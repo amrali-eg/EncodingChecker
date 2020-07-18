@@ -1,0 +1,91 @@
+# Common settings that generally should always be used with your language specific settings
+
+# https://www.davidlaing.com/2012/09/19/customise-your-gitattributes-to-become-a-git-ninja/
+# https://docs.github.com/en/github/using-git/configuring-git-to-handle-line-endings
+# https://git-scm.com/docs/gitattributes
+
+# Auto detect text files and perform LF normalization
+*                 text=auto
+
+#
+# The above will handle all files NOT found below
+#
+
+# Custom for Visual Studio
+*.cs              text eol=crlf diff=csharp
+*.resx            text eol=crlf
+*.csproj          text eol=crlf merge=union
+*.vbproj          text merge=union
+*.fsproj          text merge=union
+*.dbproj          text merge=union
+*.sln             text eol=crlf merge=union
+
+# Source code
+*.bash            text eol=lf
+*.bat             text eol=crlf
+*.cmd             text eol=crlf
+*.htm             text diff=html
+*.html            text diff=html
+*.php             text diff=php
+*.ps1             text eol=crlf
+*.py              text diff=python
+*.rb              text diff=ruby
+*.scss            text diff=css
+*.sh              text eol=lf
+*.xhtml           text diff=html
+
+# Documents
+*.doc	          diff=astextplain
+*.DOC	          diff=astextplain
+*.docx            diff=astextplain
+*.DOCX            diff=astextplain
+*.dot             diff=astextplain
+*.DOT             diff=astextplain
+*.pdf             diff=astextplain
+*.PDF             diff=astextplain
+*.rtf             diff=astextplain
+*.RTF	          diff=astextplain
+
+#
+## These files are binary and should be left untouched
+#
+
+# Graphics
+*.ai              binary
+*.bmp             binary
+*.eps             binary
+*.gif             binary
+*.gifv            binary
+*.ico             binary
+*.jng             binary
+*.jp2             binary
+*.jpg             binary
+*.jpeg            binary
+*.jpx             binary
+*.jxr             binary
+*.pdf             binary
+*.png             binary
+*.psb             binary
+*.psd             binary
+# SVG treated as an asset (binary) by default.
+*.svg             text
+# If you want to treat it as binary,
+# use the following line instead.
+# *.svg           binary
+*.svgz            binary
+*.tif             binary
+*.tiff            binary
+*.wbmp            binary
+*.webp            binary
+
+# Archives
+*.7z              binary
+*.gz              binary
+*.jar             binary
+*.rar             binary
+*.tar             binary
+*.zip             binary
+
+# Executables
+*.exe             binary
+*.pyc             binary

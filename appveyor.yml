@@ -1,0 +1,7 @@
+version: 2.0.{build}
+image: Visual Studio 2019
+configuration: Release
+platform: Any CPU
+build:
+  project: sources/EncodingChecker.sln
+  verbosity: minimal
