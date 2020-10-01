@@ -5,3 +5,10 @@ platform: Any CPU
 build:
   project: sources/EncodingChecker.sln
   verbosity: minimal
+
+after_build:
+  - 7z a EncodingChecker.zip %APPVEYOR_BUILD_FOLDER%/sources/EncodingChecker/bin/Release/*
+
+artifacts:
+  - path: EncodingChecker.zip
+    name: EncodingChecker
