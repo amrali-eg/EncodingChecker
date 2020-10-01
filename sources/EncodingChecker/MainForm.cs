@@ -75,6 +75,8 @@ namespace EncodingChecker
                     Encoding encoding = Encoding.GetEncoding(validCharset);
                     lstValidCharsets.Items.Add(encoding.WebName);
                     lstConvert.Items.Add(encoding.WebName);
+                    // add UTF-8 with BOM, right after UTF-8
+                    if (encoding.WebName == "utf-8") lstConvert.Items.Add("utf-8-bom");
                 }
                 catch
                 {
@@ -274,8 +276,23 @@ namespace EncodingChecker
                     content = reader.ReadToEnd();
 
                 string targetCharset = (string)lstConvert.SelectedItem;
-                using (StreamWriter writer = new StreamWriter(filePath, append: false, Encoding.GetEncoding(targetCharset)))
+                Encoding encoding;
+                // handle UTF-8 and UTF-8 with BOM
+                if (targetCharset == "utf-8")
                 {
+                    encoding = new UTF8Encoding(false);
+                }
+                else if (targetCharset == "utf-8-bom")
+                {
+                    encoding = new UTF8Encoding(true);
+                }
+                else
+                {
+                    encoding = Encoding.GetEncoding(targetCharset);
+                }
+                using (StreamWriter writer = new StreamWriter(filePath, append: false, encoding))
+                {
+                    // TODO: catch exceptions
                     writer.Write(content);
                     writer.Flush();
                 }
