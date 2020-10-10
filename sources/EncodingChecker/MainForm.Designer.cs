@@ -47,7 +47,7 @@
             this.statusBar = new System.Windows.Forms.StatusStrip();
             this.tlnkHelp = new System.Windows.Forms.ToolStripStatusLabel();
             this.tlnkAbout = new System.Windows.Forms.ToolStripStatusLabel();
-            this.tlnkCopy = new System.Windows.Forms.ToolStripStatusLabel();
+            this.tlnkExport = new System.Windows.Forms.ToolStripStatusLabel();
             this.actionProgress = new System.Windows.Forms.ToolStripProgressBar();
             this.actionStatus = new System.Windows.Forms.ToolStripStatusLabel();
             this.btnView = new System.Windows.Forms.Button();
@@ -161,7 +161,7 @@
             this.statusBar.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.tlnkHelp,
             this.tlnkAbout,
-            this.tlnkCopy,
+            this.tlnkExport,
             this.actionProgress,
             this.actionStatus});
             resources.ApplyResources(this.statusBar, "statusBar");
@@ -182,13 +182,13 @@
             resources.ApplyResources(this.tlnkAbout, "tlnkAbout");
             this.tlnkAbout.Click += new System.EventHandler(this.OnAbout);
             // 
-            // tlnkCopy
+            // tlnkExport
             // 
-            this.tlnkCopy.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
-            this.tlnkCopy.IsLink = true;
-            this.tlnkCopy.Name = "tlnkCopy";
-            resources.ApplyResources(this.tlnkCopy, "tlnkCopy");
-            this.tlnkCopy.Click += new System.EventHandler(this.OnCopy);
+            this.tlnkExport.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
+            this.tlnkExport.IsLink = true;
+            this.tlnkExport.Name = "tlnkExport";
+            resources.ApplyResources(this.tlnkExport, "tlnkExport");
+            this.tlnkExport.Click += new System.EventHandler(this.OnExport);
             // 
             // actionProgress
             // 
@@ -297,7 +297,7 @@
         private System.Windows.Forms.ComboBox lstConvert;
         private System.Windows.Forms.Button btnConvert;
         private System.Windows.Forms.CheckBox chkSelectDeselectAll;
-        private System.Windows.Forms.ToolStripStatusLabel tlnkCopy;
+        private System.Windows.Forms.ToolStripStatusLabel tlnkExport;
         private System.Windows.Forms.ToolStripStatusLabel tlnkAbout;
         private System.Windows.Forms.Button btnCancel;
         private System.Windows.Forms.ImageList imgsResults;

@@ -1,4 +1,5 @@
-﻿using System;
+﻿using EncodingUtils;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Deployment.Application;
@@ -9,8 +10,6 @@ using System.Runtime.Serialization.Formatters.Binary;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
-
-using EncodingUtils;
 
 namespace EncodingChecker
 {
@@ -175,18 +174,43 @@ namespace EncodingChecker
                 aboutForm.ShowDialog(this);
         }
 
-        private void OnCopy(object sender, EventArgs e)
+        private void OnExport(object sender, EventArgs e)
         {
             if (lstResults.CheckedItems.Count <= 0)
             {
+                ShowWarning("Select one or more files to export");
                 return;
             }
-            StringBuilder stringBuilder = new StringBuilder();
-            foreach (ListViewItem item in lstResults.CheckedItems)
+
+            string filename1 = "";
+            SaveFileDialog saveFileDialog1 = new SaveFileDialog();
+            saveFileDialog1.Title = "Export to a Text File";
+            saveFileDialog1.Filter = "txt files (*.txt)|*.txt";
+            saveFileDialog1.RestoreDirectory = true;
+            if (saveFileDialog1.ShowDialog() == DialogResult.OK)
             {
-                stringBuilder.AppendLine(item.Text + "\t" + item.SubItems[ResultsColumnDirectory].Text + "\\" + item.SubItems[ResultsColumnFileName].Text);
+                filename1 = saveFileDialog1.FileName.ToString();
             }
-            Clipboard.SetText(stringBuilder.ToString());
+
+            if (filename1 != "")
+            {
+                try
+                {
+                    using (StreamWriter sw = new StreamWriter(filename1))
+                    {
+                        foreach (ListViewItem item in lstResults.CheckedItems)
+                        {
+                            string charset = item.SubItems[ResultsColumnCharset].Text;
+                            string fileName = item.SubItems[ResultsColumnFileName].Text;
+                            string directory = item.SubItems[ResultsColumnDirectory].Text;
+                            sw.WriteLine("{0}\t{1}\\{2}", charset, directory, fileName);
+                        }
+                    }
+                }
+                catch
+                {
+                }
+            }
         }
         #endregion
 
