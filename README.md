@@ -14,7 +14,7 @@ When viewing a directory, some files matching the file masks were not listed.
 
 Improved performance of the list view control for faster processing of results.
 
-Added feature to copy selected results to the Windows clipboard.
+Added feature to export selected results to a text file.
 
 Switched to UtfUnknown library for better encoding detection (Multiple bugs from Ude fixed).
 
