@@ -242,6 +242,8 @@ namespace EncodingChecker
 
             _currentAction = action;
 
+            if (_settings == null)
+                _settings = new Settings();
             _settings.RecentDirectories.Add(directory);
 
             UpdateControlsOnActionStart();
@@ -579,7 +581,7 @@ namespace EncodingChecker
                 btnConvert.Enabled = true;
                 chkSelectDeselectAll.Enabled = true;
 
-                if (lstValidCharsets.CheckedItems.Count > 0)
+                if (_currentAction == CurrentAction.Validate && lstValidCharsets.CheckedItems.Count > 0)
                 {
                     string firstValidCharset = (string)lstValidCharsets.CheckedItems[0];
                     for (int i = 0; i < lstConvert.Items.Count; i++)
