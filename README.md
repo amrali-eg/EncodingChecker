@@ -3,7 +3,7 @@
 # EncodingChecker v2.0
 File Encoding Checker is a GUI tool that allows you to validate the text encoding of one or more files. The tool can display the encoding for all selected files, or only the files that do not have the encodings you specify.
 
-File Encoding Checker requires .NET 4 or above to run.
+File Encoding Checker requires Microsoft .NET Framework 4 to run.
 
 ![form image](./form.png "File Encoding Checker Form Preview")
 
