@@ -36,14 +36,15 @@ File Encoding Checker currently supports over forty charsets.
 * UTF-16 BE or LE (with or without a BOM)
 * UTF-32 BE or LE (with a BOM)
 * Arabic: iso-8859-6, windows-1256.
-* Baltic: iso-8859-4, iso-8859-13, windows-1257.
+* Baltic: iso-8859-4, windows-1257.
 * Central European: ibm852, iso-8859-2, windows-1250, x-mac-ce.
-* Chinese: big5, GB18030, hz-gb-2312, x-cp50227 (Traditional and Simplified).
-* Cyrillic: IBM855, cp866, iso-8859-5, koi8-r, windows-1251, x-mac-cyrillic (primarily Russian).
+* Chinese (Traditional and Simplified): big5, GB18030, hz-gb-2312, x-cp50227.
+* Cyrillic (primarily Russian): IBM855, cp866, iso-8859-5, koi8-r, windows-1251, x-mac-cyrillic.
+* Estonian: iso-8859-13.
 * Greek: iso-8859-7, windows-1253.
 * Hebrew: iso-8859-8, windows-1255.
 * Japanese: euc-jp, iso-2022-jp, shift_jis.
-* Korean: euc-kr, iso-2022-kr, ks_c_5601-1987.
+* Korean: euc-kr, iso-2022-kr, ks_c_5601-1987 (cp949).
 * Thai: windows-874 (aliases TIS-620 and iso-8859-11 in .NET)
 * Turkish: iso-8859-3, iso-8859-9.
 * Western European: iso-8859-1, iso-8859-15, windows-1252.
