@@ -4,12 +4,14 @@ using System.Text;
 
 namespace EncodingUtils
 {
+    /// <summary>
     /// http://architectshack.com/TextFileEncodingDetector.ashx
     /// https://github.com/AutoItConsulting/text-encoding-detect/blob/master/TextEncodingDetect-C%23/TextEncodingDetect/TextEncodingDetect.cs
     /// https://github.com/ashtuchkin/iconv-lite/blob/master/encodings/utf16.js
     /// https://sourceforge.net/p/jedit/feature-requests/396/
     /// https://stackoverflow.com/questions/1025332/determine-a-strings-encoding-in-c-sharp
     /// https://docs.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-istextunicode
+    /// </summary>
     public static class Utf16Detector
     {
         /// <summary>
@@ -65,9 +67,8 @@ namespace EncodingUtils
         }
 
         /// <summary>
-        /// Detect the UTF character encoding by reading the stream.
-        ///
-        /// Note: stream position is not reset before and after.
+        /// <para>Detect the UTF character encoding by reading the stream.</para>
+        /// <para>Note: stream position is not reset before and after.</para>
         /// </summary>
         /// <param name="stream">The steam. </param>
         /// <returns>UTF Encoding or null if not available.</returns>
@@ -82,9 +83,8 @@ namespace EncodingUtils
         }
 
         /// <summary>
-        /// Detect the UTF character encoding by reading the stream.
-        ///
-        /// Note: stream position is not reset before and after.
+        /// <para>Detect the UTF character encoding by reading the stream.</para>
+        /// <para>Note: stream position is not reset before and after.</para>
         /// </summary>
         /// <param name="stream">The steam. </param>
         /// <param name="maxBytesToRead">max bytes to read from <paramref name="stream"/>. If <c>null</c>, then no max</param>
@@ -120,13 +120,7 @@ namespace EncodingUtils
                 numBytesRead += stream.Read(buffer, numBytesRead, maxBytesToRead.Value - numBytesRead);
 
             encoding = CheckUtf16Ascii(buffer, numBytesRead);
-            if (encoding != null)
-            {
-                return encoding;
-            }
-
-            encoding = CheckUtf16ControlChars(buffer, numBytesRead);
-            return encoding;
+            return encoding ?? CheckUtf16ControlChars(buffer, numBytesRead);
         }
 
         /// <summary>

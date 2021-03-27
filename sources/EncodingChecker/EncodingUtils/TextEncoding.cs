@@ -7,8 +7,10 @@ namespace EncodingUtils
 {
     public static class TextEncoding
     {
+        /// <summary>
         /// https://netvignettes.wordpress.com/2011/07/03/how-to-detect-encoding/
-        private static DecoderExceptionFallback _decoderExceptionFallback = new DecoderExceptionFallback();
+        /// </summary>
+        private static readonly DecoderExceptionFallback DecoderExceptionFallback = new DecoderExceptionFallback();
         public static bool Validate(this Encoding encoding, byte[] bytes, int offset = 0, int? length = null)
         {
             if (encoding == null)
@@ -33,7 +35,7 @@ namespace EncodingUtils
                 throw new ArgumentOutOfRangeException(nameof(offset), @"The specified range is outside of the specified buffer.");
             }
             var decoder = encoding.GetDecoder();
-            decoder.Fallback = _decoderExceptionFallback;
+            decoder.Fallback = DecoderExceptionFallback;
             try
             {
                 decoder.GetCharCount(bytes, offset, length.Value);

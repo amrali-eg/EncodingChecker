@@ -44,9 +44,9 @@ namespace EncodingChecker
         private CurrentAction _currentAction;
         private Settings _settings;
 
-        private const int ResultsColumnCharset = 0;
-        private const int ResultsColumnFileName = 1;
-        private const int ResultsColumnDirectory = 2;
+        private const int RESULTS_COLUMN_CHARSET = 0;
+        private const int RESULTS_COLUMN_FILE_NAME = 1;
+        private const int RESULTS_COLUMN_DIRECTORY = 2;
 
         public MainForm()
         {
@@ -183,13 +183,15 @@ namespace EncodingChecker
             }
 
             string filename1 = "";
-            SaveFileDialog saveFileDialog1 = new SaveFileDialog();
-            saveFileDialog1.Title = "Export to a Text File";
-            saveFileDialog1.Filter = "txt files (*.txt)|*.txt";
-            saveFileDialog1.RestoreDirectory = true;
+            SaveFileDialog saveFileDialog1 = new SaveFileDialog
+            {
+                Title = "Export to a Text File",
+                Filter = "txt files (*.txt)|*.txt",
+                RestoreDirectory = true
+            };
             if (saveFileDialog1.ShowDialog() == DialogResult.OK)
             {
-                filename1 = saveFileDialog1.FileName.ToString();
+                filename1 = saveFileDialog1.FileName;
             }
 
             if (filename1 != "")
@@ -200,15 +202,16 @@ namespace EncodingChecker
                     {
                         foreach (ListViewItem item in lstResults.CheckedItems)
                         {
-                            string charset = item.SubItems[ResultsColumnCharset].Text;
-                            string fileName = item.SubItems[ResultsColumnFileName].Text;
-                            string directory = item.SubItems[ResultsColumnDirectory].Text;
+                            string charset = item.SubItems[RESULTS_COLUMN_CHARSET].Text;
+                            string fileName = item.SubItems[RESULTS_COLUMN_FILE_NAME].Text;
+                            string directory = item.SubItems[RESULTS_COLUMN_DIRECTORY].Text;
                             sw.WriteLine("{0}\t{1}\\{2}", charset, directory, fileName);
                         }
                     }
                 }
                 catch
                 {
+                    // do nothing
                 }
             }
         }
@@ -277,11 +280,11 @@ namespace EncodingChecker
 
             foreach (ListViewItem item in lstResults.CheckedItems)
             {
-                string charset = item.SubItems[ResultsColumnCharset].Text;
+                string charset = item.SubItems[RESULTS_COLUMN_CHARSET].Text;
                 if (charset == "(Unknown)")
                     continue;
-                string fileName = item.SubItems[ResultsColumnFileName].Text;
-                string directory = item.SubItems[ResultsColumnDirectory].Text;
+                string fileName = item.SubItems[RESULTS_COLUMN_FILE_NAME].Text;
+                string directory = item.SubItems[RESULTS_COLUMN_DIRECTORY].Text;
                 string filePath = Path.Combine(directory, fileName);
 
                 FileAttributes attributes = File.GetAttributes(filePath);
@@ -325,7 +328,7 @@ namespace EncodingChecker
 
                 item.Checked = false;
                 item.ImageIndex = 0;
-                item.SubItems[ResultsColumnCharset].Text = targetCharset;
+                item.SubItems[RESULTS_COLUMN_CHARSET].Text = targetCharset;
             }
 
             // resume drawing of the results list view control
@@ -407,7 +410,7 @@ namespace EncodingChecker
             if (reportBufferCounter > 1)
             {
                 reportBufferCounter--;
-                int percentageCompleted = 100;
+                const int percentageCompleted = 100;
                 WorkerProgress[] reportProgress = new WorkerProgress[reportBufferCounter];
                 Array.Copy(progressBuffer, reportProgress, reportBufferCounter);
                 worker.ReportProgress(percentageCompleted, reportProgress);
@@ -486,7 +489,7 @@ namespace EncodingChecker
                 _settings = (Settings)settingsInstance;
             }
 
-            if (_settings.RecentDirectories != null && _settings.RecentDirectories.Count > 0)
+            if (_settings.RecentDirectories?.Count > 0)
             {
                 foreach (string recentDirectory in _settings.RecentDirectories)
                     lstBaseDirectory.Items.Add(recentDirectory);
@@ -496,7 +499,7 @@ namespace EncodingChecker
                 lstBaseDirectory.Text = Environment.CurrentDirectory;
             chkIncludeSubdirectories.Checked = _settings.IncludeSubdirectories;
             txtFileMasks.Text = _settings.FileMasks;
-            if (_settings.ValidCharsets != null && _settings.ValidCharsets.Length > 0)
+            if (_settings.ValidCharsets?.Length > 0)
             {
                 for (int i = 0; i < lstValidCharsets.Items.Count; i++)
                     if (Array.Exists(_settings.ValidCharsets,
