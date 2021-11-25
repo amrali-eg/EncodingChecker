@@ -322,7 +322,10 @@ namespace UtfUnknown
             var bomSet = FindCharSetByBom(buf, offset, len);
             if (bomSet != null)
             {
-                _detectionDetail = new DetectionDetail(bomSet, 1.0f);
+                _detectionDetail = new DetectionDetail(bomSet, 1.0f)
+                {
+                    HasBOM = true
+                };
                 return true;
             }
             return false;
@@ -465,6 +468,10 @@ namespace UtfUnknown
             else if (InputState == InputState.PureASCII)
             {
                 //TODO why done isn't true?
+                return new DetectionResult(new DetectionDetail(CodepageName.ASCII, 1.0f));
+            }
+            else if (InputState == InputState.EscASCII)
+            {
                 return new DetectionResult(new DetectionDetail(CodepageName.ASCII, 1.0f));
             }
 
