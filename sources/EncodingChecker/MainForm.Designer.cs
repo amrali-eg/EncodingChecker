@@ -35,6 +35,7 @@
             System.Windows.Forms.Label lblValidCharsets;
             System.Windows.Forms.ColumnHeader colEncoding;
             System.Windows.Forms.ColumnHeader colFileName;
+            System.Windows.Forms.ColumnHeader colFileExt;
             System.Windows.Forms.ColumnHeader colDirectory;
             this.btnBrowseDirectories = new System.Windows.Forms.Button();
             this.chkIncludeSubdirectories = new System.Windows.Forms.CheckBox();
@@ -62,6 +63,7 @@
             lblValidCharsets = new System.Windows.Forms.Label();
             colEncoding = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
             colFileName = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
+            colFileExt = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
             colDirectory = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
             this.statusBar.SuspendLayout();
             this.SuspendLayout();
@@ -88,6 +90,10 @@
             // colFileName
             // 
             resources.ApplyResources(colFileName, "colFileName");
+            // 
+            // colFileExt
+            // 
+            resources.ApplyResources(colFileExt, "colFileExt");
             // 
             // colDirectory
             // 
@@ -133,6 +139,7 @@
             this.lstResults.Columns.AddRange(new System.Windows.Forms.ColumnHeader[] {
             colEncoding,
             colFileName,
+            colFileExt,
             colDirectory});
             this.lstResults.FullRowSelect = true;
             this.lstResults.GridLines = true;

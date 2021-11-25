@@ -112,7 +112,7 @@ namespace EncodingUtils
             Encoding encoding = CheckUtfSignature(buffer, numBytesRead);
             if (encoding != null)
             {
-                return encoding;
+                return null;
             }
 
             // BOM Detection failed, going for heuristics now.

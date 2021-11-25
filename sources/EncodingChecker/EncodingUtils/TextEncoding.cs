@@ -52,9 +52,9 @@ namespace EncodingUtils
         /// </summary>
         /// <param name="filePath">Path to file</param>
         /// <returns>System.Text.Encoding (can be null if not available or not supported by .NET).</returns>
-        public static Encoding GetFileEncoding(string filePath)
+        public static Encoding GetFileEncoding(string filePath, ref bool hasBOM)
         {
-            return GetFileEncoding(filePath, null);
+            return GetFileEncoding(filePath, null, ref hasBOM);
         }
 
         /// <summary>
@@ -63,11 +63,12 @@ namespace EncodingUtils
         /// <param name="filePath">Path to file</param>
         /// <param name="maxBytesToRead">max bytes to read from <paramref name="filePath"/>. If <c>null</c>, then no max</param>
         /// <returns>System.Text.Encoding (can be null if not available or not supported by .NET).</returns>
-        public static Encoding GetFileEncoding(string filePath, int? maxBytesToRead)
+        public static Encoding GetFileEncoding(string filePath, int? maxBytesToRead, ref bool hasBOM)
         {
             using (FileStream stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             {
                 // Check for possible UTF-16 encoding (LE or BE).
+                hasBOM = false;
                 Encoding encoding = Utf16Detector.DetectFromStream(stream, maxBytesToRead);
                 if (encoding != null)
                 {
@@ -75,7 +76,13 @@ namespace EncodingUtils
                 }
                 // https://github.com/CharsetDetector/UTF-unknown
                 stream.Position = 0L;
-                return CharsetDetector.DetectFromStream(stream, maxBytesToRead).Detected?.Encoding;
+                DetectionDetail resultDetected = CharsetDetector.DetectFromStream(stream, maxBytesToRead).Detected;
+                if (resultDetected != null)
+                {
+                    hasBOM = resultDetected.HasBOM;
+                    return resultDetected.Encoding;
+                }
+                return null;
             }
         }
     }

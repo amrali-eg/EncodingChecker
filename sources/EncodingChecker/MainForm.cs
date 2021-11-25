@@ -27,6 +27,7 @@ namespace EncodingChecker
         private sealed class WorkerProgress
         {
             internal string FileName;
+            internal string FileExt;
             internal string DirectoryName;
             internal string Charset;
         }
@@ -46,7 +47,8 @@ namespace EncodingChecker
 
         private const int RESULTS_COLUMN_CHARSET = 0;
         private const int RESULTS_COLUMN_FILE_NAME = 1;
-        private const int RESULTS_COLUMN_DIRECTORY = 2;
+        private const int RESULTS_COLUMN_FILE_EXT = 2;
+        private const int RESULTS_COLUMN_DIRECTORY = 3;
 
         public MainForm()
         {
@@ -74,8 +76,22 @@ namespace EncodingChecker
                     Encoding encoding = Encoding.GetEncoding(validCharset);
                     lstValidCharsets.Items.Add(encoding.WebName);
                     lstConvert.Items.Add(encoding.WebName);
-                    // add UTF-8 with BOM, right after UTF-8
-                    if (encoding.WebName == "utf-8") lstConvert.Items.Add("utf-8-bom");
+                    // add UTF-8/16 with BOM, right after UTF-8/16
+                    if (encoding.WebName == "utf-8")
+                    {
+                        lstValidCharsets.Items.Add("utf-8-bom");
+                        lstConvert.Items.Add("utf-8-bom");
+                    }
+                    else if (encoding.WebName == "utf-16")
+                    {
+                        lstValidCharsets.Items.Add("utf-16-bom");
+                        lstConvert.Items.Add("utf-16-bom");
+                    }
+                    else if (encoding.WebName == "utf-16BE")
+                    {
+                        lstValidCharsets.Items.Add("utf-16BE-bom");
+                        lstConvert.Items.Add("utf-16BE-bom");
+                    }
                 }
                 catch
                 {
@@ -94,10 +110,11 @@ namespace EncodingChecker
             LoadSettings();
 
             //Size the result list columns based on the initial size of the window
-            lstResults.Columns[0].AutoResize(ColumnHeaderAutoResizeStyle.HeaderSize);
+            lstResults.Columns[RESULTS_COLUMN_CHARSET].AutoResize(ColumnHeaderAutoResizeStyle.HeaderSize);
             int remainingWidth = lstResults.Width - lstResults.Columns[0].Width;
-            lstResults.Columns[1].Width = (30 * remainingWidth) / 100;
-            lstResults.Columns[2].AutoResize(ColumnHeaderAutoResizeStyle.HeaderSize);
+            lstResults.Columns[RESULTS_COLUMN_FILE_NAME].Width = (30 * remainingWidth) / 100;
+            lstResults.Columns[RESULTS_COLUMN_FILE_EXT].AutoResize(ColumnHeaderAutoResizeStyle.HeaderSize);
+            lstResults.Columns[RESULTS_COLUMN_DIRECTORY].AutoResize(ColumnHeaderAutoResizeStyle.HeaderSize);
         }
 
         private void OnFormClosing(object sender, FormClosingEventArgs e)
@@ -159,12 +176,13 @@ namespace EncodingChecker
                 _lvwColumnSorter.Order = SortOrder.Ascending;
             }
             lstResults.Sort();
+            lstResults.SetSortIcon(_lvwColumnSorter.SortColumn, _lvwColumnSorter.Order);
         }
 
         private void OnHelp(object sender, EventArgs e)
         {
             ProcessStartInfo psi =
-                new ProcessStartInfo("http://encodingchecker.codeplex.com/documentation") { UseShellExecute = true };
+                new ProcessStartInfo("https://github.com/amrali-eg/EncodingChecker") { UseShellExecute = true };
             Process.Start(psi);
         }
 
@@ -281,6 +299,8 @@ namespace EncodingChecker
             foreach (ListViewItem item in lstResults.CheckedItems)
             {
                 string charset = item.SubItems[RESULTS_COLUMN_CHARSET].Text;
+                if (charset.EndsWith("-bom"))
+                    charset = charset.Replace("-bom", "");
                 if (charset == "(Unknown)")
                     continue;
                 string fileName = item.SubItems[RESULTS_COLUMN_FILE_NAME].Text;
@@ -306,19 +326,38 @@ namespace EncodingChecker
 
                 string targetCharset = (string)lstConvert.SelectedItem;
                 Encoding encoding;
-                // handle UTF-8 and UTF-8 with BOM
-                if (targetCharset == "utf-8")
+                // handle UTF-8/16 and UTF-8/16 with BOM
+                switch (targetCharset)
                 {
-                    encoding = new UTF8Encoding(false);
+                    case "utf-8":
+                        encoding = new UTF8Encoding(false);
+                        break;
+
+                    case "utf-8-bom":
+                        encoding = new UTF8Encoding(true);
+                        break;
+
+                    case "utf-16":
+                        encoding = new UnicodeEncoding(bigEndian: false, byteOrderMark: false);
+                        break;
+
+                    case "utf-16-bom":
+                        encoding = new UnicodeEncoding(bigEndian: false, byteOrderMark: true);
+                        break;
+
+                    case "utf-16BE":
+                        encoding = new UnicodeEncoding(bigEndian: true, byteOrderMark: false);
+                        break;
+
+                    case "utf-16BE-bom":
+                        encoding = new UnicodeEncoding(bigEndian: true, byteOrderMark: true);
+                        break;
+
+                    default:
+                        encoding = Encoding.GetEncoding(targetCharset);
+                        break;
                 }
-                else if (targetCharset == "utf-8-bom")
-                {
-                    encoding = new UTF8Encoding(true);
-                }
-                else
-                {
-                    encoding = Encoding.GetEncoding(targetCharset);
-                }
+
                 using (StreamWriter writer = new StreamWriter(filePath, append: false, encoding))
                 {
                     // TODO: catch exceptions
@@ -377,8 +416,13 @@ namespace EncodingChecker
                 if (!SatisfiesMaskPatterns(fileName, maskPatterns))
                     continue;
 
-                Encoding encoding = TextEncoding.GetFileEncoding(path);
+                bool hasBOM = false;
+                Encoding encoding = TextEncoding.GetFileEncoding(path, ref hasBOM);
                 string charset = encoding?.WebName ?? "(Unknown)";
+                if (hasBOM)
+                {
+                    charset += "-bom";
+                }
 
                 if (args.Action == CurrentAction.Validate)
                 {
@@ -387,11 +431,13 @@ namespace EncodingChecker
                 }
 
                 string directoryName = Path.GetDirectoryName(path);
+                string fileExt = Path.GetExtension(path);
 
                 progressBuffer[reportBufferCounter - 1] = new WorkerProgress
                 {
                     Charset = charset,
                     FileName = fileName,
+                    FileExt = fileExt,
                     DirectoryName = directoryName
                 };
                 reportBufferCounter++;
@@ -457,7 +503,7 @@ namespace EncodingChecker
             {
                 if (progress == null)
                     break;
-                ListViewItem resultItem = new ListViewItem(new[] { progress.Charset, progress.FileName, progress.DirectoryName }, -1);
+                ListViewItem resultItem = new ListViewItem(new[] { progress.Charset, progress.FileName, progress.FileExt, progress.DirectoryName }, -1);
                 lstResults.Items.Add(resultItem);
                 actionStatus.Text = progress.FileName;
             }
