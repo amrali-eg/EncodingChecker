@@ -10,6 +10,8 @@ File Encoding Checker requires Microsoft .NET Framework 4 to run.
 ## Fixed issues
 Sorting the results by clicking a column header is working now.
 
+Display the sort arrow in the columnn header for the results list view.
+
 When viewing a directory, some files matching the file masks were not listed.
 
 Improved performance of the list view control for faster processing of results.
@@ -25,7 +27,7 @@ UTF-16 text files without byte-order-mark (BOM) can be detected by heuristics.
 ## Credits
 The original project [EncodingChecker](https://archive.codeplex.com/?p=encodingchecker) on CodePlex was written by [Jeevan James](https://github.com/JeevanJames).
 
-For encoding detection, File Encoding Checker uses the [UtfUnknown](https://github.com/CharsetDetector/UTF-unknown) library, which is a C# port of [uchardet](https://gitlab.freedesktop.org/uchardet/uchardet) library - A C++ port of the original [Mozilla Universal Charset Detector](https://dxr.mozilla.org/mozilla/source/extensions/universalchardet/).
+For encoding detection, File Encoding Checker now uses the [UtfUnknown](https://github.com/CharsetDetector/UTF-unknown) library, which is a C# port of [uchardet](https://gitlab.freedesktop.org/uchardet/uchardet) library - A C++ port of the original [Mozilla Universal Charset Detector](https://dxr.mozilla.org/mozilla/source/extensions/universalchardet/).
 
 ## Supported Charsets
 File Encoding Checker currently supports over forty charsets.
