@@ -77,20 +77,11 @@ namespace EncodingChecker
                     lstValidCharsets.Items.Add(encoding.WebName);
                     lstConvert.Items.Add(encoding.WebName);
                     // add UTF-8/16 with BOM, right after UTF-8/16
-                    if (encoding.WebName == "utf-8")
+                    const string pattern = "^utf-16BE|utf-16|utf-8$";
+                    if (Regex.IsMatch(encoding.WebName, pattern))
                     {
-                        lstValidCharsets.Items.Add("utf-8-bom");
-                        lstConvert.Items.Add("utf-8-bom");
-                    }
-                    else if (encoding.WebName == "utf-16")
-                    {
-                        lstValidCharsets.Items.Add("utf-16-bom");
-                        lstConvert.Items.Add("utf-16-bom");
-                    }
-                    else if (encoding.WebName == "utf-16BE")
-                    {
-                        lstValidCharsets.Items.Add("utf-16BE-bom");
-                        lstConvert.Items.Add("utf-16BE-bom");
+                        lstValidCharsets.Items.Add(encoding.WebName + "-bom");
+                        lstConvert.Items.Add(encoding.WebName + "-bom");
                     }
                 }
                 catch
