@@ -65,23 +65,30 @@ namespace EncodingUtils
         /// <returns>System.Text.Encoding (can be null if not available or not supported by .NET).</returns>
         public static Encoding GetFileEncoding(string filePath, int? maxBytesToRead, ref bool hasBOM)
         {
-            using (FileStream stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            hasBOM = false;
+            try
             {
-                // Check for possible UTF-16 encoding (LE or BE).
-                hasBOM = false;
-                Encoding encoding = Utf16Detector.DetectFromStream(stream, maxBytesToRead);
-                if (encoding != null)
+                using (FileStream stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                 {
-                    return encoding;
+                    // Check for possible UTF-16 encoding (LE or BE).
+                    Encoding encoding = Utf16Detector.DetectFromStream(stream, maxBytesToRead);
+                    if (encoding != null)
+                    {
+                        return encoding;
+                    }
+                    // https://github.com/CharsetDetector/UTF-unknown
+                    stream.Position = 0L;
+                    var result = CharsetDetector.DetectFromStream(stream, maxBytesToRead);
+                    if (result.Detected != null)
+                    {
+                        hasBOM = result.Detected.HasBOM;
+                        return result.Detected.Encoding;
+                    }
+                    return null;
                 }
-                // https://github.com/CharsetDetector/UTF-unknown
-                stream.Position = 0L;
-                DetectionDetail resultDetected = CharsetDetector.DetectFromStream(stream, maxBytesToRead).Detected;
-                if (resultDetected != null)
-                {
-                    hasBOM = resultDetected.HasBOM;
-                    return resultDetected.Encoding;
-                }
+            }
+            catch
+            {
                 return null;
             }
         }

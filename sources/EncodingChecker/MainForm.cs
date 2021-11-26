@@ -290,75 +290,78 @@ namespace EncodingChecker
             foreach (ListViewItem item in lstResults.CheckedItems)
             {
                 string charset = item.SubItems[RESULTS_COLUMN_CHARSET].Text;
-                if (charset.EndsWith("-bom"))
-                    charset = charset.Replace("-bom", "");
                 if (charset == "(Unknown)")
                     continue;
+
+                if (charset.EndsWith("-bom"))
+                    charset = charset.Replace("-bom", "");
+
                 string fileName = item.SubItems[RESULTS_COLUMN_FILE_NAME].Text;
                 string directory = item.SubItems[RESULTS_COLUMN_DIRECTORY].Text;
                 string filePath = Path.Combine(directory, fileName);
 
-                FileAttributes attributes = File.GetAttributes(filePath);
-                if ((attributes & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
+                try
                 {
-                    attributes ^= FileAttributes.ReadOnly;
-                    File.SetAttributes(filePath, attributes);
-                }
+                    FileAttributes attributes = File.GetAttributes(filePath);
+                    if ((attributes & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
+                    {
+                        attributes ^= FileAttributes.ReadOnly;
+                        File.SetAttributes(filePath, attributes);
+                    }
 
-                if (!Encoding.GetEncoding(charset).Validate(File.ReadAllBytes(filePath)))
+                    if (!Encoding.GetEncoding(charset).Validate(File.ReadAllBytes(filePath)))
+                    {
+                        Debug.WriteLine("Decoding error. " + filePath);
+                        continue;
+                    }
+
+                    string content;
+                    using (StreamReader reader = new StreamReader(filePath, Encoding.GetEncoding(charset)))
+                        content = reader.ReadToEnd();
+
+                    string targetCharset = (string)lstConvert.SelectedItem;
+                    Encoding encoding;
+                    // handle UTF-8/16 and UTF-8/16 with BOM
+                    switch (targetCharset)
+                    {
+                        case "utf-8":
+                            encoding = new UTF8Encoding(false);
+                            break;
+                        case "utf-8-bom":
+                            encoding = new UTF8Encoding(true);
+                            break;
+                        case "utf-16":
+                            encoding = new UnicodeEncoding(bigEndian: false, byteOrderMark: false);
+                            break;
+                        case "utf-16-bom":
+                            encoding = new UnicodeEncoding(bigEndian: false, byteOrderMark: true);
+                            break;
+                        case "utf-16BE":
+                            encoding = new UnicodeEncoding(bigEndian: true, byteOrderMark: false);
+                            break;
+                        case "utf-16BE-bom":
+                            encoding = new UnicodeEncoding(bigEndian: true, byteOrderMark: true);
+                            break;
+                        default:
+                            encoding = Encoding.GetEncoding(targetCharset);
+                            break;
+                    }
+
+                    using (StreamWriter writer = new StreamWriter(filePath, append: false, encoding))
+                    {
+                        // TODO: catch exceptions
+                        writer.Write(content);
+                        writer.Flush();
+                    }
+
+                    item.Checked = false;
+                    item.ImageIndex = 0;
+                    item.SubItems[RESULTS_COLUMN_CHARSET].Text = targetCharset;
+                }
+                catch
                 {
-                    Debug.WriteLine("Decoding error. " + filePath);
-                    continue;
+                    // do nothing
                 }
-
-                string content;
-                using (StreamReader reader = new StreamReader(filePath, Encoding.GetEncoding(charset)))
-                    content = reader.ReadToEnd();
-
-                string targetCharset = (string)lstConvert.SelectedItem;
-                Encoding encoding;
-                // handle UTF-8/16 and UTF-8/16 with BOM
-                switch (targetCharset)
-                {
-                    case "utf-8":
-                        encoding = new UTF8Encoding(false);
-                        break;
-
-                    case "utf-8-bom":
-                        encoding = new UTF8Encoding(true);
-                        break;
-
-                    case "utf-16":
-                        encoding = new UnicodeEncoding(bigEndian: false, byteOrderMark: false);
-                        break;
-
-                    case "utf-16-bom":
-                        encoding = new UnicodeEncoding(bigEndian: false, byteOrderMark: true);
-                        break;
-
-                    case "utf-16BE":
-                        encoding = new UnicodeEncoding(bigEndian: true, byteOrderMark: false);
-                        break;
-
-                    case "utf-16BE-bom":
-                        encoding = new UnicodeEncoding(bigEndian: true, byteOrderMark: true);
-                        break;
-
-                    default:
-                        encoding = Encoding.GetEncoding(targetCharset);
-                        break;
-                }
-
-                using (StreamWriter writer = new StreamWriter(filePath, append: false, encoding))
-                {
-                    // TODO: catch exceptions
-                    writer.Write(content);
-                    writer.Flush();
-                }
-
-                item.Checked = false;
-                item.ImageIndex = 0;
-                item.SubItems[RESULTS_COLUMN_CHARSET].Text = targetCharset;
             }
 
             // resume drawing of the results list view control
