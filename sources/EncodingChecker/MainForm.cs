@@ -1,5 +1,4 @@
-﻿using EncodingUtils;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Deployment.Application;
@@ -349,7 +348,6 @@ namespace EncodingChecker
 
                     using (StreamWriter writer = new StreamWriter(filePath, append: false, encoding))
                     {
-                        // TODO: catch exceptions
                         writer.Write(content);
                         writer.Flush();
                     }
@@ -418,11 +416,8 @@ namespace EncodingChecker
                     charset += "-bom";
                 }
 
-                if (args.Action == CurrentAction.Validate)
-                {
-                    if (args.ValidCharsets.Contains(charset))
-                        continue;
-                }
+                if (args.Action == CurrentAction.Validate && args.ValidCharsets.Contains(charset))
+                    continue;
 
                 string directoryName = Path.GetDirectoryName(path);
                 string fileExt = Path.GetExtension(path);
@@ -659,9 +654,8 @@ namespace EncodingChecker
             //Using reflection, figure out all the charsets that the UtfUnknown framework supports by reflecting
             //over all the strings constants in the UtfUnknown.Core.CodepageName class. These represent all the encodings
             //that can be detected by the program.
-            Assembly assembly = Assembly.LoadFrom("EncodingUtils.dll");
-            Type codepageName = assembly.GetType("UtfUnknown.Core.CodepageName");
-            FieldInfo[] charsetConstants = codepageName.GetFields(BindingFlags.GetField | BindingFlags.Static | BindingFlags.NonPublic);
+            Type codepageName = typeof(UtfUnknown.Core.CodepageName);
+            FieldInfo[] charsetConstants = codepageName.GetFields(BindingFlags.GetField | BindingFlags.Static | BindingFlags.Public);
             foreach (FieldInfo charsetConstant in charsetConstants)
             {
                 if (charsetConstant.FieldType == typeof(string))

@@ -3,7 +3,7 @@ using System.IO;
 using System.Text;
 using UtfUnknown;
 
-namespace EncodingUtils
+namespace EncodingChecker
 {
     public static class TextEncoding
     {

@@ -5,8 +5,6 @@ VisualStudioVersion = 16.0.30309.148
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EncodingChecker", "EncodingChecker\EncodingChecker.csproj", "{134E6B14-A7BE-4CED-8332-3A2CA6023EE1}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EncodingUtils", "EncodingChecker\EncodingUtils\EncodingUtils.csproj", "{559B6D97-8D76-4F4A-9076-75B72475B8FB}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -17,10 +15,6 @@ Global
 		{134E6B14-A7BE-4CED-8332-3A2CA6023EE1}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{134E6B14-A7BE-4CED-8332-3A2CA6023EE1}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{134E6B14-A7BE-4CED-8332-3A2CA6023EE1}.Release|Any CPU.Build.0 = Release|Any CPU
-		{559B6D97-8D76-4F4A-9076-75B72475B8FB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{559B6D97-8D76-4F4A-9076-75B72475B8FB}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{559B6D97-8D76-4F4A-9076-75B72475B8FB}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{559B6D97-8D76-4F4A-9076-75B72475B8FB}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

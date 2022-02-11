@@ -2,7 +2,7 @@
 using System.IO;
 using System.Text;
 
-namespace EncodingUtils
+namespace EncodingChecker
 {
     /// <summary>
     /// http://architectshack.com/TextFileEncodingDetector.ashx
