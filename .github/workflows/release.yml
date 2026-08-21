@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build
+        run: dotnet build sources\EncodingChecker.sln --configuration Release
+
+      - name: Test
+        run: dotnet test sources\EncodingChecker.sln --configuration Release --no-build
+
+      - name: Package
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "sources\EncodingChecker\bin\Release\net10.0-windows\*" -DestinationPath "EncodingChecker.zip"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "${{ github.ref_name }}" EncodingChecker.zip
+          --title "${{ github.ref_name }}"
+          --generate-notes
