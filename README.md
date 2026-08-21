@@ -1,4 +1,4 @@
-[![Build status](https://ci.appveyor.com/api/projects/status/c8arh5v18u285jmj/branch/master?svg=true)](https://ci.appveyor.com/project/amrali-eg/encodingchecker/branch/master)
+[![CI](https://github.com/amrali-eg/EncodingChecker/actions/workflows/ci.yml/badge.svg)](https://github.com/amrali-eg/EncodingChecker/actions/workflows/ci.yml)
 
 # EncodingChecker v3.0
 
