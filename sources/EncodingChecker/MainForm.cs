@@ -1,14 +1,15 @@
-﻿using System;
+using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.Deployment.Application;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
-using System.Reflection;
-using System.Runtime.Serialization.Formatters.Binary;
+using System.Linq;
 using System.Text;
-using System.Text.RegularExpressions;
+using System.Threading;
 using System.Windows.Forms;
+using System.Xml.Serialization;
 
 namespace EncodingChecker
 {
@@ -17,18 +18,19 @@ namespace EncodingChecker
         private sealed class WorkerArgs
         {
             internal CurrentAction Action;
-            internal string BaseDirectory;
+            internal required string BaseDirectory;
             internal bool IncludeSubdirectories;
-            internal string FileMasks;
-            internal List<string> ValidCharsets;
+            internal required string FileMasks;
+            internal required List<string> ValidCharsets;
+            internal CancellationToken CancellationToken;
         }
 
-        private sealed class WorkerProgress
+        private sealed class ConvertWorkerArgs
         {
-            internal string FileName;
-            internal string FileExt;
-            internal string DirectoryName;
-            internal string Charset;
+            internal required List<ConversionReportEntry> Entries;
+            internal required string TargetBaseCharset;
+            internal required bool TargetWriteBom;
+            internal CancellationToken CancellationToken;
         }
 
         private enum CurrentAction
@@ -39,10 +41,16 @@ namespace EncodingChecker
         }
 
         private readonly ListViewColumnSorter _lvwColumnSorter;
-
         private readonly BackgroundWorker _actionWorker;
+
         private CurrentAction _currentAction;
-        private Settings _settings;
+        private Settings _settings = new();
+        private CancellationTokenSource? _actionCancellation;
+        private bool _closeRequested;
+
+        // Set by OnConvert, read back by ConvertWorkerCompleted; never touched by the worker thread.
+        private Dictionary<string, ListViewItem>? _convertItemsByPath;
+        private string? _convertTargetLabel;
 
         private const int RESULTS_COLUMN_CHARSET = 0;
         private const int RESULTS_COLUMN_FILE_NAME = 1;
@@ -53,41 +61,57 @@ namespace EncodingChecker
         {
             InitializeComponent();
 
-            _lvwColumnSorter = new ListViewColumnSorter();
-            lstResults.ListViewItemSorter = _lvwColumnSorter;
+			// Default to deterministic filename sorting instead of parallel completion order.
+			_lvwColumnSorter = new ListViewColumnSorter
+			{
+			    SortColumn = RESULTS_COLUMN_FILE_NAME,
+			    Order = SortOrder.Ascending,
+			};
+			lstResults.ListViewItemSorter = _lvwColumnSorter;
 
-            _actionWorker = new BackgroundWorker { WorkerReportsProgress = true, WorkerSupportsCancellation = true };
+            _actionWorker = new BackgroundWorker
+            {
+                WorkerReportsProgress = true,
+                WorkerSupportsCancellation = true
+            };
+
             _actionWorker.DoWork += ActionWorkerDoWork;
             _actionWorker.ProgressChanged += ActionWorkerProgressChanged;
             _actionWorker.RunWorkerCompleted += ActionWorkerCompleted;
         }
 
         #region Form events
-        private void OnFormLoad(object sender, EventArgs e)
+
+        private void OnFormLoad(object? sender, EventArgs e)
         {
             lstConvert.BeginUpdate();
 
             IEnumerable<string> validCharsets = GetSupportedCharsets();
+
             foreach (string validCharset in validCharsets)
             {
                 try
-                {   // add only those charsets which are supported by .NET
-                    Encoding encoding = Encoding.GetEncoding(validCharset);
+                {
+                    // Add only charsets supported by .NET.
+                    var encoding = Encoding.GetEncoding(validCharset);
+
                     lstValidCharsets.Items.Add(encoding.WebName);
                     lstConvert.Items.Add(encoding.WebName);
-                    // add UTF-8/16 with BOM, right after UTF-8/16
-                    const string pattern = "^utf-16BE|utf-16|utf-8$";
-                    if (Regex.IsMatch(encoding.WebName, pattern))
+
+                    // Add BOM variants after UTF-8/16/32.
+                    if (encoding.WebName is "utf-16BE" or "utf-16" or "utf-8" or "utf-32" or "utf-32BE")
                     {
                         lstValidCharsets.Items.Add(encoding.WebName + "-bom");
                         lstConvert.Items.Add(encoding.WebName + "-bom");
                     }
                 }
-                catch
+                catch (Exception ex) when (
+                    ex is ArgumentException or NotSupportedException)
                 {
-                    // ignored charsets
+                    // Ignore unsupported charsets.
                 }
             }
+
             if (lstConvert.Items.Count > 0)
                 lstConvert.SelectedIndex = 0;
 
@@ -99,22 +123,50 @@ namespace EncodingChecker
 
             LoadSettings();
 
-            //Size the result list columns based on the initial size of the window
-            lstResults.Columns[RESULTS_COLUMN_CHARSET].AutoResize(ColumnHeaderAutoResizeStyle.HeaderSize);
-            int remainingWidth = lstResults.Width - lstResults.Columns[0].Width;
-            lstResults.Columns[RESULTS_COLUMN_FILE_NAME].Width = (30 * remainingWidth) / 100;
-            lstResults.Columns[RESULTS_COLUMN_FILE_EXT].AutoResize(ColumnHeaderAutoResizeStyle.HeaderSize);
-            lstResults.Columns[RESULTS_COLUMN_DIRECTORY].AutoResize(ColumnHeaderAutoResizeStyle.HeaderSize);
+            // Reflect the default sort column/order set in the constructor.
+            lstResults.SetSortIcon(_lvwColumnSorter.SortColumn, _lvwColumnSorter.Order);
+
+            // Size columns for the initial window size.
+            lstResults.Columns[RESULTS_COLUMN_CHARSET]
+                .AutoResize(ColumnHeaderAutoResizeStyle.HeaderSize);
+
+            int remainingWidth =
+                lstResults.Width - lstResults.Columns[RESULTS_COLUMN_CHARSET].Width;
+
+            lstResults.Columns[RESULTS_COLUMN_FILE_NAME].Width =
+                30 * remainingWidth / 100;
+
+            lstResults.Columns[RESULTS_COLUMN_FILE_EXT]
+                .AutoResize(ColumnHeaderAutoResizeStyle.HeaderSize);
+
+            lstResults.Columns[RESULTS_COLUMN_DIRECTORY]
+                .AutoResize(ColumnHeaderAutoResizeStyle.HeaderSize);
         }
 
-        private void OnFormClosing(object sender, FormClosingEventArgs e)
+        private void OnFormClosing(object? sender, FormClosingEventArgs e)
         {
+            if (_actionWorker.IsBusy)
+            {
+                // Cancel and defer the close until the worker settles, not mid-operation.
+                e.Cancel = true;
+
+                if (!_closeRequested)
+                {
+                    _closeRequested = true;
+                    _actionCancellation?.Cancel();
+                }
+
+                return;
+            }
+
             SaveSettings();
         }
 
-        private void OnBrowseDirectories(object sender, EventArgs e)
+        private void OnBrowseDirectories(object? sender, EventArgs e)
         {
-            dlgBrowseDirectories.SelectedPath = lstBaseDirectory.Text;
+            if (Directory.Exists(lstBaseDirectory.Text))
+                dlgBrowseDirectories.SelectedPath = lstBaseDirectory.Text;
+
             if (dlgBrowseDirectories.ShowDialog(this) == DialogResult.OK)
             {
                 lstBaseDirectory.Text = dlgBrowseDirectories.SelectedPath;
@@ -122,12 +174,14 @@ namespace EncodingChecker
             }
         }
 
-        private void OnSelectDeselectAll(object sender, EventArgs e)
+        private void OnSelectDeselectAll(object? sender, EventArgs e)
         {
             lstResults.ItemChecked -= OnResultItemChecked;
+
             try
             {
                 bool isChecked = chkSelectDeselectAll.Checked;
+
                 foreach (ListViewItem item in lstResults.Items)
                     item.Checked = isChecked;
             }
@@ -137,9 +191,10 @@ namespace EncodingChecker
             }
         }
 
-        private void OnResultItemChecked(object sender, ItemCheckedEventArgs e)
+        private void OnResultItemChecked(object? sender, ItemCheckedEventArgs e)
         {
             chkSelectDeselectAll.CheckedChanged -= OnSelectDeselectAll;
+
             try
             {
                 if (lstResults.CheckedItems.Count == 0)
@@ -154,433 +209,755 @@ namespace EncodingChecker
                 chkSelectDeselectAll.CheckedChanged += OnSelectDeselectAll;
             }
         }
+
         private void OnResultColumnClick(object o, ColumnClickEventArgs e)
         {
             if (e.Column == _lvwColumnSorter.SortColumn)
             {
-                _lvwColumnSorter.Order = _lvwColumnSorter.Order == SortOrder.Ascending ? SortOrder.Descending : SortOrder.Ascending;
+                _lvwColumnSorter.Order =
+                    _lvwColumnSorter.Order == SortOrder.Ascending
+                        ? SortOrder.Descending
+                        : SortOrder.Ascending;
             }
             else
             {
                 _lvwColumnSorter.SortColumn = e.Column;
                 _lvwColumnSorter.Order = SortOrder.Ascending;
             }
+
             lstResults.Sort();
-            lstResults.SetSortIcon(_lvwColumnSorter.SortColumn, _lvwColumnSorter.Order);
+            lstResults.SetSortIcon(
+                _lvwColumnSorter.SortColumn,
+                _lvwColumnSorter.Order);
         }
 
-        private void OnHelp(object sender, EventArgs e)
+        private void OnHelp(object? sender, EventArgs e)
         {
-            ProcessStartInfo psi =
-                new ProcessStartInfo("https://github.com/amrali-eg/EncodingChecker") { UseShellExecute = true };
+            var psi = new ProcessStartInfo(
+                "https://github.com/amrali-eg/EncodingChecker")
+            {
+                UseShellExecute = true
+            };
+
             Process.Start(psi);
         }
 
-        private void OnAbout(object sender, EventArgs e)
+        private void OnAbout(object? sender, EventArgs e)
         {
-            using (AboutForm aboutForm = new AboutForm())
-                aboutForm.ShowDialog(this);
+            using var aboutForm = new AboutForm();
+            aboutForm.ShowDialog(this);
         }
 
-        private void OnExport(object sender, EventArgs e)
+        private void OnExport(object? sender, EventArgs e)
         {
-            if (lstResults.CheckedItems.Count <= 0)
+            if (lstResults.CheckedItems.Count == 0)
             {
                 ShowWarning("Select one or more files to export");
                 return;
             }
 
-            string filename1 = "";
-            SaveFileDialog saveFileDialog1 = new SaveFileDialog
+            var saveFileDialog = new SaveFileDialog
             {
-                Title = "Export to a Text File",
-                Filter = "txt files (*.txt)|*.txt",
-                RestoreDirectory = true
+                Title = @"Export to a Text File",
+                Filter = @"Text files (*.txt)|*.txt",
+                FileName = "Encoding.txt",
+                RestoreDirectory = true,
             };
-            if (saveFileDialog1.ShowDialog() == DialogResult.OK)
-            {
-                filename1 = saveFileDialog1.FileName;
-            }
 
-            if (filename1 != "")
+            if (saveFileDialog.ShowDialog(this) != DialogResult.OK)
+                return;
+
+            try
             {
-                try
+                using var writer = new StreamWriter(saveFileDialog.FileName, false, Encoding.UTF8);
+
+                foreach (ListViewItem item in lstResults.CheckedItems)
                 {
-                    using (StreamWriter sw = new StreamWriter(filename1))
-                    {
-                        foreach (ListViewItem item in lstResults.CheckedItems)
-                        {
-                            string charset = item.SubItems[RESULTS_COLUMN_CHARSET].Text;
-                            string fileName = item.SubItems[RESULTS_COLUMN_FILE_NAME].Text;
-                            string directory = item.SubItems[RESULTS_COLUMN_DIRECTORY].Text;
-                            sw.WriteLine("{0}\t{1}\\{2}", charset, directory, fileName);
-                        }
-                    }
+                    string charset =
+                        item.SubItems[RESULTS_COLUMN_CHARSET].Text;
+
+                    string fileName =
+                        item.SubItems[RESULTS_COLUMN_FILE_NAME].Text;
+
+                    string directory =
+                        item.SubItems[RESULTS_COLUMN_DIRECTORY].Text;
+
+                    writer.WriteLine(
+                        "{0}\t{1}\\{2}",
+                        charset,
+                        directory,
+                        fileName);
                 }
-                catch
-                {
-                    // do nothing
-                }
+            }
+            catch (Exception ex) when (
+                ex is IOException or UnauthorizedAccessException)
+            {
+                ShowWarning(
+                    "Failed to export the report: {0}",
+                    ex.Message);
             }
         }
+
+        private void OnExportReport(object? sender, EventArgs e)
+        {
+            if (lstResults.Items.Count == 0)
+            {
+                ShowWarning("There are no results to export");
+                return;
+            }
+
+            var saveFileDialog = new SaveFileDialog
+            {
+                Title = @"Export Conversion Report",
+                Filter = @"CSV files (*.csv)|*.csv",
+                FileName = "Conversion report.csv",
+                RestoreDirectory = true,
+            };
+
+            if (saveFileDialog.ShowDialog(this) != DialogResult.OK)
+                return;
+
+            try
+            {
+                var entries =
+                    new List<ConversionReportEntry>(lstResults.Items.Count);
+
+                // Tag is always set to the entry when the row is added (ActionWorkerProgressChanged).
+                foreach (ListViewItem item in lstResults.Items)
+                    entries.Add((ConversionReportEntry)item.Tag!);
+
+                using var writer =
+                    new StreamWriter(saveFileDialog.FileName, false, Encoding.UTF8);
+
+                ConversionReport.WriteCsv(entries, writer);
+            }
+            catch (Exception ex) when (
+                ex is IOException or UnauthorizedAccessException)
+            {
+                ShowWarning(
+                    "Failed to export the csv report: {0}",
+                    ex.Message);
+            }
+        }
+
+        private void OnBaseDirectoryDragEnter(object? sender, DragEventArgs e)
+        {
+            e.Effect =
+                TryGetDroppedDirectory(e.Data, out _)
+                    ? DragDropEffects.Copy
+                    : DragDropEffects.None;
+        }
+
+        private void OnBaseDirectoryDragDrop(object? sender, DragEventArgs e)
+        {
+            if (!TryGetDroppedDirectory(e.Data, out string? directory))
+                return;
+
+            lstBaseDirectory.Text = directory;
+            lstBaseDirectory.Items.Add(directory);
+        }
+
+        private static bool TryGetDroppedDirectory(
+            IDataObject? data,
+            [NotNullWhen(true)] out string? directory)
+        {
+            directory = null;
+
+            if (data == null ||
+                !data.GetDataPresent(DataFormats.FileDrop))
+            {
+                return false;
+            }
+
+            var paths =
+                data.GetData(DataFormats.FileDrop) as string[];
+
+            string? firstDirectory =
+                paths?.FirstOrDefault(Directory.Exists);
+
+            if (firstDirectory == null)
+                return false;
+
+            directory = firstDirectory;
+            return true;
+        }
+
         #endregion
 
         #region Action button handling
-        private void OnAction(object sender, EventArgs e)
+
+        private void OnAction(object? sender, EventArgs e)
         {
-            CurrentAction action = (CurrentAction)((Button)sender).Tag;
+            // Only btnView/btnValidate are wired to this handler, and both have Tag set below.
+            CurrentAction action =
+                (CurrentAction)((Button)sender!).Tag!;
+
             StartAction(action);
         }
 
         private void StartAction(CurrentAction action)
         {
+            if (_actionWorker.IsBusy)
+                return;
+
             string directory = lstBaseDirectory.Text;
+
             if (string.IsNullOrEmpty(directory))
             {
                 ShowWarning("Please specify a directory to check");
                 return;
             }
+
             if (!Directory.Exists(directory))
             {
-                ShowWarning("The directory you specified '{0}' does not exist", directory);
+                ShowWarning(
+                    "The directory you specified '{0}' does not exist",
+                    directory);
                 return;
             }
-            if (action == CurrentAction.Validate && lstValidCharsets.CheckedItems.Count == 0)
+
+            if (action == CurrentAction.Validate &&
+                lstValidCharsets.CheckedItems.Count == 0)
             {
-                ShowWarning("Select one or more valid character sets to proceed with validation");
+                ShowWarning(
+                    "Select one or more valid character sets to proceed with validation");
                 return;
             }
 
             _currentAction = action;
-
-            if (_settings == null)
-                _settings = new Settings();
-            _settings.RecentDirectories.Add(directory);
+            _settings.AddRecentDirectory(directory);
 
             UpdateControlsOnActionStart();
 
-            List<string> validCharsets = new List<string>(lstValidCharsets.CheckedItems.Count);
+            // Suspend redraw until ScanWorkerCompleted, once results stop streaming in.
+            lstResults.BeginUpdate();
+            lstResults.ListViewItemSorter = null;
+            lstResults.ItemChecked -= OnResultItemChecked;
+            lstResults.Items.Clear();
+
+            var validCharsets =
+                new List<string>(lstValidCharsets.CheckedItems.Count);
+
             foreach (string validCharset in lstValidCharsets.CheckedItems)
                 validCharsets.Add(validCharset);
 
-            WorkerArgs args = new WorkerArgs
+            _actionCancellation?.Dispose();
+            _actionCancellation = new CancellationTokenSource();
+
+            var args = new WorkerArgs
             {
                 Action = action,
                 BaseDirectory = directory,
                 IncludeSubdirectories = chkIncludeSubdirectories.Checked,
                 FileMasks = txtFileMasks.Text,
-                ValidCharsets = validCharsets
+                ValidCharsets = validCharsets,
+                CancellationToken = _actionCancellation.Token,
             };
+
             _actionWorker.RunWorkerAsync(args);
         }
 
-        private void OnConvert(object sender, EventArgs e)
+        private void OnConvert(object? sender, EventArgs e)
         {
+            if (_actionWorker.IsBusy)
+                return;
+
             if (lstResults.CheckedItems.Count == 0)
             {
                 ShowWarning("Select one or more files to convert");
                 return;
             }
 
-            // stop drawing of the results list view control
-            lstResults.BeginUpdate();
-            lstResults.ItemChecked -= OnResultItemChecked;
+            // BOM is handled separately from the charset name.
+            // lstConvert is DropDownList-style and OnFormLoad selects index 0 once
+            // populated, so SelectedItem is never null here.
+            string targetLabel = (string)lstConvert.SelectedItem!;
 
+            ScanEngine.ParseCharsetLabel(
+                targetLabel,
+                out string targetBaseCharset,
+                out bool writeBom);
+
+            var itemsByPath =
+                new Dictionary<string, ListViewItem>(
+                    StringComparer.OrdinalIgnoreCase);
+
+            var entries =
+                new List<ConversionReportEntry>(
+                    lstResults.CheckedItems.Count);
+
+            // Tag is always set to the entry when the row is added (ActionWorkerProgressChanged).
             foreach (ListViewItem item in lstResults.CheckedItems)
             {
-                string charset = item.SubItems[RESULTS_COLUMN_CHARSET].Text;
-                if (charset == "(Unknown)")
-                    continue;
+                var entry = (ConversionReportEntry)item.Tag!;
 
-                if (charset.EndsWith("-bom"))
-                    charset = charset.Replace("-bom", "");
-
-                string fileName = item.SubItems[RESULTS_COLUMN_FILE_NAME].Text;
-                string directory = item.SubItems[RESULTS_COLUMN_DIRECTORY].Text;
-                string filePath = Path.Combine(directory, fileName);
-
-                try
-                {
-                    FileAttributes attributes = File.GetAttributes(filePath);
-                    if ((attributes & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
-                    {
-                        attributes ^= FileAttributes.ReadOnly;
-                        File.SetAttributes(filePath, attributes);
-                    }
-
-                    if (!Encoding.GetEncoding(charset).Validate(File.ReadAllBytes(filePath)))
-                    {
-                        Debug.WriteLine("Decoding error. " + filePath);
-                        continue;
-                    }
-
-                    string content;
-                    using (StreamReader reader = new StreamReader(filePath, Encoding.GetEncoding(charset)))
-                        content = reader.ReadToEnd();
-
-                    string targetCharset = (string)lstConvert.SelectedItem;
-                    Encoding encoding;
-                    // handle UTF-8/16 and UTF-8/16 with BOM
-                    switch (targetCharset)
-                    {
-                        case "utf-8":
-                            encoding = new UTF8Encoding(false);
-                            break;
-                        case "utf-8-bom":
-                            encoding = new UTF8Encoding(true);
-                            break;
-                        case "utf-16":
-                            encoding = new UnicodeEncoding(bigEndian: false, byteOrderMark: false);
-                            break;
-                        case "utf-16-bom":
-                            encoding = new UnicodeEncoding(bigEndian: false, byteOrderMark: true);
-                            break;
-                        case "utf-16BE":
-                            encoding = new UnicodeEncoding(bigEndian: true, byteOrderMark: false);
-                            break;
-                        case "utf-16BE-bom":
-                            encoding = new UnicodeEncoding(bigEndian: true, byteOrderMark: true);
-                            break;
-                        default:
-                            encoding = Encoding.GetEncoding(targetCharset);
-                            break;
-                    }
-
-                    using (StreamWriter writer = new StreamWriter(filePath, append: false, encoding))
-                    {
-                        writer.Write(content);
-                        writer.Flush();
-                    }
-
-                    item.Checked = false;
-                    item.ImageIndex = 0;
-                    item.SubItems[RESULTS_COLUMN_CHARSET].Text = targetCharset;
-                }
-                catch
-                {
-                    // do nothing
-                }
+                itemsByPath[entry.FilePath] = item;
+                entries.Add(entry);
             }
 
-            // resume drawing of the results list view control
-            lstResults.ItemChecked += OnResultItemChecked;
-            lstResults.EndUpdate();
+            _convertItemsByPath = itemsByPath;
+            _convertTargetLabel = targetLabel;
+            _currentAction = CurrentAction.Convert;
 
-            // execute handler of the 'ItemChecked' event
-            OnResultItemChecked(lstResults, new ItemCheckedEventArgs(lstResults.Items[0]));
+            UpdateControlsOnActionStart();
+
+            _actionCancellation?.Dispose();
+            _actionCancellation = new CancellationTokenSource();
+
+            var args = new ConvertWorkerArgs
+            {
+                Entries = entries,
+                TargetBaseCharset = targetBaseCharset,
+                TargetWriteBom = writeBom,
+                CancellationToken = _actionCancellation.Token,
+            };
+
+            _actionWorker.RunWorkerAsync(args);
         }
 
-        private void OnCancelAction(object sender, EventArgs e)
+        private void OnCancelAction(object? sender, EventArgs e)
         {
             if (_actionWorker.IsBusy)
             {
                 btnCancel.Visible = false;
                 _actionWorker.CancelAsync();
+                _actionCancellation?.Cancel();
             }
         }
+
         #endregion
 
-        #region Background worker event handlers and helper methods
-        private static void ActionWorkerDoWork(object sender, DoWorkEventArgs e)
+        #region Background worker event handlers
+
+        private static void ActionWorkerDoWork(
+            object? sender,
+            DoWorkEventArgs e)
         {
-            const int progressBufferSize = 5;
-
-            BackgroundWorker worker = (BackgroundWorker)sender;
-            WorkerArgs args = (WorkerArgs)e.Argument;
-
-            string[] allFiles = Directory.GetFiles(args.BaseDirectory, "*.*",
-                args.IncludeSubdirectories ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly);
-
-            WorkerProgress[] progressBuffer = new WorkerProgress[progressBufferSize];
-            int reportBufferCounter = 1;
-
-            IEnumerable<Regex> maskPatterns = GenerateMaskPatterns(args.FileMasks);
-            for (int i = 0; i < allFiles.Length; i++)
+            if (e.Argument is ConvertWorkerArgs convertArgs)
             {
-                if (worker.CancellationPending)
-                {
-                    e.Cancel = true;
-                    break;
-                }
-
-                string path = allFiles[i];
-                string fileName = Path.GetFileName(path);
-                if (!SatisfiesMaskPatterns(fileName, maskPatterns))
-                    continue;
-
-                bool hasBOM = false;
-                Encoding encoding = TextEncoding.GetFileEncoding(path, ref hasBOM);
-                string charset = encoding?.WebName ?? "(Unknown)";
-                if (hasBOM)
-                {
-                    charset += "-bom";
-                }
-
-                if (args.Action == CurrentAction.Validate && args.ValidCharsets.Contains(charset))
-                    continue;
-
-                string directoryName = Path.GetDirectoryName(path);
-                string fileExt = Path.GetExtension(path);
-
-                progressBuffer[reportBufferCounter - 1] = new WorkerProgress
-                {
-                    Charset = charset,
-                    FileName = fileName,
-                    FileExt = fileExt,
-                    DirectoryName = directoryName
-                };
-                reportBufferCounter++;
-                if (reportBufferCounter > progressBufferSize)
-                {
-                    reportBufferCounter = 1;
-                    int percentageCompleted = (i * 100) / allFiles.Length;
-                    WorkerProgress[] reportProgress = new WorkerProgress[progressBufferSize];
-                    Array.Copy(progressBuffer, reportProgress, progressBufferSize);
-                    worker.ReportProgress(percentageCompleted, reportProgress);
-                    Array.Clear(progressBuffer, 0, progressBufferSize);
-                }
+                ConvertWorkerDoWork(convertArgs, e);
+                return;
             }
 
-            // Copy remaining results from buffer, if any.
-            if (reportBufferCounter > 1)
+            var worker = (BackgroundWorker)sender!;
+            var args = (WorkerArgs)e.Argument!;
+
+            List<string> includePatterns =
+                SplitFileMasks(args.FileMasks);
+
+            var scanOptions = new ScanDirectoryOptions
             {
-                reportBufferCounter--;
-                const int percentageCompleted = 100;
-                WorkerProgress[] reportProgress = new WorkerProgress[reportBufferCounter];
-                Array.Copy(progressBuffer, reportProgress, reportBufferCounter);
-                worker.ReportProgress(percentageCompleted, reportProgress);
-                Array.Clear(progressBuffer, 0, reportBufferCounter);
+                BaseDirectory = args.BaseDirectory,
+                IncludeSubdirectories = args.IncludeSubdirectories,
+                IncludePatterns = includePatterns,
+                Action =
+                    args.Action == CurrentAction.Validate
+                        ? ScanAction.Validate
+                        : ScanAction.Detect,
+                ValidCharsets = args.ValidCharsets,
+            };
+
+            try
+            {
+                ScanEngine.ScanDirectory(
+                    scanOptions,
+                    onEntry: entry =>
+                    {
+                        // Hide files that already pass validation.
+                        if (args.Action == CurrentAction.Validate &&
+                            entry.Result == ConversionRowResult.Unchanged)
+                        {
+                            return;
+                        }
+
+                        worker.ReportProgress(0, entry);
+                    },
+                    args.CancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                e.Cancel = true;
             }
         }
 
-        private static IEnumerable<Regex> GenerateMaskPatterns(string fileMaskString)
+        // No per-file progress to report; results are applied in one batch in ConvertWorkerCompleted.
+        private static void ConvertWorkerDoWork(
+            ConvertWorkerArgs args,
+            DoWorkEventArgs e)
         {
-            string[] fileMasks = fileMaskString.Split(new[] { Environment.NewLine },
-                StringSplitOptions.RemoveEmptyEntries);
-            string[] processedFileMasks = Array.FindAll(fileMasks, mask => mask.Trim().Length > 0);
-            if (processedFileMasks.Length == 0)
-                processedFileMasks = new[] { "*.*" };
+            var completed = new ConcurrentBag<ConversionReportEntry>();
 
-            List<Regex> maskPatterns = new List<Regex>(processedFileMasks.Length);
-            foreach (string fileMask in processedFileMasks)
+            try
             {
-                if (string.IsNullOrEmpty(fileMask))
-                    continue;
-                Regex maskPattern =
-                    new Regex("^" + fileMask.Replace(".", "[.]").Replace("*", ".*").Replace("?", ".") + "$",
-                        RegexOptions.IgnoreCase);
-                maskPatterns.Add(maskPattern);
+                ScanEngine.ConvertFiles(
+                    args.Entries,
+                    args.TargetBaseCharset,
+                    args.TargetWriteBom,
+                    ScanEngine.DefaultMaxParallelism,
+                    onEntry: completed.Add,
+                    args.CancellationToken);
             }
-            return maskPatterns;
-        }
-
-        private static bool SatisfiesMaskPatterns(string fileName, IEnumerable<Regex> maskPatterns)
-        {
-            foreach (Regex maskPattern in maskPatterns)
+            catch (OperationCanceledException)
             {
-                if (maskPattern.IsMatch(fileName))
-                    return true;
-            }
-            return false;
-        }
-
-        private void ActionWorkerProgressChanged(object sender, ProgressChangedEventArgs e)
-        {
-            WorkerProgress[] progresses = (WorkerProgress[])e.UserState;
-
-            foreach (WorkerProgress progress in progresses)
-            {
-                if (progress == null)
-                    break;
-                ListViewItem resultItem = new ListViewItem(new[] { progress.Charset, progress.FileName, progress.FileExt, progress.DirectoryName }, -1);
-                lstResults.Items.Add(resultItem);
-                actionStatus.Text = progress.FileName;
+                e.Cancel = true;
             }
 
-            actionProgress.Value = e.ProgressPercentage;
+            e.Result = completed;
         }
 
-        private void ActionWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
+        // GUI masks are newline-separated; ScanEngine receives split patterns.
+        private static List<string> SplitFileMasks(string fileMaskString)
         {
+            if (string.IsNullOrWhiteSpace(fileMaskString))
+                return [];
+
+            return
+            [
+                .. fileMaskString
+                    .Split(
+                        [Environment.NewLine],
+                        StringSplitOptions.RemoveEmptyEntries)
+                    .Select(mask => mask.Trim())
+                    .Where(mask => mask.Length > 0)
+            ];
+        }
+
+        private void ActionWorkerProgressChanged(
+            object? sender,
+            ProgressChangedEventArgs e)
+        {
+            if (e.UserState is not ConversionReportEntry entry)
+                return;
+
+            string charsetLabel =
+                ScanEngine.FormatCharsetLabel(
+                    entry.SourceEncoding,
+                    entry.SourceHasBom);
+
+            var resultItem = new ListViewItem(
+                [
+                    charsetLabel,
+                    Path.GetFileName(entry.FilePath),
+                    Path.GetExtension(entry.FilePath),
+                    Path.GetDirectoryName(entry.FilePath) ?? string.Empty
+                ],
+                -1)
+            {
+                Tag = entry,
+            };
+
+            lstResults.Items.Add(resultItem);
+            actionStatus.Text = entry.FilePath;
+        }
+
+        private void ActionWorkerCompleted(
+            object? sender,
+            RunWorkerCompletedEventArgs e)
+        {
+            if (_currentAction == CurrentAction.Convert)
+                ConvertWorkerCompleted(e);
+            else
+                ScanWorkerCompleted(e);
+
+            // Deferred from OnFormClosing while this operation was still running.
+            if (_closeRequested)
+                Close();
+        }
+
+        private void ScanWorkerCompleted(RunWorkerCompletedEventArgs e)
+        {
+            if (e.Error != null)
+            {
+                ShowWarning(
+                    "An unexpected error occurred while scanning: {0}",
+                    e.Error.Message);
+            }
+
             if (lstResults.Items.Count > 0)
             {
                 foreach (ColumnHeader columnHeader in lstResults.Columns)
-                    columnHeader.AutoResize(ColumnHeaderAutoResizeStyle.ColumnContent);
+                {
+                    columnHeader.AutoResize(
+                        ColumnHeaderAutoResizeStyle.ColumnContent);
+                }
             }
-            UpdateControlsOnActionDone();
+
+            // Redraw was suspended in StartAction; restore sorting and resume now.
+            lstResults.ListViewItemSorter = _lvwColumnSorter;
+            lstResults.ItemChecked += OnResultItemChecked;
+            lstResults.Sort();
+            lstResults.EndUpdate();
+
+            string statusMessage = e.Cancelled
+                ? "Cancelled - {0} files processed"
+                : _currentAction == CurrentAction.View
+                    ? "{0} files processed"
+                    : "{0} files do not have the correct encoding";
+
+            UpdateControlsOnActionDone(
+                string.Format(statusMessage, lstResults.Items.Count));
         }
+
+        private void ConvertWorkerCompleted(RunWorkerCompletedEventArgs e)
+        {
+            string targetLabel = _convertTargetLabel!;
+            Dictionary<string, ListViewItem> itemsByPath = _convertItemsByPath!;
+
+            _convertItemsByPath = null;
+            _convertTargetLabel = null;
+
+            if (e.Error != null)
+            {
+                ShowWarning(
+                    "An unexpected error occurred while converting: {0}",
+                    e.Error.Message);
+
+                UpdateControlsOnActionDone("Conversion failed.");
+                return;
+            }
+
+            // ConvertWorkerDoWork always assigns e.Result, even when cancelled.
+            var completed = (ConcurrentBag<ConversionReportEntry>)e.Result!;
+
+            int convertedCount = 0;
+            int unchangedCount = 0;
+            int errorCount = 0;
+
+            // Update the UI only after parallel processing completes.
+            lstResults.BeginUpdate();
+            lstResults.ItemChecked -= OnResultItemChecked;
+
+            foreach (ConversionReportEntry entry in completed)
+            {
+                if (!itemsByPath.TryGetValue(
+                        entry.FilePath,
+                        out ListViewItem? item))
+                {
+                    continue;
+                }
+
+                UpdateResultItem(item, entry, targetLabel);
+
+                switch (entry.Result)
+                {
+                    case ConversionRowResult.Converted:
+                        convertedCount++;
+                        break;
+                    case ConversionRowResult.Error:
+                        errorCount++;
+                        break;
+                    default:
+                        unchangedCount++;
+                        break;
+                }
+            }
+
+            // The Charset column changed for converted rows.
+            lstResults.Sort();
+
+            lstResults.ItemChecked += OnResultItemChecked;
+            lstResults.EndUpdate();
+
+            OnResultItemChecked(
+                lstResults,
+                new ItemCheckedEventArgs(lstResults.Items[0]));
+
+            btnExportReport.Visible = lstResults.Items.Count > 0;
+
+            string statusMessage = e.Cancelled
+                ? $"Conversion cancelled: {convertedCount} converted, " +
+                  $"{unchangedCount} unchanged, {errorCount} failed"
+                : $"Conversion complete: {convertedCount} converted, " +
+                  $"{unchangedCount} unchanged, {errorCount} failed";
+
+            UpdateControlsOnActionDone(statusMessage);
+        }
+
+        // Single place that formats a row from its ConversionReportEntry.
+        private static void UpdateResultItem(
+            ListViewItem item,
+            ConversionReportEntry entry,
+            string targetLabel)
+        {
+            if (entry.Result == ConversionRowResult.Converted)
+            {
+                item.Checked = false;
+                item.ImageIndex = 0;
+                item.SubItems[RESULTS_COLUMN_CHARSET].Text = targetLabel;
+            }
+            else if (entry.Result == ConversionRowResult.Error)
+            {
+                Debug.WriteLine(
+                    $"Conversion failed for {entry.FilePath}: {entry.Diagnostic}");
+            }
+            // Unchanged: already matched the target; nothing was written, row stays as-is.
+        }
+
         #endregion
 
-        #region Loading and saving of settings
+        #region Loading and saving settings
+
         private void LoadSettings()
         {
             string settingsFileName = GetSettingsFileName();
+
             if (!File.Exists(settingsFileName))
                 return;
-            using (FileStream settingsFile = new FileStream(settingsFileName, FileMode.Open, FileAccess.Read, FileShare.Read))
+
+            Settings settings;
+
+            try
             {
-                BinaryFormatter formatter = new BinaryFormatter();
-                object settingsInstance = formatter.Deserialize(settingsFile);
-                _settings = (Settings)settingsInstance;
+                using (var settingsFile = new FileStream(
+                    settingsFileName,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read))
+                {
+                    var serializer = new XmlSerializer(typeof(Settings));
+
+                    settings =
+                        serializer.Deserialize(settingsFile) as Settings
+                        ?? new Settings();
+                }
+            }
+            catch (Exception ex) when (
+                ex is IOException or
+                UnauthorizedAccessException or
+                InvalidOperationException)
+            {
+                // Corrupt or unreadable settings shouldn't prevent startup.
+                settings = new Settings();
             }
 
-            if (_settings.RecentDirectories?.Count > 0)
+            _settings = settings;
+
+            if (settings.RecentDirectories.Count > 0)
             {
-                foreach (string recentDirectory in _settings.RecentDirectories)
+                foreach (string recentDirectory in
+                         settings.RecentDirectories)
+                {
                     lstBaseDirectory.Items.Add(recentDirectory);
+                }
+
                 lstBaseDirectory.SelectedIndex = 0;
             }
             else
-                lstBaseDirectory.Text = Environment.CurrentDirectory;
-            chkIncludeSubdirectories.Checked = _settings.IncludeSubdirectories;
-            txtFileMasks.Text = _settings.FileMasks;
-            if (_settings.ValidCharsets?.Length > 0)
             {
-                for (int i = 0; i < lstValidCharsets.Items.Count; i++)
-                    if (Array.Exists(_settings.ValidCharsets,
-                        charset => charset.Equals((string)lstValidCharsets.Items[i])))
-                        lstValidCharsets.SetItemChecked(i, true);
+                lstBaseDirectory.Text =
+                    Environment.CurrentDirectory;
             }
 
-            _settings.WindowPosition?.ApplyTo(this);
+            chkIncludeSubdirectories.Checked =
+                settings.IncludeSubdirectories;
+
+            // Restore CRLF for the multiline textbox; XmlSerializer writes LF.
+            txtFileMasks.Text = settings.FileMasks
+                .Replace("\r\n", "\n")
+                .Replace("\n", "\r\n");
+
+            if (settings.ValidCharsets.Length > 0)
+            {
+                for (int i = 0;
+                     i < lstValidCharsets.Items.Count;
+                     i++)
+                {
+                    if (Array.Exists(
+                        settings.ValidCharsets,
+                        charset => charset.Equals(
+                            (string)lstValidCharsets.Items[i],
+                            StringComparison.OrdinalIgnoreCase)))
+                    {
+                        lstValidCharsets.SetItemChecked(i, true);
+                    }
+                }
+            }
+
+            settings.WindowPosition.ApplyTo(this);
         }
 
         private void SaveSettings()
         {
-            if (_settings == null)
-                _settings = new Settings();
-            _settings.IncludeSubdirectories = chkIncludeSubdirectories.Checked;
-            _settings.FileMasks = txtFileMasks.Text;
+            _settings.IncludeSubdirectories =
+                chkIncludeSubdirectories.Checked;
 
-            _settings.ValidCharsets = new string[lstValidCharsets.CheckedItems.Count];
-            for (int i = 0; i < lstValidCharsets.CheckedItems.Count; i++)
-                _settings.ValidCharsets[i] = (string)lstValidCharsets.CheckedItems[i];
+            _settings.FileMasks =
+                txtFileMasks.Text;
 
-            _settings.WindowPosition = new WindowPosition { Left = Left, Top = Top, Width = Width, Height = Height };
+            _settings.ValidCharsets =
+                new string[lstValidCharsets.CheckedItems.Count];
 
-            string settingsFileName = GetSettingsFileName();
-            using (
-                FileStream settingsFile = new FileStream(settingsFileName, FileMode.Create, FileAccess.Write,
-                    FileShare.None))
+            for (int i = 0;
+                 i < lstValidCharsets.CheckedItems.Count;
+                 i++)
             {
-                BinaryFormatter formatter = new BinaryFormatter();
-                formatter.Serialize(settingsFile, _settings);
+                _settings.ValidCharsets[i] =
+                    (string)lstValidCharsets.CheckedItems[i]!;
+            }
+
+            _settings.WindowPosition =
+                new WindowPosition
+                {
+                    Left = Left,
+                    Top = Top,
+                    Width = Width,
+                    Height = Height
+                };
+
+            string settingsFileName =
+                GetSettingsFileName();
+
+            try
+            {
+                using var settingsFile = new FileStream(
+                    settingsFileName,
+                    FileMode.Create,
+                    FileAccess.Write,
+                    FileShare.None);
+
+                var serializer =
+                    new XmlSerializer(typeof(Settings));
+
+                serializer.Serialize(
+                    settingsFile,
+                    _settings);
+
                 settingsFile.Flush();
+            }
+            catch (Exception ex) when (
+                ex is IOException or
+                UnauthorizedAccessException or
+                InvalidOperationException)
+            {
+                // Settings are non-critical; don't block closing the app over this.
             }
         }
 
         private static string GetSettingsFileName()
         {
-            string dataDirectory = ApplicationDeployment.IsNetworkDeployed
-                ? ApplicationDeployment.CurrentDeployment.DataDirectory
-                : Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            if (string.IsNullOrEmpty(dataDirectory) || !Directory.Exists(dataDirectory))
+            string dataDirectory =
+                Environment.GetFolderPath(
+                    Environment.SpecialFolder.ApplicationData);
+
+            if (string.IsNullOrEmpty(dataDirectory) ||
+                !Directory.Exists(dataDirectory))
+            {
                 dataDirectory = Environment.CurrentDirectory;
-            dataDirectory = Path.Combine(dataDirectory, "EncodingChecker");
+            }
+
+            dataDirectory =
+                Path.Combine(
+                    dataDirectory,
+                    "EncodingChecker");
+
             if (!Directory.Exists(dataDirectory))
                 Directory.CreateDirectory(dataDirectory);
-            return Path.Combine(dataDirectory, "Settings.bin");
+
+            return Path.Combine(
+                dataDirectory,
+                "Settings.xml");
         }
+
         #endregion
 
         private void UpdateControlsOnActionStart()
@@ -592,22 +969,21 @@ namespace EncodingChecker
             lstConvert.Enabled = false;
             btnConvert.Enabled = false;
             chkSelectDeselectAll.Enabled = false;
-            chkSelectDeselectAll.CheckState = CheckState.Unchecked;
+            chkSelectDeselectAll.CheckState =
+                CheckState.Unchecked;
+            btnExportReport.Visible = false;
 
             btnCancel.Visible = true;
 
-            // stop drawing of the results list view control
-            lstResults.BeginUpdate();
-            lstResults.ListViewItemSorter = null;
-            lstResults.ItemChecked -= OnResultItemChecked;
-            lstResults.Items.Clear();
+            // Total file count isn't known up front, so show activity, not a percentage.
+            actionProgress.Style =
+                ProgressBarStyle.Marquee;
 
-            actionProgress.Value = 0;
             actionProgress.Visible = true;
             actionStatus.Text = string.Empty;
         }
 
-        private void UpdateControlsOnActionDone()
+        private void UpdateControlsOnActionDone(string statusMessage)
         {
             btnView.Enabled = true;
             btnValidate.Enabled = true;
@@ -619,13 +995,22 @@ namespace EncodingChecker
                 btnConvert.Enabled = true;
                 chkSelectDeselectAll.Enabled = true;
 
-                if (_currentAction == CurrentAction.Validate && lstValidCharsets.CheckedItems.Count > 0)
+                if (_currentAction == CurrentAction.Validate &&
+                    lstValidCharsets.CheckedItems.Count > 0)
                 {
-                    string firstValidCharset = (string)lstValidCharsets.CheckedItems[0];
-                    for (int i = 0; i < lstConvert.Items.Count; i++)
+                    string firstValidCharset =
+                        (string)lstValidCharsets.CheckedItems[0]!;
+
+                    for (int i = 0;
+                         i < lstConvert.Items.Count;
+                         i++)
                     {
-                        string convertCharset = (string)lstConvert.Items[i];
-                        if (firstValidCharset.Equals(convertCharset, StringComparison.OrdinalIgnoreCase))
+                        string convertCharset =
+                            (string)lstConvert.Items[i]!;
+
+                        if (firstValidCharset.Equals(
+                            convertCharset,
+                            StringComparison.OrdinalIgnoreCase))
                         {
                             lstConvert.SelectedIndex = i;
                             break;
@@ -636,36 +1021,57 @@ namespace EncodingChecker
 
             btnCancel.Visible = false;
 
-            // resume drawing of the results list view control
-            lstResults.ListViewItemSorter = _lvwColumnSorter;
-            lstResults.ItemChecked += OnResultItemChecked;
-            lstResults.Sort();
-            lstResults.EndUpdate();
-
             actionProgress.Visible = false;
+            actionProgress.Style =
+                ProgressBarStyle.Continuous;
+            actionProgress.Value = 0;
 
-            string statusMessage = _currentAction == CurrentAction.View
-                ? "{0} files processed" : "{0} files do not have the correct encoding";
-            actionStatus.Text = string.Format(statusMessage, lstResults.Items.Count);
+            actionStatus.Text = statusMessage;
         }
 
-        private static IEnumerable<string> GetSupportedCharsets()
+        // Matches the encodings reported by UtfUnknown.Core.CodepageName. UTF-7 is
+        // deliberately excluded: .NET disabled it by default for security reasons (see
+        // SYSLIB0001 - UTF-7 content can be crafted to evade validation that assumes a
+        // different encoding), so Encoding.GetEncoding throws NotSupportedException for
+        // it. Omitting it here documents that instead of leaving it implicit.
+        private static readonly string[] SupportedCharsets =
+        [
+            "ascii", "utf-8", "utf-16le", "utf-16be",
+            "utf-32le", "utf-32be",
+            "euc-jp", "euc-kr", "euc-tw",
+            "iso-2022-cn", "iso-2022-kr", "iso-2022-jp",
+            "x-cp50227",
+            "big5", "gb18030", "hz-gb-2312", "shift-jis",
+            "ks_c_5601-1987", "cp949",
+            "ibm852", "ibm855", "ibm866",
+            "iso-8859-1", "iso-8859-2", "iso-8859-3",
+            "iso-8859-4", "iso-8859-5", "iso-8859-6",
+            "iso-8859-7", "iso-8859-8", "iso-8859-9",
+            "iso-8859-10", "iso-8859-11", "iso-8859-13",
+            "iso-8859-15", "iso-8859-16",
+            "windows-1250", "windows-1251", "windows-1252",
+            "windows-1253", "windows-1255", "windows-1256",
+            "windows-1257", "windows-1258",
+            "x-mac-ce", "x-mac-cyrillic",
+            "koi8-r", "tis-620", "viscii",
+            "X-ISO-10646-UCS-4-3412",
+            "X-ISO-10646-UCS-4-2143"
+        ];
+
+        private static string[] GetSupportedCharsets() =>
+            SupportedCharsets;
+
+        private void ShowWarning(
+            string message,
+            params object[] args)
         {
-            //Using reflection, figure out all the charsets that the UtfUnknown framework supports by reflecting
-            //over all the strings constants in the UtfUnknown.Core.CodepageName class. These represent all the encodings
-            //that can be detected by the program.
-            Type codepageName = typeof(UtfUnknown.Core.CodepageName);
-            FieldInfo[] charsetConstants = codepageName.GetFields(BindingFlags.GetField | BindingFlags.Static | BindingFlags.Public);
-            foreach (FieldInfo charsetConstant in charsetConstants)
-            {
-                if (charsetConstant.FieldType == typeof(string))
-                    yield return (string)charsetConstant.GetValue(null);
-            }
+            MessageBox.Show(
+                this,
+                string.Format(message, args),
+                @"Warning",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
         }
 
-        private void ShowWarning(string message, params object[] args)
-        {
-            MessageBox.Show(this, string.Format(message, args), @"Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        }
     }
 }

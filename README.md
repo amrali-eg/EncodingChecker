@@ -1,42 +1,70 @@
 [![Build status](https://ci.appveyor.com/api/projects/status/c8arh5v18u285jmj/branch/master?svg=true)](https://ci.appveyor.com/project/amrali-eg/encodingchecker/branch/master)
 
-# EncodingChecker v2.0
-File Encoding Checker is a GUI tool that allows you to validate the text encoding of one or more files. The tool can display the encoding for all selected files, or only the files that do not have the encodings you specify.
+# EncodingChecker v3.0
 
-File Encoding Checker requires Microsoft .NET Framework 4 to run.
+File Encoding Checker detects, validates, and converts the text encoding of one or more files. It runs either as a Windows GUI app or as a command-line tool for scripting and CI, and shares one detection/conversion engine between both.
+
+Requires the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download) (Windows only).
 
 ![form image](./form.png "File Encoding Checker Form Preview")
 
-## Fixed issues
-Sorting the results by clicking a column header is working now.
+## Highlights
 
-Display the sort arrow in the columnn header for the results list view.
+- Layered detection: byte-order-mark and heuristic checks for Unicode encodings, [UtfUnknown](https://github.com/CharsetDetector/UTF-unknown) for legacy code pages, each candidate independently verified by strict decoding before being trusted.
+- Lossless, safe conversion: every write is verified afterward by comparing a SHA-256 hash of the decoded content, so a silent encoder substitution (e.g. an unrepresentable character) is caught and reported as an error instead of corrupting the file.
+- Optional `.bak` backup before overwriting, and a `-WhatIf` dry-run mode that reports what would happen without touching any file.
+- Covered by an xUnit test suite exercising the detection/conversion engine, CLI argument parsing, and CSV report formatting across multilingual content and edge cases.
 
-When viewing a directory, some files matching the file masks were not listed.
+## GUI usage
 
-Improved performance of the list view control for faster processing of results.
+Launch `EncodingChecker.exe` with no arguments. Pick a directory and file filters, choose **View** to detect encodings, **Validate** against a set of accepted charsets, or **Convert** to a target encoding. Results can be exported to CSV.
 
-Added feature to export selected results to a text file.
+## Command-line usage
 
-Switched to UtfUnknown library for better encoding detection (Multiple bugs from Ude fixed).
+Launch `EncodingChecker.exe` with arguments to run in console mode instead. Run `EncodingChecker.exe -?` (or `-h`, `/?`, `--help`) at any time to print this from the tool itself.
 
-Validating the detected file encoding to avoid errors during conversion of files.
+```
+EncodingChecker.exe
+    -BasePath <directory>
+    [-Include "<pattern1,pattern2,...>"]
+    [-Exclude "<pattern1,pattern2,...>"]
 
-UTF-16 text files without byte-order-mark (BOM) can be detected by heuristics.
+    -Target "<encoding>"          # Convert mode (default); e.g. "utf-8" or "utf-8-bom"
+    -Validate "<charset1,...>"    # Validate mode: flag files not in this list
+    -DetectOnly                   # Read-only detection mode
 
-## Credits
-The original project [EncodingChecker](https://archive.codeplex.com/?p=encodingchecker) on CodePlex was written by [Jeevan James](https://github.com/JeevanJames).
+    [-Report <path>]              # Also write a CSV report to this path
+    [-MaxParallelism <N>]         # Default: min(logical processor count, 4)
+    [-WhatIf]                     # Convert mode: report without writing
+    [-Backup]                     # Convert mode: write "<file>.bak" before overwriting
+    [-Quiet]                      # Suppress per-file rows; print only a summary
+    [-Verbose]                    # Print error detail and a result breakdown
+    [-FailOnChanges]              # Non-zero exit code if any file needs (or, under
+                                   # -Validate, fails) conversion — useful as a CI gate
+```
 
-For encoding detection, File Encoding Checker now uses the [UtfUnknown](https://github.com/CharsetDetector/UTF-unknown) library, which is a C# port of [uchardet](https://gitlab.freedesktop.org/uchardet/uchardet) library - A C++ port of the original [Mozilla Universal Charset Detector](https://dxr.mozilla.org/mozilla/source/extensions/universalchardet/).
+`-Include`/`-Exclude` are comma-separated wildcard file-name patterns; `.git`, `.svn`, `.hg`, `.vs`, `.idea`, `bin`, `obj`, `node_modules`, `packages`, `dist`, `build`, and `target` directories are always skipped. Convert, Validate, and Detect-only are mutually exclusive modes.
 
-## Supported Charsets
-File Encoding Checker currently supports over forty charsets.
+Exit codes: `0` clean, `1` usage/argument error, `2` `-FailOnChanges` triggered, `3` one or more files failed to process, `4` cancelled (Ctrl+C).
+
+Examples:
+
+```bash
+EncodingChecker.exe -BasePath C:\Source -Include "*.cs,*.txt" -Target "utf-8"
+
+EncodingChecker.exe -BasePath . -Include "*.cpp,*.hpp" -Target "utf-8" -WhatIf
+
+EncodingChecker.exe -BasePath . -Include "*" -Validate "utf-8,utf-8-bom" -Report report.csv -FailOnChanges
+```
+
+## Supported charsets
+
+Over forty charsets, matching what [UtfUnknown](https://github.com/CharsetDetector/UTF-unknown) can report and .NET can encode/decode:
 
 * ASCII
-* UTF-7 (with a BOM)
 * UTF-8 (with or without a BOM)
 * UTF-16 BE or LE (with or without a BOM)
-* UTF-32 BE or LE (with a BOM)
+* UTF-32 BE or LE (with or without a BOM)
 * Arabic: iso-8859-6, windows-1256.
 * Baltic: iso-8859-4, windows-1257.
 * Central European: ibm852, iso-8859-2, windows-1250, x-mac-ce.
@@ -51,3 +79,15 @@ File Encoding Checker currently supports over forty charsets.
 * Turkish: iso-8859-3, iso-8859-9.
 * Western European: iso-8859-1, iso-8859-15, windows-1252.
 * Vietnamese: windows-1258.
+
+**UTF-7 is not supported.** .NET disables its UTF-7 encoder/decoder by default for security reasons (see [SYSLIB0001](https://learn.microsoft.com/dotnet/fundamentals/syslib-diagnostics/syslib0001)) — UTF-7 content can be crafted to evade validation that assumes a different encoding.
+
+## Credits
+
+The original project [EncodingChecker](https://archive.codeplex.com/?p=encodingchecker) on CodePlex was written by [Jeevan James](https://github.com/JeevanJames).
+
+For encoding detection, File Encoding Checker uses the [UtfUnknown](https://github.com/CharsetDetector/UTF-unknown) library, a C# port of [uchardet](https://gitlab.freedesktop.org/uchardet/uchardet), itself a C++ port of the original [Mozilla Universal Charset Detector](https://dxr.mozilla.org/mozilla/source/extensions/universalchardet/).
+
+## License
+
+[Mozilla Public License 2.0](./LICENSE)

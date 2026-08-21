@@ -10,7 +10,7 @@ namespace EncodingChecker
     public static class ListViewExtensions
     {
         [StructLayout(LayoutKind.Sequential)]
-        public struct HDITEM
+        public struct Hditem
         {
             public Mask mask;
             public int cxy;
@@ -50,10 +50,10 @@ namespace EncodingChecker
         public const int HDM_SETITEM = HDM_FIRST + 12;
 
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        public static extern IntPtr SendMessage(this IntPtr hWnd, UInt32 msg, IntPtr wParam, IntPtr lParam);
+        private static extern IntPtr SendMessage(this IntPtr hWnd, UInt32 msg, IntPtr wParam, IntPtr lParam);
 
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        public static extern IntPtr SendMessage(this IntPtr hWnd, UInt32 msg, IntPtr wParam, ref HDITEM lParam);
+        private static extern IntPtr SendMessage(this IntPtr hWnd, UInt32 msg, IntPtr wParam, ref Hditem lParam);
 
         public static void SetSortIcon(this ListView listViewControl, int columnIndex, SortOrder order)
         {
@@ -61,9 +61,9 @@ namespace EncodingChecker
             for (int columnNumber = 0; columnNumber <= listViewControl.Columns.Count - 1; columnNumber++)
             {
                 var columnPtr = new IntPtr(columnNumber);
-                var lvColumn = new HDITEM
+                var lvColumn = new Hditem
                 {
-                    mask = HDITEM.Mask.Format
+                    mask = Hditem.Mask.Format
                 };
 
                 if (SendMessage(columnHeader, HDM_GETITEM, columnPtr, ref lvColumn) == IntPtr.Zero)
@@ -76,18 +76,18 @@ namespace EncodingChecker
                     switch (order)
                     {
                         case SortOrder.Ascending:
-                            lvColumn.fmt &= ~HDITEM.Format.SortDown;
-                            lvColumn.fmt |= HDITEM.Format.SortUp;
+                            lvColumn.fmt &= ~Hditem.Format.SortDown;
+                            lvColumn.fmt |= Hditem.Format.SortUp;
                             break;
                         case SortOrder.Descending:
-                            lvColumn.fmt &= ~HDITEM.Format.SortUp;
-                            lvColumn.fmt |= HDITEM.Format.SortDown;
+                            lvColumn.fmt &= ~Hditem.Format.SortUp;
+                            lvColumn.fmt |= Hditem.Format.SortDown;
                             break;
                     }
                 }
                 else
                 {
-                    lvColumn.fmt &= ~HDITEM.Format.SortDown & ~HDITEM.Format.SortUp;
+                    lvColumn.fmt &= ~Hditem.Format.SortDown & ~Hditem.Format.SortUp;
                 }
 
                 if (SendMessage(columnHeader, HDM_SETITEM, columnPtr, ref lvColumn) == IntPtr.Zero)

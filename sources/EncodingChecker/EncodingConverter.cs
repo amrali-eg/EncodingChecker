@@ -1,0 +1,1344 @@
+using System;
+using System.Buffers;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading;
+
+namespace EncodingChecker;
+
+#region Public Types
+
+/// <summary>Machine-readable conversion failure code.</summary>
+internal enum ConversionErrorCode
+{
+    None = 0,
+    SourceOpenError,
+    SourceReadError,
+    SourceDecodeError,
+    TargetEncodeError,
+    TargetWriteError,
+    TargetReadError,
+    TargetDecodeError,
+    VerificationFailed,
+    UnicodeMismatch,
+    BomMismatch,
+    TemporaryFileError,
+    ReplacementError,
+    MetadataRestoreFailed,
+    CodePageProviderNotRegistered,
+    ReparsePointRejected,
+    SourceChangedDuringConversion,
+    Cancelled,
+    Unexpected,
+}
+
+/// <summary>Options controlling <see cref="EncodingConverter.Convert"/>.</summary>
+internal sealed record ConversionOptions
+{
+    /// <summary>Default conversion options.</summary>
+    internal static readonly ConversionOptions Default = new();
+
+    /// <summary>Streaming buffer size in bytes.</summary>
+    internal int BufferSize { get; init; } = EncodingConverter.DEFAULT_BUFFER_SIZE;
+
+    /// <summary>
+    /// Whether to write a BOM. Requires the target encoding to support a preamble.
+    /// </summary>
+    internal bool WriteBom { get; init; }
+
+    /// <summary>
+    /// Whether to preserve source attributes during in-place conversion.
+    /// Ignored when writing to a different destination. Defaults to <see langword="true"/>.
+    /// </summary>
+    internal bool PreserveAttributes { get; init; } = true;
+
+    /// <summary>
+    /// Whether to preserve source timestamps during in-place conversion.
+    /// Ignored for a different destination. Defaults to <see langword="false"/>.
+    /// </summary>
+    internal bool PreserveTimestamps { get; init; }
+}
+
+/// <summary>Progress reported by bytes processed.</summary>
+internal sealed record ConversionProgress
+{
+    internal long BytesProcessed { get; init; }
+
+    internal long TotalBytes { get; init; }
+
+    internal double Percentage { get; init; }
+}
+
+/// <summary>Structured result of an <see cref="EncodingConverter.Convert"/> call.</summary>
+internal sealed record ConversionResult
+{
+    internal bool Success { get; init; }
+
+    internal ConversionErrorCode ErrorCode { get; init; } = ConversionErrorCode.None;
+
+    internal string? ErrorMessage { get; init; }
+
+    internal Exception? Exception { get; init; }
+
+    internal required Encoding SourceEncoding { get; init; }
+
+    internal required Encoding TargetEncoding { get; init; }
+
+    /// <summary>Source bytes actually processed.</summary>
+    internal long SourceBytes { get; init; }
+
+    /// <summary>Target bytes written, including any BOM.</summary>
+    internal long TargetBytes { get; init; }
+
+    internal long UnicodeScalarsVerified { get; init; }
+
+    internal bool VerificationPassed { get; init; }
+
+    internal bool BomVerificationPassed { get; init; }
+
+    /// <summary>
+    /// Whether replacement is known to have occurred.
+    /// <see langword="false"/> means it did not occur;
+    /// <see langword="true"/> means it occurred;
+    /// <see langword="null"/> means the outcome is unknown.
+    /// </summary>
+    internal bool? ReplacementCommitted { get; init; }
+}
+
+#endregion
+
+/// <summary>
+/// Converts text files between encodings without data loss.
+/// Verifies converted content before replacement.
+/// </summary>
+internal static class EncodingConverter
+{
+    #region Constants
+
+    // Default: 256 KiB, capped to the source file size.
+    internal const int DEFAULT_BUFFER_SIZE = 256 * 1024;
+
+    // Minimum interval between progress reports.
+    private const long PROGRESS_REPORT_INTERVAL_MS = 100;
+
+    // Temporary file suffix.
+    private const string TEMP_FILE_SUFFIX = "unicodechecker.tmp";
+
+    #endregion
+
+    #region Public API
+
+    /// <summary>
+    /// Converts a file between encodings using a verified temporary file.
+    /// Uses atomic replacement when supported; fallback replacement is not atomic.
+    /// </summary>
+    /// <param name="sourcePath">Source file path.</param>
+    /// <param name="destinationPath">Destination path; may equal the source path.</param>
+    /// <param name="sourceEncoding">Detected source encoding.</param>
+    /// <param name="targetEncoding">Target encoding.</param>
+    /// <param name="options">Conversion options.</param>
+    /// <param name="progress">Optional progress callback.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A structured <see cref="ConversionResult"/>.</returns>
+    internal static ConversionResult Convert(
+        string sourcePath,
+        string destinationPath,
+        Encoding sourceEncoding,
+        Encoding targetEncoding,
+        ConversionOptions? options = null,
+        IProgress<ConversionProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(sourcePath);
+        ArgumentNullException.ThrowIfNull(destinationPath);
+        ArgumentNullException.ThrowIfNull(sourceEncoding);
+        ArgumentNullException.ThrowIfNull(targetEncoding);
+
+        options ??= ConversionOptions.Default;
+
+        if (options.BufferSize <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.BufferSize,
+                @"ConversionOptions.BufferSize must be greater than zero.");
+        }
+
+        // Reject impossible BOM requests before I/O.
+        if (options.WriteBom && targetEncoding.GetPreamble().Length == 0)
+        {
+            return Failure(
+                ConversionErrorCode.BomMismatch,
+                $"The requested target encoding ({targetEncoding.EncodingName}) " +
+                $"does not provide a byte-order mark, so the requested BOM " +
+                $"policy (WriteBom = true) cannot be satisfied.",
+                sourceEncoding,
+                targetEncoding);
+        }
+
+        string? tempPath = null;
+
+        // Keep progress counters available to error handlers.
+        long sourceBytesProcessed = 0;
+        long targetBytesWritten = 0;
+
+        try
+        {
+            bool sameFile = IsSameFile(sourcePath, destinationPath);
+            long capturedLength;
+            DateTime capturedLastWriteUtc;
+            DateTime capturedCreationTimeUtc;
+            DateTime capturedLastAccessTimeUtc;
+            FileAttributes capturedAttributes;
+            int effectiveBufferSize;
+            ContentDigest sourceDigest;
+
+            // Open first so metadata describes the file held by this handle.
+            using (FileStream sourceStream = RunIoStage(
+                       ConversionErrorCode.SourceOpenError,
+                       "Failed to open the source file",
+                       () => OpenReadShared(sourcePath, options.BufferSize)))
+            {
+                FileInfo sourceInfo = new(sourcePath);
+
+                if (IsReparsePoint(sourceInfo))
+                {
+                    return Failure(
+                        ConversionErrorCode.ReparsePointRejected,
+                        "The source is a symbolic link or other reparse point; " +
+                        "conversion was rejected.",
+                        sourceEncoding,
+                        targetEncoding);
+                }
+
+                capturedLength = sourceInfo.Length;
+                capturedLastWriteUtc = sourceInfo.LastWriteTimeUtc;
+                capturedCreationTimeUtc = sourceInfo.CreationTimeUtc;
+                capturedLastAccessTimeUtc = sourceInfo.LastAccessTimeUtc;
+                capturedAttributes = sourceInfo.Attributes;
+
+                // Limit the buffer to the source size while keeping it at least 1.
+                effectiveBufferSize =
+                    (int)Math.Max(1, Math.Min(options.BufferSize, capturedLength));
+
+                tempPath = CreateTempFilePath(destinationPath);
+
+                string path = tempPath;
+                using FileStream tempStream = RunIoStage(
+                    ConversionErrorCode.TemporaryFileError,
+                    "Failed to create the temporary output file",
+                    () => CreateTempStream(path, effectiveBufferSize));
+
+                // Consume a compatible source BOM; its absence is allowed.
+                int sourcePreambleLength = RunIoStage(
+                    ConversionErrorCode.SourceReadError,
+                    "Failed to read the source file's leading bytes",
+                    () => ConsumePreambleIfPresent(sourceStream, sourceEncoding));
+
+                sourceBytesProcessed += sourcePreambleLength;
+
+                if (options.WriteBom)
+                {
+                    byte[] preamble = targetEncoding.GetPreamble();
+
+                    if (preamble.Length > 0)
+                    {
+                        tempStream.Write(preamble, 0, preamble.Length);
+                        targetBytesWritten += preamble.Length;
+                    }
+                }
+
+                Decoder sourceDecoder = MakeStrictDecoder(sourceEncoding);
+                Encoder targetEncoder = MakeStrictEncoder(targetEncoding);
+
+                sourceDigest = StreamConvert(
+                    sourceStream,
+                    tempStream,
+                    sourceEncoding,
+                    sourceDecoder,
+                    targetEncoding,
+                    targetEncoder,
+                    effectiveBufferSize,
+                    capturedLength,
+                    progress,
+                    cancellationToken,
+                    ref sourceBytesProcessed,
+                    ref targetBytesWritten);
+
+                try
+                {
+                    // Flush buffered data to storage before verification.
+                    tempStream.Flush(flushToDisk: true);
+                }
+                catch (IOException ex)
+                {
+                    throw new ConversionStageException(
+                        ConversionErrorCode.TargetWriteError,
+                        $"Failed to flush the temporary output file: {ex.Message}",
+                        ex);
+                }
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // Sanity-check that the source did not change during conversion.
+            FileInfo recheckInfo = new(sourcePath);
+
+            if (recheckInfo.Length != capturedLength ||
+                recheckInfo.LastWriteTimeUtc != capturedLastWriteUtc)
+            {
+                return Failure(
+                    ConversionErrorCode.SourceChangedDuringConversion,
+                    "The source file changed while it was being converted.",
+                    sourceEncoding,
+                    targetEncoding) with
+                {
+                    SourceBytes = sourceBytesProcessed,
+                    TargetBytes = targetBytesWritten,
+                };
+            }
+
+            // Verify length, BOM, and decoded content.
+            VerificationOutcome verification = VerifyTarget(
+                sourceDigest,
+                tempPath,
+                targetEncoding,
+                options.WriteBom,
+                targetBytesWritten,
+                effectiveBufferSize,
+                cancellationToken);
+
+            if (!verification.Success)
+            {
+                return new ConversionResult
+                {
+                    Success = false,
+                    ErrorCode = verification.ErrorCode,
+                    ErrorMessage = verification.Message,
+                    SourceEncoding = sourceEncoding,
+                    TargetEncoding = targetEncoding,
+                    SourceBytes = sourceBytesProcessed,
+                    TargetBytes = targetBytesWritten,
+                    UnicodeScalarsVerified = verification.ScalarsCompared,
+                    VerificationPassed = false,
+                    BomVerificationPassed = verification.BomVerified,
+                    ReplacementCommitted = false,
+                };
+            }
+
+            // Final cancellation checkpoint before installation.
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // Restore source metadata on the temp file before installation.
+            if (sameFile && (options.PreserveTimestamps || options.PreserveAttributes))
+            {
+                string? metadataError = RestoreTempFileMetadata(
+                    tempPath,
+                    options,
+                    capturedAttributes,
+                    capturedCreationTimeUtc,
+                    capturedLastWriteUtc,
+                    capturedLastAccessTimeUtc);
+
+                if (metadataError is not null)
+                {
+                    return new ConversionResult
+                    {
+                        Success = false,
+                        ErrorCode = ConversionErrorCode.MetadataRestoreFailed,
+                        ErrorMessage = "Content conversion succeeded and content verification " +
+                                       "succeeded, but required metadata could not be restored " +
+                                       $"to the converted file before installation: {metadataError} " +
+                                       "The original destination was left unmodified.",
+                        SourceEncoding = sourceEncoding,
+                        TargetEncoding = targetEncoding,
+                        SourceBytes = sourceBytesProcessed,
+                        TargetBytes = targetBytesWritten,
+                        UnicodeScalarsVerified = verification.ScalarsCompared,
+                        VerificationPassed = true,
+                        BomVerificationPassed = true,
+                        ReplacementCommitted = false,
+                    };
+                }
+            }
+
+            // Install only after verification and metadata restoration succeed.
+            ConversionErrorCode? replaceError = AtomicReplace(
+                tempPath,
+                destinationPath,
+                sameFile,
+                out string? replaceErrorMessage,
+                out bool metadataRestoreFailed,
+                out bool? replacementCommitted);
+
+            if (replaceError is not null)
+            {
+                return new ConversionResult
+                {
+                    Success = false,
+                    ErrorCode = replaceError.Value,
+                    ErrorMessage = replaceErrorMessage,
+                    SourceEncoding = sourceEncoding,
+                    TargetEncoding = targetEncoding,
+                    SourceBytes = sourceBytesProcessed,
+                    TargetBytes = targetBytesWritten,
+                    UnicodeScalarsVerified = verification.ScalarsCompared,
+                    VerificationPassed = true,
+                    BomVerificationPassed = true,
+                    ReplacementCommitted = replacementCommitted,
+                };
+            }
+
+            tempPath = null;
+
+            return new ConversionResult
+            {
+                // Replacement succeeded; only destination metadata restoration can fail here.
+                Success = !metadataRestoreFailed,
+                ErrorCode = metadataRestoreFailed
+                    ? ConversionErrorCode.MetadataRestoreFailed
+                    : ConversionErrorCode.None,
+                ErrorMessage = metadataRestoreFailed
+                    ? "Content conversion succeeded, content verification succeeded, and file " +
+                      "replacement succeeded, but restoring the original destination file's " +
+                      "own attributes failed."
+                    : null,
+                SourceEncoding = sourceEncoding,
+                TargetEncoding = targetEncoding,
+                SourceBytes = sourceBytesProcessed,
+                TargetBytes = targetBytesWritten,
+                UnicodeScalarsVerified = verification.ScalarsCompared,
+                VerificationPassed = true,
+                BomVerificationPassed = true,
+                ReplacementCommitted = true,
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            return Failure(
+                ConversionErrorCode.Cancelled,
+                "The conversion was cancelled.",
+                sourceEncoding,
+                targetEncoding,
+                sourceBytes: sourceBytesProcessed,
+                targetBytes: targetBytesWritten);
+        }
+        catch (ConversionStageException ex)
+        {
+            // Preserve the error code for the failed I/O stage.
+            return Failure(
+                ex.ErrorCode,
+                ex.Message,
+                sourceEncoding,
+                targetEncoding,
+                ex.InnerException,
+                sourceBytesProcessed,
+                targetBytesWritten);
+        }
+        catch (DecoderFallbackException ex)
+        {
+            return Failure(
+                ConversionErrorCode.SourceDecodeError,
+                $"The source file could not be decoded using " +
+                $"{sourceEncoding.EncodingName}: {DescribeDecoderFailure(ex)}",
+                sourceEncoding,
+                targetEncoding,
+                ex,
+                sourceBytesProcessed,
+                targetBytesWritten);
+        }
+        catch (EncoderFallbackException ex)
+        {
+            return Failure(
+                ConversionErrorCode.TargetEncodeError,
+                $"Character {DescribeEncoderFailure(ex)} cannot be represented " +
+                $"by {targetEncoding.EncodingName}.",
+                sourceEncoding,
+                targetEncoding,
+                ex,
+                sourceBytesProcessed,
+                targetBytesWritten);
+        }
+        catch (NotSupportedException ex) when (IsMissingCodePageProvider(ex))
+        {
+            return Failure(
+                ConversionErrorCode.CodePageProviderNotRegistered,
+                "The requested target encoding requires a code-page provider " +
+                "that has not been registered. Call " +
+                "Encoding.RegisterProvider(CodePagesEncodingProvider.Instance) " +
+                "once during application startup.",
+                sourceEncoding,
+                targetEncoding,
+                ex,
+                sourceBytesProcessed,
+                targetBytesWritten);
+        }
+        catch (Exception ex)
+        {
+            // Preserve unexpected exceptions for diagnostics.
+            return Failure(
+                ConversionErrorCode.Unexpected,
+                ex.Message,
+                sourceEncoding,
+                targetEncoding,
+                ex,
+                sourceBytesProcessed,
+                targetBytesWritten);
+        }
+        finally
+        {
+            // Remove the temp file unless it was installed.
+            TryDeleteTempFile(tempPath);
+        }
+    }
+
+    #endregion
+
+    #region Strict Encoding Configuration
+
+    /// <summary>Creates a decoder with strict fallback.</summary>
+    private static Decoder MakeStrictDecoder(Encoding encoding)
+    {
+        Decoder decoder = encoding.GetDecoder();
+        decoder.Fallback = DecoderFallback.ExceptionFallback;
+        return decoder;
+    }
+
+    /// <summary>
+    /// Creates an encoder with strict fallback.
+    /// </summary>
+    /// <remarks>
+    /// Some code-page encodings may still replace unmappable characters with '?' despite
+    /// <see cref="Encoder.Fallback"/>. Post-write Unicode verification detects such loss
+    /// before installation. Unicode encodings and ASCII do not have this limitation.
+    /// </remarks>
+    private static Encoder MakeStrictEncoder(Encoding encoding)
+    {
+        Encoder encoder = encoding.GetEncoder();
+        encoder.Fallback = EncoderFallback.ExceptionFallback;
+        return encoder;
+    }
+
+    #endregion
+
+    #region Conversion Pipeline
+
+    /// <summary>
+    /// Converts the source stream with persistent decoder/encoder state and hashes decoded content.
+    /// </summary>
+    private static ContentDigest StreamConvert(
+        FileStream sourceStream,
+        FileStream targetStream,
+        Encoding sourceEncoding,
+        Decoder sourceDecoder,
+        Encoding targetEncoding,
+        Encoder targetEncoder,
+        int bufferSize,
+        long totalSourceBytes,
+        IProgress<ConversionProgress>? progress,
+        CancellationToken cancellationToken,
+        ref long sourceBytesProcessed,
+        ref long targetBytesWritten)
+    {
+        byte[] readBuffer = ArrayPool<byte>.Shared.Rent(bufferSize);
+        char[] charBuffer =
+            ArrayPool<char>.Shared.Rent(sourceEncoding.GetMaxCharCount(bufferSize));
+        byte[] writeBuffer =
+            ArrayPool<byte>.Shared.Rent(targetEncoding.GetMaxByteCount(charBuffer.Length));
+
+        try
+        {
+            using IncrementalHash sourceHash =
+                IncrementalHash.CreateHash(ContentDigestAlgorithm);
+
+            long scalarCount = 0;
+            long codeUnitCount = 0;
+            long lastProgressReportTicks = Environment.TickCount64;
+            bool endOfStream;
+
+            do
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                int bytesRead;
+
+                try
+                {
+                    bytesRead = sourceStream.Read(readBuffer, 0, bufferSize);
+                }
+                catch (IOException ex)
+                {
+                    throw new ConversionStageException(
+                        ConversionErrorCode.SourceReadError,
+                        $"Failed to read the source file: {ex.Message}",
+                        ex);
+                }
+
+                endOfStream = bytesRead == 0;
+                sourceBytesProcessed += bytesRead;
+
+                // Flush only at EOF to detect incomplete trailing sequences.
+                int charsWritten = sourceDecoder.GetChars(
+                    readBuffer,
+                    0,
+                    bytesRead,
+                    charBuffer,
+                    0,
+                    flush: endOfStream);
+
+                if (charsWritten > 0)
+                {
+                    ReadOnlySpan<char> chars = charBuffer.AsSpan(0, charsWritten);
+
+                    sourceHash.AppendData(MemoryMarshal.AsBytes(chars));
+                    codeUnitCount += charsWritten;
+
+                    foreach (Rune _ in chars.EnumerateRunes())
+                    {
+                        scalarCount++;
+                    }
+                }
+
+                int bytesWritten = targetEncoder.GetBytes(
+                    charBuffer,
+                    0,
+                    charsWritten,
+                    writeBuffer,
+                    0,
+                    flush: endOfStream);
+
+                if (bytesWritten > 0)
+                {
+                    try
+                    {
+                        targetStream.Write(writeBuffer, 0, bytesWritten);
+                    }
+                    catch (IOException ex)
+                    {
+                        throw new ConversionStageException(
+                            ConversionErrorCode.TargetWriteError,
+                            $"Failed to write the target file: {ex.Message}",
+                            ex);
+                    }
+
+                    targetBytesWritten += bytesWritten;
+                }
+
+                // Throttle progress reports; cancellation remains immediate.
+                if (progress is not null)
+                {
+                    long nowTicks = Environment.TickCount64;
+
+                    if (endOfStream ||
+                        nowTicks - lastProgressReportTicks >= PROGRESS_REPORT_INTERVAL_MS)
+                    {
+                        lastProgressReportTicks = nowTicks;
+
+                        // Ignore callback failures; allow cancellation through.
+                        try
+                        {
+                            progress.Report(new ConversionProgress
+                            {
+                                BytesProcessed = sourceBytesProcessed,
+                                TotalBytes = totalSourceBytes,
+                                Percentage = totalSourceBytes > 0
+                                    ? Math.Min(
+                                        100.0,
+                                        (double)sourceBytesProcessed / totalSourceBytes * 100.0)
+                                    : 100.0,
+                            });
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch
+                        {
+                            // Progress is observational.
+                        }
+                    }
+                }
+            }
+            while (!endOfStream);
+
+            return new ContentDigest(
+                sourceHash.GetHashAndReset(),
+                scalarCount,
+                codeUnitCount);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(readBuffer);
+            ArrayPool<char>.Shared.Return(charBuffer);
+            ArrayPool<byte>.Shared.Return(writeBuffer);
+        }
+    }
+
+    #endregion
+
+    #region Target Verification
+
+    private sealed record VerificationOutcome
+    {
+        internal bool Success { get; init; }
+        internal ConversionErrorCode ErrorCode { get; init; }
+        internal string? Message { get; init; }
+        internal long ScalarsCompared { get; init; }
+
+        /// <summary>
+        /// Whether the target BOM state was confirmed to match the requested policy.
+        /// </summary>
+        internal bool BomVerified { get; init; }
+    }
+
+    // SHA-256 is used only for same-run content verification.
+    private static readonly HashAlgorithmName ContentDigestAlgorithm = HashAlgorithmName.SHA256;
+
+    /// <summary>
+    /// Verifies target length, BOM, and decoded content without rereading the source.
+    /// </summary>
+    private static VerificationOutcome VerifyTarget(
+        ContentDigest sourceDigest,
+        string tempPath,
+        Encoding targetEncoding,
+        bool bomExpected,
+        long expectedTargetBytes,
+        int bufferSize,
+        CancellationToken cancellationToken)
+    {
+        // Retained so decode failures can report whether BOM verification completed.
+        bool bomVerified = false;
+
+        try
+        {
+            using FileStream targetStream = RunIoStage(
+                ConversionErrorCode.TargetReadError,
+                "Failed to reopen the temporary output file for verification",
+                () => OpenReadShared(tempPath, bufferSize));
+
+            // Verify the expected byte count.
+            if (targetStream.Length != expectedTargetBytes)
+            {
+                return new VerificationOutcome
+                {
+                    Success = false,
+                    ErrorCode = ConversionErrorCode.VerificationFailed,
+                    Message = $"The generated file is {targetStream.Length} byte(s), but " +
+                              $"{expectedTargetBytes} byte(s) were written during conversion.",
+                };
+            }
+
+            if (targetEncoding.GetPreamble().Length > 0)
+            {
+                bool actualBomPresent;
+
+                try
+                {
+                    actualBomPresent =
+                        ConsumePreambleIfPresent(targetStream, targetEncoding) > 0;
+                }
+                catch (IOException ex)
+                {
+                    throw new ConversionStageException(
+                        ConversionErrorCode.TargetReadError,
+                        $"Failed to read the target file's leading bytes: {ex.Message}",
+                        ex);
+                }
+
+                if (actualBomPresent != bomExpected)
+                {
+                    return new VerificationOutcome
+                    {
+                        Success = false,
+                        ErrorCode = ConversionErrorCode.BomMismatch,
+                        Message = bomExpected
+                            ? "The target file is missing the expected byte-order mark."
+                            : "The target file unexpectedly contains a byte-order mark.",
+                    };
+                }
+            }
+
+            // BOM state is now confirmed.
+            bomVerified = true;
+
+            Decoder targetDecoder = MakeStrictDecoder(targetEncoding);
+
+            ContentDigest targetDigest = ComputeContentDigest(
+                targetStream,
+                targetEncoding,
+                targetDecoder,
+                bufferSize,
+                cancellationToken);
+
+            bool contentMatches =
+                sourceDigest.Hash.AsSpan().SequenceEqual(targetDigest.Hash);
+
+            if (contentMatches)
+            {
+                return new VerificationOutcome
+                {
+                    Success = true,
+                    ScalarsCompared = sourceDigest.ScalarCount,
+                    BomVerified = bomVerified,
+                };
+            }
+
+            string message =
+                sourceDigest.Utf16CodeUnitCount != targetDigest.Utf16CodeUnitCount
+                    ? $"Decoded content length differs from source: source decoded " +
+                      $"to {sourceDigest.ScalarCount} Unicode scalar(s) " +
+                      $"({sourceDigest.Utf16CodeUnitCount} UTF-16 code units), target " +
+                      $"decoded to {targetDigest.ScalarCount} scalar(s) " +
+                      $"({targetDigest.Utf16CodeUnitCount} UTF-16 code units)."
+                    : $"Decoded content differs from source (both decode to " +
+                      $"{sourceDigest.ScalarCount} Unicode scalar(s), but the " +
+                      $"content is not identical).";
+
+            return new VerificationOutcome
+            {
+                Success = false,
+                ErrorCode = ConversionErrorCode.UnicodeMismatch,
+                Message = message,
+                ScalarsCompared =
+                    Math.Min(sourceDigest.ScalarCount, targetDigest.ScalarCount),
+                BomVerified = bomVerified,
+            };
+        }
+        catch (DecoderFallbackException ex)
+        {
+            // Bytes were readable but invalid for the target encoding.
+            return new VerificationOutcome
+            {
+                Success = false,
+                ErrorCode = ConversionErrorCode.TargetDecodeError,
+                Message = $"The generated file could not be re-decoded for " +
+                          $"verification: {DescribeDecoderFailure(ex)}",
+                BomVerified = bomVerified,
+            };
+        }
+    }
+
+    private readonly record struct ContentDigest(
+        byte[] Hash,
+        long ScalarCount,
+        long Utf16CodeUnitCount);
+
+    /// <summary>
+    /// Hashes the exact decoded UTF-16 content and returns scalar/code-unit counts.
+    /// No normalization is performed.
+    /// </summary>
+    private static ContentDigest ComputeContentDigest(
+        Stream stream,
+        Encoding encoding,
+        Decoder decoder,
+        int bufferSize,
+        CancellationToken cancellationToken)
+    {
+        byte[] byteBuffer = ArrayPool<byte>.Shared.Rent(bufferSize);
+        char[] charBuffer =
+            ArrayPool<char>.Shared.Rent(encoding.GetMaxCharCount(bufferSize));
+
+        try
+        {
+            using IncrementalHash hash =
+                IncrementalHash.CreateHash(ContentDigestAlgorithm);
+
+            long scalarCount = 0;
+            long codeUnitCount = 0;
+            bool endOfStream;
+
+            do
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                int bytesRead;
+
+                try
+                {
+                    bytesRead = stream.Read(byteBuffer, 0, bufferSize);
+                }
+                catch (IOException ex)
+                {
+                    throw new ConversionStageException(
+                        ConversionErrorCode.TargetReadError,
+                        $"Failed to read the target file: {ex.Message}",
+                        ex);
+                }
+
+                endOfStream = bytesRead == 0;
+
+                int charsWritten = decoder.GetChars(
+                    byteBuffer,
+                    0,
+                    bytesRead,
+                    charBuffer,
+                    0,
+                    flush: endOfStream);
+
+                if (charsWritten > 0)
+                {
+                    ReadOnlySpan<char> chars = charBuffer.AsSpan(0, charsWritten);
+
+                    hash.AppendData(MemoryMarshal.AsBytes(chars));
+                    codeUnitCount += charsWritten;
+
+                    foreach (Rune _ in chars.EnumerateRunes())
+                    {
+                        scalarCount++;
+                    }
+                }
+            }
+            while (!endOfStream);
+
+            return new ContentDigest(
+                hash.GetHashAndReset(),
+                scalarCount,
+                codeUnitCount);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(byteBuffer);
+            ArrayPool<char>.Shared.Return(charBuffer);
+        }
+    }
+
+    #endregion
+
+    #region File I/O
+
+    /// <summary>
+    /// Consumes the encoding preamble if present; otherwise restores the original position.
+    /// </summary>
+    private static int ConsumePreambleIfPresent(
+        FileStream stream,
+        Encoding encoding)
+    {
+        byte[] preamble = encoding.GetPreamble();
+
+        if (preamble.Length == 0)
+            return 0;
+
+        long startPosition = stream.Position;
+        byte[] header = new byte[preamble.Length];
+
+        int totalRead =
+            stream.ReadAtLeast(header, header.Length, throwOnEndOfStream: false);
+
+        if (totalRead == preamble.Length &&
+            header.AsSpan(0, totalRead).SequenceEqual(preamble))
+        {
+            return preamble.Length;
+        }
+
+        stream.Position = startPosition;
+        return 0;
+    }
+
+    /// <summary>
+    /// Opens a file for shared reads while blocking writes and deletion.
+    /// </summary>
+    private static FileStream OpenReadShared(string path, int bufferSize)
+    {
+        return new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize,
+            FileOptions.SequentialScan);
+    }
+
+    /// <summary>
+    /// Creates a unique temp-file path beside the destination.
+    /// </summary>
+    private static string CreateTempFilePath(string destinationPath)
+    {
+        string fullDestination = Path.GetFullPath(destinationPath);
+        string? directory = Path.GetDirectoryName(fullDestination);
+
+        if (string.IsNullOrEmpty(directory))
+        {
+            throw new IOException(
+                $"Could not determine a directory for destination path " +
+                $"'{destinationPath}'.");
+        }
+
+        string fileName = Path.GetFileName(fullDestination);
+
+        return Path.Combine(
+            directory,
+            $"{fileName}.{Guid.NewGuid():N}.{TEMP_FILE_SUFFIX}");
+    }
+
+    /// <summary>
+    /// Creates the temp file exclusively.
+    /// </summary>
+    private static FileStream CreateTempStream(string tempPath, int bufferSize)
+    {
+        return new FileStream(
+            tempPath,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize,
+            FileOptions.SequentialScan);
+    }
+
+    /// <summary>
+    /// Deletes the temp file if it still exists.
+    /// </summary>
+    private static void TryDeleteTempFile(string? tempPath)
+    {
+        if (tempPath is null)
+            return;
+
+        try
+        {
+            if (File.Exists(tempPath))
+            {
+                File.SetAttributes(tempPath, FileAttributes.Normal);
+                File.Delete(tempPath);
+            }
+        }
+        catch
+        {
+            // Cleanup failure does not affect the conversion result.
+        }
+    }
+
+    #endregion
+
+    #region Destination Handling
+
+    /// <summary>
+    /// Checks normalized path equality; does not resolve filesystem aliases such as hard links.
+    /// </summary>
+    private static bool IsSameFile(
+        string sourcePath,
+        string destinationPath)
+    {
+        string fullSource = Path.GetFullPath(sourcePath);
+        string fullDestination = Path.GetFullPath(destinationPath);
+
+        StringComparison comparison =
+            OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+
+        return string.Equals(fullSource, fullDestination, comparison);
+    }
+
+    /// <summary>Returns true for symbolic links and other reparse points.</summary>
+    private static bool IsReparsePoint(FileInfo info)
+    {
+        return info.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+               info.LinkTarget is not null;
+    }
+
+    /// <summary>
+    /// Applies requested source timestamps and attributes to the temp file before installation.
+    /// </summary>
+    /// <remarks>
+    /// Preserves only <see cref="FileAttributes"/> and the three standard timestamps.
+    /// ACLs, alternate streams, compression, encryption, extended attributes, and other
+    /// filesystem-specific metadata are not preserved.
+    /// </remarks>
+    /// <returns>
+    /// <see langword="null"/> on success; otherwise a failure description.
+    /// </returns>
+    private static string? RestoreTempFileMetadata(
+        string tempPath,
+        ConversionOptions options,
+        FileAttributes capturedAttributes,
+        DateTime capturedCreationTimeUtc,
+        DateTime capturedLastWriteTimeUtc,
+        DateTime capturedLastAccessTimeUtc)
+    {
+        if (options.PreserveTimestamps)
+        {
+            try
+            {
+                File.SetCreationTimeUtc(tempPath, capturedCreationTimeUtc);
+                File.SetLastWriteTimeUtc(tempPath, capturedLastWriteTimeUtc);
+                File.SetLastAccessTimeUtc(tempPath, capturedLastAccessTimeUtc);
+            }
+            catch (Exception ex) when (
+                ex is IOException or UnauthorizedAccessException
+                    or ArgumentException or PlatformNotSupportedException)
+            {
+                return $"Timestamp restoration failed: {ex.Message}";
+            }
+        }
+
+        if (options.PreserveAttributes)
+        {
+            try
+            {
+                File.SetAttributes(tempPath, capturedAttributes);
+            }
+            catch (Exception ex) when (
+                ex is IOException or UnauthorizedAccessException
+                    or ArgumentException or PlatformNotSupportedException)
+            {
+                return $"Attribute restoration failed: {ex.Message}";
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Installs the verified temp file, using atomic replacement when available.
+    /// Also handles destination ReadOnly state.
+    /// </summary>
+    /// <param name="metadataRestoreFailed">Indicates whether metadata restoration failed.</param>
+    /// <param name="replacementCommitted">
+    /// True if replacement occurred, false if it did not, or null if the outcome is unknown.
+    /// </param>
+    /// <param name="destinationPath">The path to the destination file.</param>
+    /// <param name="sameFile">Indicates whether the source and destination files are the same.</param>
+    /// <param name="tempPath">The path to the temporary file.</param>
+    /// <param name="errorMessage">A message describing the error, if the operation fails.</param>
+    /// <returns><see langword="null"/> on success; otherwise the failure code.</returns>
+    private static ConversionErrorCode? AtomicReplace(
+        string tempPath,
+        string destinationPath,
+        bool sameFile,
+        out string? errorMessage,
+        out bool metadataRestoreFailed,
+        out bool? replacementCommitted)
+    {
+        errorMessage = null;
+        metadataRestoreFailed = false;
+        replacementCommitted = false;
+
+        try
+        {
+            FileInfo destinationInfo = new(destinationPath);
+            bool destinationExists = destinationInfo.Exists;
+
+            // Final reparse-point check before replacement.
+            if (destinationExists && IsReparsePoint(destinationInfo))
+            {
+                errorMessage =
+                    "The destination is a symbolic link or other reparse point; " +
+                    "replacement was rejected.";
+                return ConversionErrorCode.ReparsePointRejected;
+            }
+
+            // Temporarily clear ReadOnly so replacement can proceed.
+            FileAttributes? clearedAttributes =
+                destinationExists &&
+                destinationInfo.Attributes.HasFlag(FileAttributes.ReadOnly)
+                    ? destinationInfo.Attributes
+                    : null;
+
+            try
+            {
+                if (clearedAttributes is not null)
+                {
+                    File.SetAttributes(
+                        destinationPath,
+                        clearedAttributes.Value & ~FileAttributes.ReadOnly);
+                }
+
+                if (destinationExists)
+                {
+                    try
+                    {
+                        // Ignore metadata outside this converter's preservation contract.
+                        File.Replace(
+                            tempPath,
+                            destinationPath,
+                            destinationBackupFileName: null,
+                            ignoreMetadataErrors: true);
+                    }
+                    catch (PlatformNotSupportedException)
+                    {
+                        // Fallback is not guaranteed to be atomic.
+                        File.Move(tempPath, destinationPath, overwrite: true);
+                    }
+                }
+                else
+                {
+                    File.Move(tempPath, destinationPath);
+                }
+            }
+            catch (Exception replaceEx) when (
+                replaceEx is IOException or UnauthorizedAccessException
+                    or ArgumentException or NotSupportedException)
+            {
+                // A failed rename may have consumed the temp file; use its presence to classify
+                // the outcome without incorrectly modifying the destination.
+                bool tempStillExists = File.Exists(tempPath);
+
+                string? rollbackError = null;
+
+                if (tempStillExists)
+                {
+                    // Replacement did not consume the temp file; restore ReadOnly if changed.
+                    if (clearedAttributes is not null)
+                    {
+                        try
+                        {
+                            File.SetAttributes(
+                                destinationPath,
+                                clearedAttributes.Value);
+                        }
+                        catch (Exception rollbackEx)
+                        {
+                            rollbackError =
+                                $" The original ReadOnly attribute could also not be " +
+                                $"restored: {rollbackEx.Message}";
+                        }
+                    }
+
+                    replacementCommitted = false;
+                    errorMessage =
+                        $"Failed to install the converted file: {replaceEx.Message}" +
+                        rollbackError;
+                }
+                else
+                {
+                    // The destination state cannot be determined reliably.
+                    replacementCommitted = null;
+                    errorMessage =
+                        $"Failed to install the converted file: {replaceEx.Message} " +
+                        "The temporary file was no longer present afterward, so it is " +
+                        "unclear whether the destination was actually replaced despite " +
+                        "this error — inspect the destination directly if that matters.";
+                }
+
+                return ConversionErrorCode.ReplacementError;
+            }
+
+            replacementCommitted = true;
+
+            // For a different destination, restore its original ReadOnly state.
+            if (!sameFile && clearedAttributes is not null)
+            {
+                try
+                {
+                    File.SetAttributes(
+                        destinationPath,
+                        clearedAttributes.Value);
+                }
+                catch (Exception ex) when (
+                    ex is IOException or UnauthorizedAccessException
+                        or ArgumentException or NotSupportedException)
+                {
+                    metadataRestoreFailed = true;
+                    errorMessage =
+                        $"Destination attribute restoration failed: {ex.Message}";
+                }
+            }
+
+            return null;
+        }
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException
+                or ArgumentException or NotSupportedException)
+        {
+            errorMessage = $"Failed to install the converted file: {ex.Message}";
+            return ConversionErrorCode.ReplacementError;
+        }
+    }
+
+    #endregion
+
+    #region Error Classification
+
+    // Carries the stage-specific conversion error code.
+    private sealed class ConversionStageException : IOException
+    {
+        internal ConversionErrorCode ErrorCode { get; }
+
+        internal ConversionStageException(
+            ConversionErrorCode errorCode,
+            string message,
+            Exception inner)
+            : base(message, inner)
+        {
+            ErrorCode = errorCode;
+        }
+    }
+
+    /// <summary>Runs an I/O operation and assigns its stage-specific error code.</summary>
+    private static T RunIoStage<T>(
+        ConversionErrorCode errorCode,
+        string stageDescription,
+        Func<T> action)
+    {
+        try
+        {
+            return action();
+        }
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException)
+        {
+            throw new ConversionStageException(
+                errorCode,
+                $"{stageDescription}: {ex.Message}",
+                ex);
+        }
+    }
+
+    #endregion
+
+    #region Result Helpers
+
+    private static ConversionResult Failure(
+        ConversionErrorCode errorCode,
+        string message,
+        Encoding sourceEncoding,
+        Encoding targetEncoding,
+        Exception? exception = null,
+        long sourceBytes = 0,
+        long targetBytes = 0)
+    {
+        return new ConversionResult
+        {
+            Success = false,
+            ErrorCode = errorCode,
+            ErrorMessage = message,
+            Exception = exception,
+            SourceEncoding = sourceEncoding,
+            TargetEncoding = targetEncoding,
+            SourceBytes = sourceBytes,
+            TargetBytes = targetBytes,
+            ReplacementCommitted = false,
+        };
+    }
+
+    private static string DescribeDecoderFailure(DecoderFallbackException ex)
+    {
+        // Index is relative to the failing read chunk.
+        return
+            $"invalid byte sequence (offset {ex.Index} within the failing read chunk).";
+    }
+
+    private static string DescribeEncoderFailure(EncoderFallbackException ex)
+    {
+        if (ex.IsUnknownSurrogate())
+        {
+            int codePoint =
+                char.ConvertToUtf32(ex.CharUnknownHigh, ex.CharUnknownLow);
+
+            return $"U+{codePoint:X4}";
+        }
+
+        return $"U+{(int)ex.CharUnknown:X4}";
+    }
+
+    private static bool IsMissingCodePageProvider(NotSupportedException ex)
+    {
+        // Current BCL exposes this condition only through the exception message.
+        return ex.Message.Contains(
+            "RegisterProvider",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    #endregion
+}

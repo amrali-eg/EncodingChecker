@@ -6,36 +6,49 @@ namespace EncodingChecker
 {
     public class ListViewColumnSorter : IComparer
     {
-        private readonly CaseInsensitiveComparer _objectCompare;
+        private readonly CaseInsensitiveComparer _objectCompare = new();
 
         public int SortColumn { get; set; }
 
         public SortOrder Order { get; set; }
 
-        public ListViewColumnSorter()
+        public int Compare(object? x, object? y)
         {
-            SortColumn = 0;
-            Order = SortOrder.None;
-            _objectCompare = new CaseInsensitiveComparer();
+            if (x is not ListViewItem item1)
+                throw new ArgumentNullException(nameof(x));
+
+            if (y is not ListViewItem item2)
+                throw new ArgumentNullException(nameof(y));
+
+            int result = _objectCompare.Compare(
+                item1.SubItems[SortColumn].Text,
+                item2.SubItems[SortColumn].Text);
+
+            // Files are added in non-deterministic (parallel-scan) completion order, so
+            // ties on the sort column need a stable tiebreaker across the other columns -
+            // otherwise equal rows reshuffle between runs even though the sort is applied.
+            if (result == 0)
+                result = CompareRemainingColumns(item1, item2);
+
+            return Order switch
+            {
+                SortOrder.Ascending => result,
+                SortOrder.Descending => -result,
+                _ => 0,
+            };
         }
 
-        public int Compare(object x, object y)
+        private static int CompareRemainingColumns(ListViewItem x, ListViewItem y)
         {
-            ListViewItem listViewItem = (ListViewItem)x;
-            if (listViewItem == null) throw new ArgumentNullException(nameof(listViewItem));
+            int count = Math.Min(x.SubItems.Count, y.SubItems.Count);
 
-            ListViewItem listViewItem2 = (ListViewItem)y;
-            if (listViewItem2 == null) throw new ArgumentNullException(nameof(listViewItem2));
+            for (int i = 0; i < count; i++)
+            {
+                int result = string.CompareOrdinal(x.SubItems[i].Text, y.SubItems[i].Text);
+                if (result != 0)
+                    return result;
+            }
 
-            int compareResult = _objectCompare.Compare(a: listViewItem.SubItems[index: SortColumn].Text, b: listViewItem2.SubItems[index: SortColumn].Text);
-            if (Order == SortOrder.Ascending)
-            {
-                return compareResult;
-            }
-            if (Order == SortOrder.Descending)
-            {
-                return -compareResult;
-            }
             return 0;
         }
     }

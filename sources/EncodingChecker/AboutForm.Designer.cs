@@ -29,7 +29,6 @@
         private void InitializeComponent()
         {
             System.Windows.Forms.Label lblProductName;
-            System.Windows.Forms.Label lblVersion;
             System.Windows.Forms.Label lblCredits;
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(AboutForm));
             this.btnClose = new System.Windows.Forms.Button();
@@ -62,7 +61,7 @@
             lblVersion.Name = "lblVersion";
             lblVersion.Size = new System.Drawing.Size(60, 18);
             lblVersion.TabIndex = 1;
-            lblVersion.Text = "Version 2.0";
+            lblVersion.Text = "Version 3.0";
             lblVersion.UseCompatibleTextRendering = true;
             // 
             // lblCredits
@@ -198,6 +197,7 @@
         #endregion
 
         private System.Windows.Forms.Button btnClose;
+        private System.Windows.Forms.Label lblVersion;
         private System.Windows.Forms.LinkLabel lblHomepage;
         private System.Windows.Forms.LinkLabel lblAuthor;
         private System.Windows.Forms.LinkLabel lblLicense;

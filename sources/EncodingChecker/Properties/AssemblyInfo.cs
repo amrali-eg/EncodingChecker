@@ -1,6 +1,15 @@
 ﻿using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
+
+[assembly: InternalsVisibleTo("EncodingChecker.Tests")]
+
+// This assembly is Windows Forms and only runs on Windows. Setting this explicitly (normally
+// implied automatically by the "net10.0-windows" TargetFramework via SDK-generated assembly info,
+// which is disabled here since this handwritten file supplies the assembly attributes instead)
+// avoids CA1416 platform-compatibility warnings on every Windows Forms API call in this assembly.
+[assembly: SupportedOSPlatform("windows")]
 
 // General Information about an assembly is controlled through the following
 // set of attributes. Change these attribute values to modify the information
@@ -29,8 +38,8 @@ using System.Runtime.InteropServices;
 //      Build Number
 //      Revision
 //
-// You can specify all the values or you can default the Build and Revision Numbers
+// You can specify all the values, or you can default the Build and Revision Numbers
 // by using the '*' as shown below:
 // [assembly: AssemblyVersion("1.0.*")]
-[assembly: AssemblyVersion("2.0.1.0")]
-[assembly: AssemblyFileVersion("2.0.1.0")]
+[assembly: AssemblyVersion("3.0.0.0")]
+[assembly: AssemblyFileVersion("3.0.0.0")]
