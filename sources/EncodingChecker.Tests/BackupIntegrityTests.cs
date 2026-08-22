@@ -71,8 +71,8 @@ public sealed class BackupIntegrityTests : IDisposable
         var options = new ScanDirectoryOptions
         {
             BaseDirectory = _root,
-            // Exclude the pre-seeded stale .bak file itself from the scan's input set.
-            IncludePatterns = ["*.txt"],
+            // No IncludePatterns restriction: ScanEngine excludes *.bak on its own now
+            // (see Backup_WildcardInclude_NeverScansItsOwnBakOrTempFiles).
             Action = ScanAction.Convert,
             TargetCharset = "utf-8",
             TargetWriteBom = true,
@@ -84,6 +84,49 @@ public sealed class BackupIntegrityTests : IDisposable
 
         Assert.Equal(ConversionRowResult.Converted, Assert.Single(entries).Result);
         Assert.Equal(Encoding.ASCII.GetBytes(TestContent.Ascii), File.ReadAllBytes(backupPath));
+    }
+
+    [Fact]
+    public void Backup_WildcardInclude_NeverScansItsOwnBakOrTempFiles()
+    {
+        // Regression test: -Include "*" combined with -Backup must not re-scan the
+        // .bak files it just created, across repeated runs - doing so used to cascade
+        // (.bak, .bak.bak, ...) and race a file's own backup write against another
+        // worker independently reading/converting that same .bak as its own entry.
+        string path = Path.Combine(_root, "convert-me.txt");
+        File.WriteAllText(path, TestContent.Multilingual, new UnicodeEncoding(false, true));
+
+        // A leftover temp-conversion artifact, as could survive a crash mid-conversion.
+        File.WriteAllText(
+            Path.Combine(_root, $"other.txt.{Guid.NewGuid():N}.{EncodingConverter.TEMP_FILE_SUFFIX}"),
+            "leftover temp file content");
+
+        var options = new ScanDirectoryOptions
+        {
+            BaseDirectory = _root,
+            IncludePatterns = ["*"],
+            Action = ScanAction.Convert,
+            TargetCharset = "utf-8",
+            TargetWriteBom = false,
+            Backup = true,
+        };
+
+        var firstRun = new List<ConversionReportEntry>();
+        ScanEngine.ScanDirectory(options, firstRun.Add, CancellationToken.None);
+        Assert.Equal(ConversionRowResult.Converted, Assert.Single(firstRun).Result);
+
+        string backupPath = path + ".bak";
+        Assert.True(File.Exists(backupPath));
+        Assert.False(File.Exists(backupPath + ".bak"));
+
+        // Re-running over the same directory (now containing convert-me.txt.bak) must
+        // still see only the one real source file, not the backup it just wrote.
+        var secondRun = new List<ConversionReportEntry>();
+        ScanEngine.ScanDirectory(options, secondRun.Add, CancellationToken.None);
+
+        ConversionReportEntry onlyEntry = Assert.Single(secondRun);
+        Assert.Equal(path, onlyEntry.FilePath);
+        Assert.False(File.Exists(backupPath + ".bak"));
     }
 
     [Fact]

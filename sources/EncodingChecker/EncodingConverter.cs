@@ -123,8 +123,8 @@ internal static class EncodingConverter
     // Minimum interval between progress reports.
     private const long PROGRESS_REPORT_INTERVAL_MS = 100;
 
-    // Temporary file suffix.
-    private const string TEMP_FILE_SUFFIX = "unicodechecker.tmp";
+    // Temporary file suffix. Internal so ScanEngine can exclude these from scans too.
+    internal const string TEMP_FILE_SUFFIX = "unicodechecker.tmp";
 
     #endregion
 

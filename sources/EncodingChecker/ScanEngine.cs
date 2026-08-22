@@ -96,11 +96,23 @@ namespace EncodingChecker
             AttributesToSkip = FileAttributes.ReparsePoint,
         };
 
+        /// <summary>
+        /// Always excluded, regardless of -Include/-Exclude: the tool's own backup and
+        /// temporary-file artifacts. Without this, a broad include pattern (e.g. "*")
+        /// combined with -Backup re-scans previous runs' ".bak" files as ordinary input,
+        /// which cascades (.bak, .bak.bak, ...) and can race against another file's
+        /// concurrent backup write to the same path.
+        /// </summary>
+        private static bool IsAlwaysExcludedFile(string fileName) =>
+            fileName.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) ||
+            fileName.EndsWith("." + EncodingConverter.TEMP_FILE_SUFFIX, StringComparison.OrdinalIgnoreCase);
+
         #region Public API
 
         /// <summary>
         /// Scans the base directory and processes matching files with bounded parallelism.
-        /// Skips excluded directories, reparse points, and likely binary files.
+        /// Skips excluded directories, reparse points, the tool's own backup/temp files,
+        /// and likely binary files.
         /// </summary>
         /// <remarks>
         /// <paramref name="onEntry"/> is invoked concurrently from worker threads; callers
@@ -454,6 +466,9 @@ namespace EncodingChecker
                 foreach (string file in files)
                 {
                     string fileName = Path.GetFileName(file);
+
+                    if (IsAlwaysExcludedFile(fileName))
+                        continue;
 
                     if (MatchesAny(fileName, includePatterns) &&
                         !MatchesAny(fileName, excludePatterns))
