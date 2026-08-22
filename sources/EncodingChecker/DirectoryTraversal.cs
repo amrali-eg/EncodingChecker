@@ -118,8 +118,12 @@ internal static class DirectoryTraversal
                 if (IsAlwaysExcludedFile(fileName))
                     continue;
 
+                // excludedFullPath is always absolute (Path.GetFullPath'd by the caller), but
+                // file is rooted at baseDirectory as given, which may itself be relative (e.g.
+                // -BasePath "."); compare full paths so the exclusion still matches instead of
+                // silently doing nothing.
                 if (excludedFullPath is not null &&
-                    string.Equals(file, excludedFullPath, StringComparison.OrdinalIgnoreCase))
+                    string.Equals(Path.GetFullPath(file), excludedFullPath, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
