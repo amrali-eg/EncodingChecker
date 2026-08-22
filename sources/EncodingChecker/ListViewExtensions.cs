@@ -4,96 +4,95 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
-namespace EncodingChecker
+namespace EncodingChecker;
+
+[EditorBrowsable(EditorBrowsableState.Never)]
+public static class ListViewExtensions
 {
-    [EditorBrowsable(EditorBrowsableState.Never)]
-    public static class ListViewExtensions
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Hditem
     {
-        [StructLayout(LayoutKind.Sequential)]
-        public struct Hditem
+        public Mask mask;
+        public int cxy;
+        [MarshalAs(UnmanagedType.LPTStr)] public string pszText;
+        public IntPtr hbm;
+        public int cchTextMax;
+        public Format fmt;
+        public IntPtr lParam;
+        // _WIN32_IE >= 0x0300
+        public int iImage;
+        public int iOrder;
+        // _WIN32_IE >= 0x0500
+        public uint type;
+        public IntPtr pvFilter;
+        // _WIN32_WINNT >= 0x0600
+        public uint state;
+
+        [Flags]
+        public enum Mask
         {
-            public Mask mask;
-            public int cxy;
-            [MarshalAs(UnmanagedType.LPTStr)] public string pszText;
-            public IntPtr hbm;
-            public int cchTextMax;
-            public Format fmt;
-            public IntPtr lParam;
-            // _WIN32_IE >= 0x0300
-            public int iImage;
-            public int iOrder;
-            // _WIN32_IE >= 0x0500
-            public uint type;
-            public IntPtr pvFilter;
-            // _WIN32_WINNT >= 0x0600
-            public uint state;
-
-            [Flags]
-            public enum Mask
-            {
-                Format = 0x4,       // HDI_FORMAT
-            };
-
-            [Flags]
-            public enum Format
-            {
-                SortDown = 0x200,   // HDF_SORTDOWN
-                SortUp = 0x400,     // HDF_SORTUP
-            };
+            Format = 0x4,       // HDI_FORMAT
         };
 
-        public const int LVM_FIRST = 0x1000;
-        public const int LVM_GETHEADER = LVM_FIRST + 31;
-
-        public const int HDM_FIRST = 0x1200;
-        public const int HDM_GETITEM = HDM_FIRST + 11;
-        public const int HDM_SETITEM = HDM_FIRST + 12;
-
-        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        private static extern IntPtr SendMessage(this IntPtr hWnd, UInt32 msg, IntPtr wParam, IntPtr lParam);
-
-        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        private static extern IntPtr SendMessage(this IntPtr hWnd, UInt32 msg, IntPtr wParam, ref Hditem lParam);
-
-        public static void SetSortIcon(this ListView listViewControl, int columnIndex, SortOrder order)
+        [Flags]
+        public enum Format
         {
-            IntPtr columnHeader = SendMessage(listViewControl.Handle, LVM_GETHEADER, IntPtr.Zero, IntPtr.Zero);
-            for (int columnNumber = 0; columnNumber <= listViewControl.Columns.Count - 1; columnNumber++)
+            SortDown = 0x200,   // HDF_SORTDOWN
+            SortUp = 0x400,     // HDF_SORTUP
+        };
+    };
+
+    public const int LVM_FIRST = 0x1000;
+    public const int LVM_GETHEADER = LVM_FIRST + 31;
+
+    public const int HDM_FIRST = 0x1200;
+    public const int HDM_GETITEM = HDM_FIRST + 11;
+    public const int HDM_SETITEM = HDM_FIRST + 12;
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    private static extern IntPtr SendMessage(this IntPtr hWnd, UInt32 msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    private static extern IntPtr SendMessage(this IntPtr hWnd, UInt32 msg, IntPtr wParam, ref Hditem lParam);
+
+    public static void SetSortIcon(this ListView listViewControl, int columnIndex, SortOrder order)
+    {
+        IntPtr columnHeader = SendMessage(listViewControl.Handle, LVM_GETHEADER, IntPtr.Zero, IntPtr.Zero);
+        for (int columnNumber = 0; columnNumber <= listViewControl.Columns.Count - 1; columnNumber++)
+        {
+            var columnPtr = new IntPtr(columnNumber);
+            var lvColumn = new Hditem
             {
-                var columnPtr = new IntPtr(columnNumber);
-                var lvColumn = new Hditem
-                {
-                    mask = Hditem.Mask.Format
-                };
+                mask = Hditem.Mask.Format
+            };
 
-                if (SendMessage(columnHeader, HDM_GETITEM, columnPtr, ref lvColumn) == IntPtr.Zero)
-                {
-                    throw new Win32Exception();
-                }
+            if (SendMessage(columnHeader, HDM_GETITEM, columnPtr, ref lvColumn) == IntPtr.Zero)
+            {
+                throw new Win32Exception();
+            }
 
-                if (order != SortOrder.None && columnNumber == columnIndex)
+            if (order != SortOrder.None && columnNumber == columnIndex)
+            {
+                switch (order)
                 {
-                    switch (order)
-                    {
-                        case SortOrder.Ascending:
-                            lvColumn.fmt &= ~Hditem.Format.SortDown;
-                            lvColumn.fmt |= Hditem.Format.SortUp;
-                            break;
-                        case SortOrder.Descending:
-                            lvColumn.fmt &= ~Hditem.Format.SortUp;
-                            lvColumn.fmt |= Hditem.Format.SortDown;
-                            break;
-                    }
+                    case SortOrder.Ascending:
+                        lvColumn.fmt &= ~Hditem.Format.SortDown;
+                        lvColumn.fmt |= Hditem.Format.SortUp;
+                        break;
+                    case SortOrder.Descending:
+                        lvColumn.fmt &= ~Hditem.Format.SortUp;
+                        lvColumn.fmt |= Hditem.Format.SortDown;
+                        break;
                 }
-                else
-                {
-                    lvColumn.fmt &= ~Hditem.Format.SortDown & ~Hditem.Format.SortUp;
-                }
+            }
+            else
+            {
+                lvColumn.fmt &= ~Hditem.Format.SortDown & ~Hditem.Format.SortUp;
+            }
 
-                if (SendMessage(columnHeader, HDM_SETITEM, columnPtr, ref lvColumn) == IntPtr.Zero)
-                {
-                    throw new Win32Exception();
-                }
+            if (SendMessage(columnHeader, HDM_SETITEM, columnPtr, ref lvColumn) == IntPtr.Zero)
+            {
+                throw new Win32Exception();
             }
         }
     }
