@@ -184,9 +184,10 @@ internal static class Program
                    under -Validate, fails) conversion. Useful as a CI
                    gate, optionally with -WhatIf or -Validate.
 
-        Exit codes: 0 = clean; 1 = usage/argument error; 2 = -FailOnChanges
-        triggered; 3 = one or more files failed to process; 4 = cancelled
-        (Ctrl+C).
+        Exit codes: 0 = clean; 1 = usage/argument error (nothing was scanned);
+        2 = -FailOnChanges triggered; 3 = the run did not complete cleanly -
+        one or more files failed to process, the scan itself failed, or the
+        -Report file could not be written; 4 = cancelled (Ctrl+C).
 
         Examples:
 
@@ -308,8 +309,10 @@ internal static class Program
         catch (Exception ex) when (
             ex is IOException or UnauthorizedAccessException)
         {
+            // Exit 3, not 1: the arguments were valid and the run started; this is a
+            // processing failure, and a CI gate must be able to tell them apart.
             Console.Error.WriteLine($"Scan failed: {ex.Message}");
-            return 1;
+            return 3;
         }
         finally
         {
@@ -345,9 +348,11 @@ internal static class Program
             catch (Exception ex) when (
                 ex is IOException or UnauthorizedAccessException)
             {
+                // Exit 3, not 1: in Convert mode the files have already been rewritten
+                // by this point, so reporting a usage error here would be misleading.
                 Console.Error.WriteLine(
                     $"Failed to write report file: {ex.Message}");
-                return 1;
+                return 3;
             }
         }
 
