@@ -732,7 +732,7 @@
     <value>18</value>
   </data>
   <data name="chkCreateBackup.Text" xml:space="preserve">
-    <value>Back up the original file before converting (.bak)</value>
+    <value>Back up original files before converting (.bak)</value>
   </data>
   <data name="&gt;&gt;chkCreateBackup.Name" xml:space="preserve">
     <value>chkCreateBackup</value>
