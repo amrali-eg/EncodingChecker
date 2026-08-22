@@ -46,9 +46,8 @@ internal sealed class ScanDirectoryOptions
     internal IReadOnlyList<string>? ExcludePatterns { get; init; }
 
     /// <summary>
-    /// Full path of a file to exclude regardless of patterns, e.g. an in-progress
-    /// -Report output that would otherwise get rescanned as ordinary input on a
-    /// later run with a broad -Include.
+    /// Full path of a file to exclude regardless of pattern matches - e.g. an
+    /// in-progress -Report output, so it isn't rescanned as input on a later run.
     /// </summary>
     internal string? ExcludedFullPath { get; init; }
 
@@ -413,9 +412,8 @@ internal static class ScanEngine
     }
 
     /// <summary>
-    /// Writes "<paramref name="path"/>.bak" via a temp-file-then-atomic-replace
-    /// sequence, so a crash mid-write can't leave a truncated/corrupt backup - the
-    /// same crash-safety as the main conversion write, instead of a plain File.Copy.
+    /// Writes "<paramref name="path"/>.bak" via temp-file-then-atomic-replace, so a
+    /// crash mid-write can't leave a truncated backup (unlike a plain File.Copy).
     /// </summary>
     private static void CreateBackup(string path)
     {

@@ -283,9 +283,8 @@ internal static class EncodingConverter
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Sanity-check that the source did not change during conversion.
-            // A point-in-time race check, not a complete TOCTOU guarantee: the source
-            // could still change between this check and installation below.
+            // Point-in-time check only, not a full TOCTOU guarantee - the source
+            // could still change between here and the install below.
             FileInfo recheckInfo = new(sourcePath);
 
             if (IsReparsePoint(recheckInfo))

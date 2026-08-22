@@ -36,11 +36,9 @@ internal static class DirectoryTraversal
     };
 
     /// <summary>
-    /// Always excluded, regardless of -Include/-Exclude: the tool's own backup and
-    /// temporary-file artifacts. Without this, a broad include pattern (e.g. "*")
-    /// combined with -Backup re-scans previous runs' ".bak" files as ordinary input,
-    /// which cascades (.bak, .bak.bak, ...) and can race against another file's
-    /// concurrent backup write to the same path.
+    /// Always excluded, even with a broad -Include like "*" - otherwise -Backup would
+    /// rescan its own ".bak" output on a later run, cascading (.bak.bak, ...) and
+    /// racing concurrent backup writes.
     /// </summary>
     private static bool IsAlwaysExcludedFile(string fileName) =>
         fileName.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) ||
@@ -121,9 +119,8 @@ internal static class DirectoryTraversal
                     continue;
                 }
 
-                // A pattern with no separator matches just the filename (unchanged,
-                // backward-compatible); one containing a separator matches the path
-                // relative to baseDirectory instead - see CompilePatterns.
+                // No separator -> match bare filename (backward-compatible); with a
+                // separator -> match path relative to baseDirectory (see CompilePatterns).
                 string relativePath =
                     Path.GetRelativePath(baseDirectory, file).Replace('\\', '/');
 
@@ -188,9 +185,8 @@ internal static class DirectoryTraversal
 
     /// <summary>
     /// Converts wildcard masks to case-insensitive regexes. A mask with no "/" or "\"
-    /// matches against a candidate's bare filename; one containing a separator matches
-    /// against its path relative to the scan root instead (see <see cref="EnumerateFiles"/>).
-    /// Separators are normalized to "/" so a mask written with either matches the same way.
+    /// matches the bare filename; one with a separator matches the path relative to the
+    /// scan root instead (see <see cref="EnumerateFiles"/>). "\" is normalized to "/".
     /// </summary>
     internal static List<Regex> CompilePatterns(
         IReadOnlyList<string>? patterns,

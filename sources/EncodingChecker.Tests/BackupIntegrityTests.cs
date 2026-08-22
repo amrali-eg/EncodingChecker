@@ -61,9 +61,8 @@ public sealed class BackupIntegrityTests : IDisposable
     [Fact]
     public void Backup_SuccessfulConversion_LeavesNoTempArtifactBehind()
     {
-        // The backup is now written via a temp-file-then-atomic-replace sequence
-        // (matching LineEndingNormalizer's LosslessFileWriter.CreateBackup), not a
-        // plain File.Copy - confirm the "*.bak.<guid>.tmp" sibling never survives.
+        // Backup is now temp-file-then-atomic-replace, not a plain File.Copy -
+        // confirm the "*.bak.<guid>.tmp" sibling never survives.
         string path = Path.Combine(_root, "convert-me.txt");
         File.WriteAllText(path, TestContent.Multilingual, new UTF8Encoding(false));
 
@@ -115,10 +114,8 @@ public sealed class BackupIntegrityTests : IDisposable
     [Fact]
     public void Backup_WildcardInclude_NeverScansItsOwnBakOrTempFiles()
     {
-        // Regression test: -Include "*" combined with -Backup must not re-scan the
-        // .bak files it just created, across repeated runs - doing so used to cascade
-        // (.bak, .bak.bak, ...) and race a file's own backup write against another
-        // worker independently reading/converting that same .bak as its own entry.
+        // Regression test: -Include "*" with -Backup must not re-scan its own .bak
+        // output - that used to cascade (.bak.bak, ...) and race backup writes.
         string path = Path.Combine(_root, "convert-me.txt");
         File.WriteAllText(path, TestContent.Multilingual, new UnicodeEncoding(false, true));
 

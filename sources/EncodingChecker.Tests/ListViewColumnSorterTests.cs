@@ -66,16 +66,10 @@ public sealed class ListViewColumnSorterTests
     [Fact]
     public void PrimaryColumnCaseOnlyDifference_IsNotTreatedAsATie()
     {
-        // Documents a real, verified quirk (found while writing this test, not a
-        // deliberate design choice - see the code review flag raised alongside this
-        // suite): the primary-column comparison itself IS case-insensitive
-        // (CaseInsensitiveComparer judges "Apple"/"apple" equal), but
-        // CompareRemainingColumns' tiebreak loop starts at index 0 instead of the
-        // column after SortColumn. It redundantly re-compares the primary column
-        // too, this time via string.CompareOrdinal (case-sensitive), so a
-        // primary-column difference that's only a case difference is NOT actually
-        // treated as a tie end-to-end - it resolves ordinally instead of falling
-        // through to genuinely compare the next column.
+        // Documents a real bug, not a design choice (flagged separately for a fix):
+        // the primary comparison is case-insensitive, but CompareRemainingColumns'
+        // tiebreak loop starts at index 0 instead of after SortColumn, so it
+        // redundantly re-compares column 0 ordinally and never truly ties.
         var sorter = new ListViewColumnSorter { SortColumn = 0, Order = SortOrder.Ascending };
 
         ListViewItem x = Row("Apple", "same");
@@ -90,9 +84,8 @@ public sealed class ListViewColumnSorterTests
     [Fact]
     public void PrimaryColumnCaseOnlyDifference_WinsOverARealDifferenceInALaterColumn()
     {
-        // Same quirk, made concrete: column 1 genuinely differs ("aaa" vs "zzz"), but
-        // the tiebreak's redundant re-check of column 0 fires first and decides the
-        // result, so the later column's real difference is never even reached.
+        // Same bug: column 1 genuinely differs, but the redundant column-0 recheck
+        // fires first and decides the result before column 1 is ever reached.
         var sorter = new ListViewColumnSorter { SortColumn = 0, Order = SortOrder.Ascending };
 
         ListViewItem x = Row("Apple", "zzz");
