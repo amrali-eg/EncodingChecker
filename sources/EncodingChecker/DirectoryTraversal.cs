@@ -72,7 +72,8 @@ internal static class DirectoryTraversal
         bool includeSubdirectories,
         List<Regex> includePatterns,
         List<Regex> excludePatterns,
-        string? excludedFullPath = null)
+        string? excludedFullPath = null,
+        Action<string>? onWarning = null)
     {
         var pending = new Stack<string>();
         pending.Push(baseDirectory);
@@ -97,6 +98,13 @@ internal static class DirectoryTraversal
             catch (Exception ex) when (
                 ex is IOException or UnauthorizedAccessException)
             {
+                onWarning?.Invoke(
+                    string.Format(
+                        "Skipping directory (cannot list): {0}{1}    {2}",
+                        dir,
+                        Environment.NewLine,
+                        ex.Message));
+
                 continue;
             }
 
@@ -138,6 +146,13 @@ internal static class DirectoryTraversal
             catch (Exception ex) when (
                 ex is IOException or UnauthorizedAccessException)
             {
+                onWarning?.Invoke(
+                    string.Format(
+                        "Skipping directory (cannot list): {0}{1}    {2}",
+                        dir,
+                        Environment.NewLine,
+                        ex.Message));
+
                 continue;
             }
 

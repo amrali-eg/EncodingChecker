@@ -293,7 +293,8 @@ namespace EncodingChecker
                 ScanEngine.ScanDirectory(
                     scanOptions,
                     collectedEntries.Add,
-                    cancellation.Token);
+                    cancellation.Token,
+                    onWarning: Console.Error.WriteLine);
             }
             catch (OperationCanceledException)
             {

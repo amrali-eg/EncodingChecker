@@ -93,7 +93,8 @@ namespace EncodingChecker
         internal static void ScanDirectory(
             ScanDirectoryOptions options,
             Action<ConversionReportEntry> onEntry,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            Action<string>? onWarning = null)
         {
             ArgumentNullException.ThrowIfNull(options);
             ArgumentNullException.ThrowIfNull(onEntry);
@@ -113,7 +114,8 @@ namespace EncodingChecker
                 options.IncludeSubdirectories,
                 includePatterns,
                 excludePatterns,
-                options.ExcludedFullPath);
+                options.ExcludedFullPath,
+                onWarning);
 
             RunParallel(
                 files,
