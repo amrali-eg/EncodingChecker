@@ -45,6 +45,13 @@ namespace EncodingChecker
         /// <summary>Exclude masks applied after include masks.</summary>
         internal IReadOnlyList<string>? ExcludePatterns { get; init; }
 
+        /// <summary>
+        /// Full path of a file to exclude regardless of patterns, e.g. an in-progress
+        /// -Report output that would otherwise get rescanned as ordinary input on a
+        /// later run with a broad -Include.
+        /// </summary>
+        internal string? ExcludedFullPath { get; init; }
+
         internal ScanAction Action { get; init; }
 
         /// <summary>Accepted charset labels for validation.</summary>
@@ -105,7 +112,8 @@ namespace EncodingChecker
                 options.BaseDirectory,
                 options.IncludeSubdirectories,
                 includePatterns,
-                excludePatterns);
+                excludePatterns,
+                options.ExcludedFullPath);
 
             RunParallel(
                 files,

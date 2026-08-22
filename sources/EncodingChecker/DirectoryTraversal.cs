@@ -71,7 +71,8 @@ internal static class DirectoryTraversal
         string baseDirectory,
         bool includeSubdirectories,
         List<Regex> includePatterns,
-        List<Regex> excludePatterns)
+        List<Regex> excludePatterns,
+        string? excludedFullPath = null)
     {
         var pending = new Stack<string>();
         pending.Push(baseDirectory);
@@ -105,6 +106,12 @@ internal static class DirectoryTraversal
 
                 if (IsAlwaysExcludedFile(fileName))
                     continue;
+
+                if (excludedFullPath is not null &&
+                    string.Equals(file, excludedFullPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
 
                 if (MatchesAny(fileName, includePatterns) &&
                     !MatchesAny(fileName, excludePatterns))

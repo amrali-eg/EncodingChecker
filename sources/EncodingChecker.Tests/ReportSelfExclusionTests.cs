@@ -1,0 +1,84 @@
+using System.Text;
+
+namespace EncodingChecker.Tests;
+
+/// <summary>
+/// A -Report output path inside the scanned tree must never be picked up as an
+/// ordinary scan candidate, even with a broad -Include "*", across repeated runs.
+/// </summary>
+public sealed class ReportSelfExclusionTests : IDisposable
+{
+    private readonly string _root;
+
+    public ReportSelfExclusionTests()
+    {
+        _root = Directory.CreateTempSubdirectory("ec_report_exclusion_").FullName;
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            Directory.Delete(_root, recursive: true);
+        }
+        catch (IOException)
+        {
+            // Best-effort cleanup.
+        }
+    }
+
+    [Fact]
+    public void ReportInsideScannedTree_IsExcludedFromItsOwnAndLaterScans()
+    {
+        string sourcePath = Path.Combine(_root, "source.txt");
+        File.WriteAllText(sourcePath, TestContent.Multilingual, new UTF8Encoding(false));
+
+        string reportPath = Path.Combine(_root, "report.csv");
+
+        var options = new ScanDirectoryOptions
+        {
+            BaseDirectory = _root,
+            IncludePatterns = ["*"],
+            ExcludedFullPath = reportPath,
+            Action = ScanAction.Detect,
+        };
+
+        // Run 1: the report doesn't exist yet, but the path is already excluded.
+        var firstRun = new List<ConversionReportEntry>();
+        ScanEngine.ScanDirectory(options, firstRun.Add, CancellationToken.None);
+        Assert.Equal(sourcePath, Assert.Single(firstRun).FilePath);
+
+        File.WriteAllText(reportPath, "File,Encoding,BOM,Target,BOM,Result\r\n", new UTF8Encoding(false));
+
+        // Run 2: the report file now exists in the scanned tree; a broad -Include "*"
+        // must still not pick it up, since it's excluded by exact full path.
+        var secondRun = new List<ConversionReportEntry>();
+        ScanEngine.ScanDirectory(options, secondRun.Add, CancellationToken.None);
+        Assert.Equal(sourcePath, Assert.Single(secondRun).FilePath);
+    }
+
+    [Fact]
+    public void ReportOutsideScannedTree_ExcludedFullPathHasNoEffect()
+    {
+        string sourcePath = Path.Combine(_root, "source.txt");
+        File.WriteAllText(sourcePath, TestContent.Multilingual, new UTF8Encoding(false));
+
+        string unrelatedPath = Path.Combine(_root, "not-the-report.csv");
+        File.WriteAllText(unrelatedPath, "irrelevant", new UTF8Encoding(false));
+
+        var options = new ScanDirectoryOptions
+        {
+            BaseDirectory = _root,
+            IncludePatterns = ["*"],
+            ExcludedFullPath = Path.Combine(_root, "report.csv"), // never created
+            Action = ScanAction.Detect,
+        };
+
+        var entries = new List<ConversionReportEntry>();
+        ScanEngine.ScanDirectory(options, entries.Add, CancellationToken.None);
+
+        Assert.Equal(2, entries.Count);
+        Assert.Contains(entries, e => e.FilePath == sourcePath);
+        Assert.Contains(entries, e => e.FilePath == unrelatedPath);
+    }
+}

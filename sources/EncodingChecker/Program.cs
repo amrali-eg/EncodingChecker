@@ -258,6 +258,9 @@ namespace EncodingChecker
                 IncludeSubdirectories = true,
                 IncludePatterns = options.Include,
                 ExcludePatterns = options.Exclude,
+                ExcludedFullPath = string.IsNullOrEmpty(options.ReportPath)
+                    ? null
+                    : Path.GetFullPath(options.ReportPath),
                 Action = action,
                 MaxParallelism =
                     options.MaxParallelism ??
