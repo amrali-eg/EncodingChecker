@@ -10,7 +10,6 @@ public sealed class BackupIntegrityTests : IDisposable
     public BackupIntegrityTests()
     {
         _root = Directory.CreateTempSubdirectory("ec_backup_").FullName;
-        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
     }
 
     public void Dispose()

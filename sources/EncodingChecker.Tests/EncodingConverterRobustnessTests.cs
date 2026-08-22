@@ -14,7 +14,6 @@ public sealed class EncodingConverterRobustnessTests : IDisposable
     public EncodingConverterRobustnessTests()
     {
         _root = Directory.CreateTempSubdirectory("ec_converter_").FullName;
-        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
     }
 
     public void Dispose()
