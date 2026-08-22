@@ -121,8 +121,14 @@ internal static class DirectoryTraversal
                     continue;
                 }
 
-                if (MatchesAny(fileName, includePatterns) &&
-                    !MatchesAny(fileName, excludePatterns))
+                // A pattern with no separator matches just the filename (unchanged,
+                // backward-compatible); one containing a separator matches the path
+                // relative to baseDirectory instead - see CompilePatterns.
+                string relativePath =
+                    Path.GetRelativePath(baseDirectory, file).Replace('\\', '/');
+
+                if (MatchesAny(relativePath, includePatterns) &&
+                    !MatchesAny(relativePath, excludePatterns))
                 {
                     yield return file;
                 }
@@ -181,7 +187,10 @@ internal static class DirectoryTraversal
     }
 
     /// <summary>
-    /// Converts wildcard masks to case-insensitive regexes.
+    /// Converts wildcard masks to case-insensitive regexes. A mask with no "/" or "\"
+    /// matches against a candidate's bare filename; one containing a separator matches
+    /// against its path relative to the scan root instead (see <see cref="EnumerateFiles"/>).
+    /// Separators are normalized to "/" so a mask written with either matches the same way.
     /// </summary>
     internal static List<Regex> CompilePatterns(
         IReadOnlyList<string>? patterns,
@@ -205,7 +214,7 @@ internal static class DirectoryTraversal
             .. effectivePatterns.Select(mask =>
                 new Regex(
                     "^" +
-                    Regex.Escape(mask)
+                    Regex.Escape(mask.Replace('\\', '/'))
                         .Replace(@"\*", ".*")
                         .Replace(@"\?", ".") +
                     "$",

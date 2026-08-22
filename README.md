@@ -43,7 +43,7 @@ EncodingChecker.exe
                                    # -Validate, fails) conversion — useful as a CI gate
 ```
 
-`-Include`/`-Exclude` are comma-separated wildcard file-name patterns; `.git`, `.svn`, `.hg`, `.vs`, `.idea`, `bin`, `obj`, `node_modules`, `packages`, `dist`, `build`, and `target` directories are always skipped. Convert, Validate, and Detect-only are mutually exclusive modes.
+`-Include`/`-Exclude` are comma-separated wildcard patterns. A pattern with no `/` or `\` matches just the filename (e.g. `*.cs` matches at any depth); a pattern containing a separator matches the path relative to `-BasePath` instead (e.g. `src/*.cs` matches only under `src`, `\` and `/` behave the same way). `.git`, `.svn`, `.hg`, `.vs`, `.idea`, `bin`, `obj`, `node_modules`, `packages`, `dist`, `build`, and `target` directories are always skipped. Convert, Validate, and Detect-only are mutually exclusive modes.
 
 Exit codes: `0` clean, `1` usage/argument error, `2` `-FailOnChanges` triggered, `3` one or more files failed to process, `4` cancelled (Ctrl+C).
 
