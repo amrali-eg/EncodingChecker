@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 
 namespace EncodingChecker.Tests;
@@ -118,7 +119,8 @@ public sealed class ReportSelfExclusionTests : IDisposable
             Action = ScanAction.Detect,
         };
 
-        var entries = new List<ConversionReportEntry>();
+        // Two matching files, so onEntry can fire concurrently; List<T>.Add would race.
+        var entries = new ConcurrentBag<ConversionReportEntry>();
         ScanEngine.ScanDirectory(options, entries.Add, CancellationToken.None);
 
         Assert.Equal(2, entries.Count);

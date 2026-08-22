@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+
 namespace EncodingChecker.Tests;
 
 /// <summary>
@@ -45,7 +47,9 @@ public sealed class PathAwarePatternTests : IDisposable
             Action = ScanAction.Detect,
         };
 
-        var entries = new List<ConversionReportEntry>();
+        // The tree has several matching files, so onEntry genuinely fires from multiple
+        // worker threads; List<T>.Add would race here.
+        var entries = new ConcurrentBag<ConversionReportEntry>();
         ScanEngine.ScanDirectory(options, entries.Add, CancellationToken.None);
 
         return
