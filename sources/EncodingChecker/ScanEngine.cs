@@ -187,12 +187,16 @@ internal static class ScanEngine
     /// <summary>
     /// Converts previously detected entries with bounded parallelism.
     /// </summary>
+    /// <param name="whatIf">Simulate conversion without writing, matching ScanDirectory's option.</param>
+    /// <param name="backup">Back up each original before conversion, matching ScanDirectory's option.</param>
     /// <remarks>Same concurrent-<paramref name="onEntry"/> contract as <see cref="ScanDirectory"/>.</remarks>
     internal static void ConvertFiles(
         IEnumerable<ConversionReportEntry> entries,
         string targetCharset,
         bool targetWriteBom,
         int maxParallelism,
+        bool whatIf,
+        bool backup,
         Action<ConversionReportEntry> onEntry,
         CancellationToken cancellationToken)
     {
@@ -233,8 +237,8 @@ internal static class ScanEngine
                     targetCharset,
                     targetEncoding,
                     targetWriteBom,
-                    whatIf: false,
-                    backup: false,
+                    whatIf,
+                    backup,
                     cancellationToken);
 
                 return entry;

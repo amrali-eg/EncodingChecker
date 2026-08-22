@@ -147,7 +147,7 @@
     <value>$this</value>
   </data>
   <data name="&gt;&gt;lblBaseDirectory.ZOrder" xml:space="preserve">
-    <value>16</value>
+    <value>18</value>
   </data>
   <metadata name="lblFileMasks.GenerateMember" type="System.Boolean, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
     <value>False</value>
@@ -177,7 +177,7 @@
     <value>$this</value>
   </data>
   <data name="&gt;&gt;lblFileMasks.ZOrder" xml:space="preserve">
-    <value>13</value>
+    <value>15</value>
   </data>
   <metadata name="lblValidCharsets.GenerateMember" type="System.Boolean, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
     <value>False</value>
@@ -207,7 +207,7 @@
     <value>$this</value>
   </data>
   <data name="&gt;&gt;lblValidCharsets.ZOrder" xml:space="preserve">
-    <value>11</value>
+    <value>13</value>
   </data>
   <metadata name="colEncoding.GenerateMember" type="System.Boolean, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
     <value>False</value>
@@ -259,7 +259,7 @@
     <value>$this</value>
   </data>
   <data name="&gt;&gt;btnBrowseDirectories.ZOrder" xml:space="preserve">
-    <value>15</value>
+    <value>17</value>
   </data>
   <data name="chkIncludeSubdirectories.Anchor" type="System.Windows.Forms.AnchorStyles, System.Windows.Forms">
     <value>Top, Right</value>
@@ -289,7 +289,7 @@
     <value>$this</value>
   </data>
   <data name="&gt;&gt;chkIncludeSubdirectories.ZOrder" xml:space="preserve">
-    <value>14</value>
+    <value>16</value>
   </data>
   <data name="txtFileMasks.Location" type="System.Drawing.Point, System.Drawing">
     <value>10, 77</value>
@@ -316,7 +316,7 @@
     <value>$this</value>
   </data>
   <data name="&gt;&gt;txtFileMasks.ZOrder" xml:space="preserve">
-    <value>12</value>
+    <value>14</value>
   </data>
   <data name="lstValidCharsets.Location" type="System.Drawing.Point, System.Drawing">
     <value>220, 77</value>
@@ -337,7 +337,7 @@
     <value>$this</value>
   </data>
   <data name="&gt;&gt;lstValidCharsets.ZOrder" xml:space="preserve">
-    <value>10</value>
+    <value>12</value>
   </data>
   <data name="btnValidate.Location" type="System.Drawing.Point, System.Drawing">
     <value>85, 187</value>
@@ -361,7 +361,7 @@
     <value>$this</value>
   </data>
   <data name="&gt;&gt;btnValidate.ZOrder" xml:space="preserve">
-    <value>9</value>
+    <value>11</value>
   </data>
   <data name="lstResults.Anchor" type="System.Windows.Forms.AnchorStyles, System.Windows.Forms">
     <value>Top, Bottom, Left, Right</value>
@@ -380,7 +380,7 @@
         AAEAAAD/////AQAAAAAAAAAMAgAAAEZTeXN0ZW0uV2luZG93cy5Gb3JtcywgQ3VsdHVyZT1uZXV0cmFs
         LCBQdWJsaWNLZXlUb2tlbj1iNzdhNWM1NjE5MzRlMDg5BQEAAAAmU3lzdGVtLldpbmRvd3MuRm9ybXMu
         SW1hZ2VMaXN0U3RyZWFtZXIBAAAABERhdGEHAgIAAAAJAwAAAA8DAAAAcgsAAAJNU0Z0AUkBTAIBAQMB
-        AAH0AQAB9AEAARABAAEQAQAE/wEhAQAI/wFCAU0BNgcAATYDAAEoAwABQAMAARADAAEBAQABIAYAARD/
+        AAH8AQAB/AEAARABAAEQAQAE/wEhAQAI/wFCAU0BNgcAATYDAAEoAwABQAMAARADAAEBAQABIAYAARD/
         AFcAAwIBAwMGAQgIAAMHAQkDCgENAwoBDQMKAQ0DCgENAwkBDAgAAwUBBgMCAQMIAAMEAQUDCQQMAQ8D
         DQERAwcBCQQCAwQBBQMEAQUEAgMGAQcDDQERAwwBDwMJAQwDBAEFSAADBgEHAwwEDwETAxEBFgMSARcD
         CQELAxABFQMNAREDEwEZAxIBGAMRARYDDwETAwwBDwMGAQcIAAMMARADCgENA0YBfwJVAVcBtAMhATAD
@@ -396,20 +396,20 @@
         DwEUAZEB/wEPARQBkQH/AQ8BFAGQAf8DVgGzA0oBigEPARQBkAH/AQ8BFAGRAf8BDwEUAZEB/wEPARQB
         kQH/AlUBVwG0AwYBCAwAAzYBVwEHAYsB6wH/AQcBiwHrAf8BBQGKAesB/wEEAYoB6wH/AfQB+gH+Bf8B
         FgGNAesB/wECAYoB6wH/AQcBiwHrAf8BBwGLAesB/wNGAX5UAANNAZIBIgGsAVwB/wEiAa0BXQH/AR8B
-        rQFcAf8BIAGtAVwB/wEiAa0BXQH/AVoBfAFcAfgDFQEcIAACRgFHAYEBDwEVAZkB/wEPARUBmQH/AQ8B
+        rQFcAf8BIAGtAVwB/wEiAa0BXQH/AVsBfAFcAfgDFQEcIAACRgFHAYEBDwEVAZkB/wEPARUBmQH/AQ8B
         FQGZAf8BDwEVAZgB/wEPARUBmAH/AQ8BFQGZAf8BDwEVAZkB/wEPARUBmQH/AlUBVwG0FAADXQHMAQUB
         kQHsAf8BBQGRAewB/wEFAZEB7AH/AQABjAHsAf8BRwGxAfIB/wFWAbIB8gH/AQABiwHrAf8BBQGRAewB
         /wEFAZEB7AH/AQUBkQHsAf8BXQFlAWcB6gMEAQVIAAQBA00BkwEgAbQBZgH/AR8BtAFmAf8BHQG0AWUB
-        /wE0AYMBXwH7ASoBuQFuAf8BHQG0AWUB/wEgAbQBZgH/A1kBuyQAAkYBRwGAAisBfgH8AQ8BFQGhAf8B
-        DwEVAaEB/wEPARUBoQH/AQ8BFQGhAf8BDwEVAaEB/wJVAVcBsRQAAwsBDgFJAnwB+AEDAZcB7gH/AQMB
+        /wE0AYIBXwH7ASoBuQFuAf8BHQG0AWUB/wEgAbQBZgH/A1kBuyQAAkYBRwGAAisBfgH8AQ8BFQGhAf8B
+        DwEVAaEB/wEPARUBoQH/AQ8BFQGhAf8BDwEVAaEB/wJVAVcBsRQAAwsBDgFLAnwB+AEDAZcB7gH/AQMB
         lwHuAf8BAwGXAe4B/wEAAZAB7QH/AbgB4gH6Af8BzQHhAfoB/wEAAY0B7AH/AQIBmAHuAf8BAwGXAe4B
         /wEDAZcB7gH/AQMBlwHuAf8DHQEoSAADBgEIAUABtAGDAf0BGgG7AW8B/wEaAbsBbwH/AVMCaAH0Ax4B
         KwNEAXgBIAG9AXIB/wEcAbwBcAH/AR0BvAFwAf8DOwFkJAADWgHHARABFgGoAf8BEAEWAagB/wEQARYB
         qAH/ARABFgGoAf8DYgHuAwMBBBQAAxUBHAECAZ4B7wH/AQEBnQHvAf8BAQGdAe8B/wEBAZ0B7wH/AQAB
         mAHuAf8B0wHvAfwB/wHrAe8B/AH/AQABkwHtAf8BAAGeAe8B/wEBAZ0B7wH/AQEBnQHvAf8BAQGeAe8B
-        /wMmATlMAAMpAT0BKwF+AXgB/AFaAXwBeQH4AyMBMwQABAEDXwHVARgBwAGCAf8BGgHBAYIB/wFBAX8B
+        /wMmATlMAAMpAT0BKwF+AXgB/AFbAXwBeQH4AyMBMwQABAEDXwHVARgBwAGCAf8BGgHBAYIB/wFBAX0B
         agH5Ax0BKBwAA0sBjQEQARcBsAH/ARABFwGwAf8BDwEWAbAB/wEPARUBrwH/ARABFwGwAf8BEAEXAbAB
-        /wJYAVoBvQMEAQUQAAMIAQoBUwFoAWsB9AEAAaMB8AH/AQABpAHwAf8BAAGjAfAB/wEAAaEB8AH/Ad0B
+        /wJYAVoBvQMEAQUQAAMIAQoBUwFoAWkB9AEAAaMB8AH/AQABpAHwAf8BAAGjAfAB/wEAAaEB8AH/Ad0B
         8wH9Af8B9wH1Af0B/wEIAZsB7gH/AQABpQHwAf8BAAGkAfAB/wEAAaMB8AH/AQQBpgHxAf8DGQEiUAAD
         HgEqAxsBJgwAAyABLQEjAcYBjQH/ARIBwgGHAf8BFgHDAYgB/wFbAmEB3gMLAQ4UAANLAY0BEAEXAbgB
         /wEQARcBuQH/AQ8BFQG4Af8BEwEcAbwB/wEWAR8BvgH/AQ4BFQG3Af8BEAEXAbkB/wEQARcBuAH/A1oB
@@ -423,7 +423,7 @@
         /wEPARYBxwH/ARYBHgHKAf8DJAE1EAADSQGGAQ8BvAH2Af8BAAG2AfUB/wEAAbIB9AH/AUMBzAH4Af8B
         WwHLAfcB/wEAAa4B8wH/AQABtgH1Af8BDAG8AfYB/wFSAlQBqHgAA1YBsAFXAloBwgMeASoQAAM2AVgB
         GgElAdQB/wEVAR8B0gH/AlUBVwG0EAACRgFHAYEBGAEiAdMB/wEXASEB0wH/A0sBjQQBFAABPwJAAW4B
-        XgJoAfABDgHBAfcB/wEAAbsB9gH/AQABuwH2Af8BDAHBAfcB/wFBAYABiQH5A0kBhpwAAzEBTQJHAUgB
+        XgJoAfABDgHBAfcB/wEAAbsB9gH/AQABuwH2Af8BDAHBAfcB/wFBAX8BiAH5A0kBhpwAAzEBTQJHAUgB
         gxgAAz0BaQNAAXEgAAMMARADNQFWAUcCSAGDA0kBhwM5AV4DEwEa/wBVAAFCAU0BPgcAAT4DAAEoAwAB
         QAMAARADAAEBAQABAQUAAYAXAAP/AQAG/wIAAv8BmAEZAYABAQIAAYABAQGAAQEBgAEBAgABgAEBAsEB
         8AEHAgAB+AF/AYABgQHgAQMCAAHwAT8BwAEBAcABAwIAAeABHwHgAQcBwAEBAgABgAEfAfABDwGAAQEC
@@ -444,7 +444,7 @@
     <value>$this</value>
   </data>
   <data name="&gt;&gt;lstResults.ZOrder" xml:space="preserve">
-    <value>8</value>
+    <value>10</value>
   </data>
   <metadata name="dlgBrowseDirectories.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
     <value>17, 17</value>
@@ -455,6 +455,27 @@
   <metadata name="statusBar.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
     <value>184, 17</value>
   </metadata>
+  <data name="statusBar.Location" type="System.Drawing.Point, System.Drawing">
+    <value>0, 497</value>
+  </data>
+  <data name="statusBar.Size" type="System.Drawing.Size, System.Drawing">
+    <value>700, 22</value>
+  </data>
+  <data name="statusBar.TabIndex" type="System.Int32, mscorlib">
+    <value>16</value>
+  </data>
+  <data name="&gt;&gt;statusBar.Name" xml:space="preserve">
+    <value>statusBar</value>
+  </data>
+  <data name="&gt;&gt;statusBar.Type" xml:space="preserve">
+    <value>System.Windows.Forms.StatusStrip, System.Windows.Forms, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </data>
+  <data name="&gt;&gt;statusBar.Parent" xml:space="preserve">
+    <value>$this</value>
+  </data>
+  <data name="&gt;&gt;statusBar.ZOrder" xml:space="preserve">
+    <value>9</value>
+  </data>
   <data name="tlnkHelp.Size" type="System.Drawing.Size, System.Drawing">
     <value>32, 17</value>
   </data>
@@ -506,27 +527,6 @@
   <data name="actionStatus.Size" type="System.Drawing.Size, System.Drawing">
     <value>0, 17</value>
   </data>
-  <data name="statusBar.Location" type="System.Drawing.Point, System.Drawing">
-    <value>0, 497</value>
-  </data>
-  <data name="statusBar.Size" type="System.Drawing.Size, System.Drawing">
-    <value>700, 22</value>
-  </data>
-  <data name="statusBar.TabIndex" type="System.Int32, mscorlib">
-    <value>16</value>
-  </data>
-  <data name="&gt;&gt;statusBar.Name" xml:space="preserve">
-    <value>statusBar</value>
-  </data>
-  <data name="&gt;&gt;statusBar.Type" xml:space="preserve">
-    <value>System.Windows.Forms.StatusStrip, System.Windows.Forms, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
-  </data>
-  <data name="&gt;&gt;statusBar.Parent" xml:space="preserve">
-    <value>$this</value>
-  </data>
-  <data name="&gt;&gt;statusBar.ZOrder" xml:space="preserve">
-    <value>7</value>
-  </data>
   <data name="btnView.Location" type="System.Drawing.Point, System.Drawing">
     <value>10, 187</value>
   </data>
@@ -549,7 +549,7 @@
     <value>$this</value>
   </data>
   <data name="&gt;&gt;btnView.ZOrder" xml:space="preserve">
-    <value>6</value>
+    <value>8</value>
   </data>
   <data name="lstBaseDirectory.Anchor" type="System.Windows.Forms.AnchorStyles, System.Windows.Forms">
     <value>Top, Left, Right</value>
@@ -573,7 +573,7 @@
     <value>$this</value>
   </data>
   <data name="&gt;&gt;lstBaseDirectory.ZOrder" xml:space="preserve">
-    <value>5</value>
+    <value>7</value>
   </data>
   <data name="lblConvert.AutoSize" type="System.Boolean, mscorlib">
     <value>True</value>
@@ -606,7 +606,7 @@
     <value>$this</value>
   </data>
   <data name="&gt;&gt;lblConvert.ZOrder" xml:space="preserve">
-    <value>4</value>
+    <value>6</value>
   </data>
   <data name="lstConvert.Enabled" type="System.Boolean, mscorlib">
     <value>False</value>
@@ -630,7 +630,7 @@
     <value>$this</value>
   </data>
   <data name="&gt;&gt;lstConvert.ZOrder" xml:space="preserve">
-    <value>3</value>
+    <value>5</value>
   </data>
   <data name="btnConvert.Enabled" type="System.Boolean, mscorlib">
     <value>False</value>
@@ -657,7 +657,7 @@
     <value>$this</value>
   </data>
   <data name="&gt;&gt;btnConvert.ZOrder" xml:space="preserve">
-    <value>2</value>
+    <value>4</value>
   </data>
   <data name="chkSelectDeselectAll.AutoSize" type="System.Boolean, mscorlib">
     <value>True</value>
@@ -687,7 +687,7 @@
     <value>$this</value>
   </data>
   <data name="&gt;&gt;chkSelectDeselectAll.ZOrder" xml:space="preserve">
-    <value>1</value>
+    <value>3</value>
   </data>
   <data name="btnCancel.Location" type="System.Drawing.Point, System.Drawing">
     <value>564, 187</value>
@@ -714,7 +714,67 @@
     <value>$this</value>
   </data>
   <data name="&gt;&gt;btnCancel.ZOrder" xml:space="preserve">
-    <value>0</value>
+    <value>2</value>
+  </data>
+  <data name="chkCreateBackup.AutoSize" type="System.Boolean, mscorlib">
+    <value>True</value>
+  </data>
+  <data name="chkCreateBackup.Enabled" type="System.Boolean, mscorlib">
+    <value>False</value>
+  </data>
+  <data name="chkCreateBackup.Location" type="System.Drawing.Point, System.Drawing">
+    <value>426, 113</value>
+  </data>
+  <data name="chkCreateBackup.Size" type="System.Drawing.Size, System.Drawing">
+    <value>257, 17</value>
+  </data>
+  <data name="chkCreateBackup.TabIndex" type="System.Int32, mscorlib">
+    <value>18</value>
+  </data>
+  <data name="chkCreateBackup.Text" xml:space="preserve">
+    <value>Back up original files before converting (.bak)</value>
+  </data>
+  <data name="&gt;&gt;chkCreateBackup.Name" xml:space="preserve">
+    <value>chkCreateBackup</value>
+  </data>
+  <data name="&gt;&gt;chkCreateBackup.Type" xml:space="preserve">
+    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </data>
+  <data name="&gt;&gt;chkCreateBackup.Parent" xml:space="preserve">
+    <value>$this</value>
+  </data>
+  <data name="&gt;&gt;chkCreateBackup.ZOrder" xml:space="preserve">
+    <value>3</value>
+  </data>
+  <data name="chkPreviewChanges.AutoSize" type="System.Boolean, mscorlib">
+    <value>True</value>
+  </data>
+  <data name="chkPreviewChanges.Enabled" type="System.Boolean, mscorlib">
+    <value>False</value>
+  </data>
+  <data name="chkPreviewChanges.Location" type="System.Drawing.Point, System.Drawing">
+    <value>425, 136</value>
+  </data>
+  <data name="chkPreviewChanges.Size" type="System.Drawing.Size, System.Drawing">
+    <value>217, 17</value>
+  </data>
+  <data name="chkPreviewChanges.TabIndex" type="System.Int32, mscorlib">
+    <value>19</value>
+  </data>
+  <data name="chkPreviewChanges.Text" xml:space="preserve">
+    <value>Preview changes without modifying files</value>
+  </data>
+  <data name="&gt;&gt;chkPreviewChanges.Name" xml:space="preserve">
+    <value>chkPreviewChanges</value>
+  </data>
+  <data name="&gt;&gt;chkPreviewChanges.Type" xml:space="preserve">
+    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </data>
+  <data name="&gt;&gt;chkPreviewChanges.Parent" xml:space="preserve">
+    <value>$this</value>
+  </data>
+  <data name="&gt;&gt;chkPreviewChanges.ZOrder" xml:space="preserve">
+    <value>3</value>
   </data>
   <metadata name="$this.Localizable" type="System.Boolean, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
     <value>True</value>

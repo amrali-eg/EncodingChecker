@@ -211,6 +211,8 @@ public sealed class ScanEngineValidationTests : IDisposable
             "utf-8",
             targetWriteBom: false,
             ScanEngine.DefaultMaxParallelism,
+            whatIf: false,
+            backup: false,
             converted.Add,
             CancellationToken.None);
 
@@ -295,6 +297,8 @@ public sealed class ScanEngineValidationTests : IDisposable
                 "not-a-real-encoding",
                 targetWriteBom: false,
                 ScanEngine.DefaultMaxParallelism,
+                whatIf: false,
+                backup: false,
                 onEntry: _ => { },
                 CancellationToken.None));
     }
@@ -321,6 +325,8 @@ public sealed class ScanEngineValidationTests : IDisposable
             "utf-8",
             targetWriteBom: false,
             ScanEngine.DefaultMaxParallelism,
+            whatIf: false,
+            backup: false,
             onEntry: completed.Add,
             CancellationToken.None);
 
