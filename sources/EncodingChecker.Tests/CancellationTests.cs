@@ -163,13 +163,14 @@ public sealed class CancellationTests : IDisposable
                 "utf-8",
                 targetWriteBom: true,
                 maxParallelism: 1,
+                whatIf: true,
+                backup: false,
                 onEntry: _ =>
                 {
                     Interlocked.Increment(ref deliveredCount);
                     cts.Cancel();
                 },
-                cts.Token,
-                whatIf: true));
+                cts.Token));
 
         // The run stopped early rather than delivering every entry anyway.
         Assert.True(
@@ -206,6 +207,8 @@ public sealed class CancellationTests : IDisposable
                 "utf-16",
                 targetWriteBom: true,
                 ScanEngine.DefaultMaxParallelism,
+                whatIf: false,
+                backup: false,
                 onEntry: _ => { },
                 cts.Token));
 

@@ -53,10 +53,10 @@ public sealed class ConvertFilesPreviewAndBackupTests : IDisposable
             "utf-8",
             targetWriteBom: true,
             ScanEngine.DefaultMaxParallelism,
-            completed.Add,
-            CancellationToken.None,
             whatIf: false,
-            backup: false);
+            backup: false,
+            completed.Add,
+            CancellationToken.None);
 
         Assert.Equal(ConversionRowResult.Converted, Assert.Single(completed).Result);
         Assert.False(File.Exists(path + ".bak"));
@@ -75,10 +75,10 @@ public sealed class ConvertFilesPreviewAndBackupTests : IDisposable
             "utf-8",
             targetWriteBom: true,
             ScanEngine.DefaultMaxParallelism,
-            completed.Add,
-            CancellationToken.None,
             whatIf: false,
-            backup: true);
+            backup: true,
+            completed.Add,
+            CancellationToken.None);
 
         Assert.Equal(ConversionRowResult.Converted, Assert.Single(completed).Result);
         Assert.True(File.Exists(path + ".bak"));
@@ -100,10 +100,10 @@ public sealed class ConvertFilesPreviewAndBackupTests : IDisposable
             "utf-8",
             targetWriteBom: true,
             ScanEngine.DefaultMaxParallelism,
-            completed.Add,
-            CancellationToken.None,
             whatIf: true,
-            backup: true); // Both checkboxes checked - Preview must still win (see ApplyConversion).
+            backup: true, // Both checkboxes checked - Preview must still win (see ApplyConversion).
+            completed.Add,
+            CancellationToken.None);
 
         // "Converted" is this codebase's existing convention for "would be converted"
         // under a dry run (see ConversionRowResult.Converted's own doc comment) - the
@@ -135,10 +135,10 @@ public sealed class ConvertFilesPreviewAndBackupTests : IDisposable
             "utf-8",
             targetWriteBom: true,
             ScanEngine.DefaultMaxParallelism,
-            completed.Add,
-            CancellationToken.None,
             whatIf: true,
-            backup: false);
+            backup: false,
+            completed.Add,
+            CancellationToken.None);
 
         Assert.Equal(ConversionRowResult.Unchanged, Assert.Single(completed).Result);
         Assert.Equal(originalBytes, File.ReadAllBytes(path));
@@ -176,10 +176,10 @@ public sealed class ConvertFilesPreviewAndBackupTests : IDisposable
             "utf-8",
             targetWriteBom: true,
             ScanEngine.DefaultMaxParallelism,
-            completed.Add,
-            CancellationToken.None,
             whatIf: true,
-            backup: true);
+            backup: true,
+            completed.Add,
+            CancellationToken.None);
 
         Assert.Equal(2, completed.Count);
         Assert.Equal(originalA, File.ReadAllBytes(needsConversion));
@@ -195,11 +195,12 @@ public sealed class ConvertFilesPreviewAndBackupTests : IDisposable
     }
 
     [Fact]
-    public void OmittingTheNewParameters_BehavesExactlyAsBeforeThisFeature()
+    public void ExplicitFalseFalse_BehavesExactlyAsBeforeThisFeature()
     {
         // Regression guard for every pre-existing caller (MainForm's non-preview/non-
-        // backup path, and every existing test): the new parameters default to false,
-        // false, so a real conversion happens and no backup is created, unchanged.
+        // backup path, and every existing test): whatIf: false, backup: false is a real
+        // conversion with no backup, exactly as ConvertFiles behaved before it gained
+        // these two parameters.
         string path = Path.Combine(_root, "f.txt");
         File.WriteAllText(path, TestContent.Ascii, Encoding.ASCII);
         byte[] originalBytes = File.ReadAllBytes(path);
@@ -210,6 +211,8 @@ public sealed class ConvertFilesPreviewAndBackupTests : IDisposable
             "utf-8",
             targetWriteBom: true,
             ScanEngine.DefaultMaxParallelism,
+            whatIf: false,
+            backup: false,
             completed.Add,
             CancellationToken.None);
 

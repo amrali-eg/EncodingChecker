@@ -609,10 +609,10 @@ public partial class MainForm : Form
                 args.TargetBaseCharset,
                 args.TargetWriteBom,
                 ScanEngine.DefaultMaxParallelism,
-                onEntry: args.Completed.Add,
-                args.CancellationToken,
                 whatIf: args.WhatIf,
-                backup: args.Backup);
+                backup: args.Backup,
+                onEntry: args.Completed.Add,
+                args.CancellationToken);
         }
         catch (OperationCanceledException)
         {

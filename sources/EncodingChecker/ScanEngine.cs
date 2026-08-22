@@ -195,10 +195,10 @@ internal static class ScanEngine
         string targetCharset,
         bool targetWriteBom,
         int maxParallelism,
+        bool whatIf,
+        bool backup,
         Action<ConversionReportEntry> onEntry,
-        CancellationToken cancellationToken,
-        bool whatIf = false,
-        bool backup = false)
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(entries);
         ArgumentNullException.ThrowIfNull(onEntry);
