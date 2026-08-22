@@ -30,6 +30,7 @@ public partial class MainForm : Form
         internal required List<ConversionReportEntry> Entries;
         internal required string TargetBaseCharset;
         internal required bool TargetWriteBom;
+        internal required ConcurrentBag<ConversionReportEntry> Completed;
         internal CancellationToken CancellationToken;
     }
 
@@ -51,6 +52,12 @@ public partial class MainForm : Form
     // Set by OnConvert, read back by ConvertWorkerCompleted; never touched by the worker thread.
     private Dictionary<string, ListViewItem>? _convertItemsByPath;
     private string? _convertTargetLabel;
+
+    // Filled by the worker thread, read by ConvertWorkerCompleted once it finishes.
+    // RunWorkerCompletedEventArgs.Result cannot carry this: its getter throws
+    // InvalidOperationException whenever the operation was cancelled, which is exactly
+    // when the partial results still need to be applied to the list.
+    private ConcurrentBag<ConversionReportEntry>? _convertResults;
 
     private const int RESULTS_COLUMN_CHARSET = 0;
     private const int RESULTS_COLUMN_FILE_NAME = 1;
@@ -495,8 +502,11 @@ public partial class MainForm : Form
             entries.Add(entry);
         }
 
+        var completed = new ConcurrentBag<ConversionReportEntry>();
+
         _convertItemsByPath = itemsByPath;
         _convertTargetLabel = targetLabel;
+        _convertResults = completed;
         _currentAction = CurrentAction.Convert;
 
         UpdateControlsOnActionStart();
@@ -509,6 +519,7 @@ public partial class MainForm : Form
             Entries = entries,
             TargetBaseCharset = targetBaseCharset,
             TargetWriteBom = writeBom,
+            Completed = completed,
             CancellationToken = _actionCancellation.Token,
         };
 
@@ -580,13 +591,13 @@ public partial class MainForm : Form
         }
     }
 
-    // No per-file progress to report; results are applied in one batch in ConvertWorkerCompleted.
+    // No per-file progress to report; results are applied in one batch in
+    // ConvertWorkerCompleted. Results accumulate into args.Completed (the caller's
+    // _convertResults) rather than e.Result, which is unreadable once e.Cancel is set.
     private static void ConvertWorkerDoWork(
         ConvertWorkerArgs args,
         DoWorkEventArgs e)
     {
-        var completed = new ConcurrentBag<ConversionReportEntry>();
-
         try
         {
             ScanEngine.ConvertFiles(
@@ -594,15 +605,13 @@ public partial class MainForm : Form
                 args.TargetBaseCharset,
                 args.TargetWriteBom,
                 ScanEngine.DefaultMaxParallelism,
-                onEntry: completed.Add,
+                onEntry: args.Completed.Add,
                 args.CancellationToken);
         }
         catch (OperationCanceledException)
         {
             e.Cancel = true;
         }
-
-        e.Result = completed;
     }
 
     // GUI masks are newline-separated; ScanEngine receives split patterns.
@@ -702,9 +711,11 @@ public partial class MainForm : Form
     {
         string targetLabel = _convertTargetLabel!;
         Dictionary<string, ListViewItem> itemsByPath = _convertItemsByPath!;
+        ConcurrentBag<ConversionReportEntry> completed = _convertResults ?? [];
 
         _convertItemsByPath = null;
         _convertTargetLabel = null;
+        _convertResults = null;
 
         if (e.Error != null)
         {
@@ -715,9 +726,6 @@ public partial class MainForm : Form
             UpdateControlsOnActionDone("Conversion failed.");
             return;
         }
-
-        // ConvertWorkerDoWork always assigns e.Result, even when cancelled.
-        var completed = (ConcurrentBag<ConversionReportEntry>)e.Result!;
 
         int convertedCount = 0;
         int unchangedCount = 0;
