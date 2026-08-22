@@ -218,7 +218,7 @@ internal static class DirectoryTraversal
                         .Replace(@"\*", ".*")
                         .Replace(@"\?", ".") +
                     "$",
-                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled))
         ];
     }
 }
