@@ -60,6 +60,33 @@ public sealed class BackupIntegrityTests : IDisposable
     }
 
     [Fact]
+    public void Backup_SuccessfulConversion_LeavesNoTempArtifactBehind()
+    {
+        // The backup is now written via a temp-file-then-atomic-replace sequence
+        // (matching LineEndingNormalizer's LosslessFileWriter.CreateBackup), not a
+        // plain File.Copy - confirm the "*.bak.<guid>.tmp" sibling never survives.
+        string path = Path.Combine(_root, "convert-me.txt");
+        File.WriteAllText(path, TestContent.Multilingual, new UTF8Encoding(false));
+
+        var options = new ScanDirectoryOptions
+        {
+            BaseDirectory = _root,
+            Action = ScanAction.Convert,
+            TargetCharset = "utf-16",
+            TargetWriteBom = true,
+            Backup = true,
+        };
+
+        var entries = new List<ConversionReportEntry>();
+        ScanEngine.ScanDirectory(options, entries.Add, CancellationToken.None);
+
+        Assert.Equal(ConversionRowResult.Converted, Assert.Single(entries).Result);
+        Assert.True(File.Exists(path + ".bak"));
+        // Temp filename shape: "<name>.<guid>.bak.tmp" - the guid precedes ".bak.tmp".
+        Assert.Empty(Directory.GetFiles(_root, "*.bak.tmp"));
+    }
+
+    [Fact]
     public void Backup_OverwritesAnyPreviousBackupFile()
     {
         string path = Path.Combine(_root, "convert-me.txt");

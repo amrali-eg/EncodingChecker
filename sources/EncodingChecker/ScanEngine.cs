@@ -366,10 +366,7 @@ namespace EncodingChecker
             {
                 try
                 {
-                    File.Copy(
-                        path,
-                        path + ".bak",
-                        overwrite: true);
+                    CreateBackup(path);
                 }
                 catch (Exception ex) when (
                     ex is IOException or UnauthorizedAccessException)
@@ -401,6 +398,63 @@ namespace EncodingChecker
             if (!result.Success)
                 entry.Diagnostic =
                     $"{result.ErrorCode}: {result.ErrorMessage}";
+        }
+
+        /// <summary>
+        /// Writes "<paramref name="path"/>.bak" via a temp-file-then-atomic-replace
+        /// sequence, so a crash mid-write can't leave a truncated/corrupt backup - the
+        /// same crash-safety as the main conversion write, instead of a plain File.Copy.
+        /// </summary>
+        private static void CreateBackup(string path)
+        {
+            string? directory = Path.GetDirectoryName(path);
+
+            if (string.IsNullOrEmpty(directory))
+            {
+                throw new IOException(
+                    $"Could not determine a directory for path '{path}'.");
+            }
+
+            string tempPath = Path.Combine(
+                directory,
+                $"{Path.GetFileName(path)}.{Guid.NewGuid():N}.bak.tmp");
+
+            try
+            {
+                using (FileStream source = new(
+                           path,
+                           FileMode.Open,
+                           FileAccess.Read,
+                           FileShare.Read,
+                           EncodingConverter.DEFAULT_BUFFER_SIZE,
+                           FileOptions.SequentialScan))
+                using (FileStream destination = new(
+                           tempPath,
+                           FileMode.CreateNew,
+                           FileAccess.Write,
+                           FileShare.None,
+                           EncodingConverter.DEFAULT_BUFFER_SIZE,
+                           FileOptions.SequentialScan))
+                {
+                    source.CopyTo(destination, EncodingConverter.DEFAULT_BUFFER_SIZE);
+                    destination.Flush(flushToDisk: true);
+                }
+
+                EncodingConverter.AtomicReplaceForBackup(tempPath, path + ".bak");
+            }
+            finally
+            {
+                try
+                {
+                    if (File.Exists(tempPath))
+                        File.Delete(tempPath);
+                }
+                catch (Exception ex) when (
+                    ex is IOException or UnauthorizedAccessException)
+                {
+                    // Cleanup failure does not affect the backup result.
+                }
+            }
         }
 
         #endregion
