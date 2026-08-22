@@ -580,6 +580,14 @@ namespace EncodingChecker
                 return false;
             }
 
+            if (DirectoryTraversal.IsReparsePointDirectory(options.BasePath))
+            {
+                error =
+                    $"'{options.BasePath}' is a symbolic link or other reparse point; " +
+                    "-BasePath must be a real directory.";
+                return false;
+            }
+
             if (options is
                 {
                     DetectOnly: true,

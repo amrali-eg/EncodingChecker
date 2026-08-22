@@ -131,6 +131,14 @@ namespace EncodingChecker
                     nameof(options));
             }
 
+            if (DirectoryTraversal.IsReparsePointDirectory(options.BaseDirectory))
+            {
+                throw new ArgumentException(
+                    $"Base directory '{options.BaseDirectory}' is a symbolic link or " +
+                    "other reparse point.",
+                    nameof(options));
+            }
+
             if (options.MaxParallelism < 1)
             {
                 throw new ArgumentOutOfRangeException(

@@ -47,6 +47,23 @@ internal static class DirectoryTraversal
         fileName.EndsWith("." + EncodingConverter.TEMP_FILE_SUFFIX, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Returns true for symlink, junction, or other reparse-point directories.
+    /// Attribute-read failures are treated conservatively (unsafe to walk).
+    /// </summary>
+    internal static bool IsReparsePointDirectory(string dir)
+    {
+        try
+        {
+            return (File.GetAttributes(dir) & FileAttributes.ReparsePoint) != 0;
+        }
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Enumerates matching files while skipping excluded directories and reparse points.
     /// Inaccessible directories are skipped.
     /// </summary>
