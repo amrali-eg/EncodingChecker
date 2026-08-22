@@ -25,10 +25,13 @@ jobs:
       - name: Test
         run: dotnet test sources\EncodingChecker.sln --configuration Release --no-build
 
+      - name: Publish single-file executable
+        run: dotnet publish sources\EncodingChecker\EncodingChecker.csproj -p:PublishProfile=FolderProfile
+
       - name: Package
         shell: pwsh
         run: |
-          Compress-Archive -Path "sources\EncodingChecker\bin\Release\net10.0-windows\*" -DestinationPath "EncodingChecker.zip"
+          Compress-Archive -Path "sources\EncodingChecker\bin\Release\net10.0-windows\publish\win-x64\*" -DestinationPath "EncodingChecker.zip"
 
       - name: Create GitHub release
         env:
