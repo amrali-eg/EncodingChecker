@@ -120,7 +120,8 @@ internal static class ScanEngine
             files,
             options.MaxParallelism,
             getPath: path => path,
-            processItem: path => ProcessFileForScan(path, options, targetEncoding),
+            processItem: path =>
+                ProcessFileForScan(path, options, targetEncoding, cancellationToken),
             onEntry: onEntry,
             cancellationToken);
     }
@@ -233,7 +234,8 @@ internal static class ScanEngine
                     targetEncoding,
                     targetWriteBom,
                     whatIf: false,
-                    backup: false);
+                    backup: false,
+                    cancellationToken);
 
                 return entry;
             },
@@ -266,7 +268,8 @@ internal static class ScanEngine
     private static ConversionReportEntry? ProcessFileForScan(
         string path,
         ScanDirectoryOptions options,
-        Encoding? targetEncoding)
+        Encoding? targetEncoding,
+        CancellationToken cancellationToken)
     {
         Encoding? detected = TextEncoding.DetectFromFile(path);
 
@@ -325,7 +328,8 @@ internal static class ScanEngine
                         targetEncoding!,
                         options.TargetWriteBom,
                         options.WhatIf,
-                        options.Backup);
+                        options.Backup,
+                        cancellationToken);
                 }
                 else
                 {
@@ -349,7 +353,8 @@ internal static class ScanEngine
         Encoding targetEncoding,
         bool targetWriteBom,
         bool whatIf,
-        bool backup)
+        bool backup,
+        CancellationToken cancellationToken)
     {
         entry.TargetEncoding = targetCharset;
         entry.TargetHasBom = targetWriteBom;
@@ -393,13 +398,25 @@ internal static class ScanEngine
             WriteBom = targetWriteBom,
         };
 
+        // Without the token, Parallel.ForEach could only observe cancellation between
+        // files, so a large in-flight conversion had to finish first. Convert's own
+        // checkpoints make cancelling mid-file safe: nothing is installed until the
+        // temp file is written, verified, and atomically replaced.
         ConversionResult result =
             EncodingConverter.Convert(
                 path,
                 path,
                 sourceEncoding,
                 targetEncoding,
-                conversionOptions);
+                conversionOptions,
+                progress: null,
+                cancellationToken);
+
+        // Convert reports cancellation as a result code rather than an exception.
+        // Rethrow it so a user-initiated cancel unwinds the scan like every other
+        // cancellation instead of being recorded as a per-file conversion failure.
+        if (result.ErrorCode == ConversionErrorCode.Cancelled)
+            throw new OperationCanceledException(cancellationToken);
 
         entry.Result =
             result.Success
