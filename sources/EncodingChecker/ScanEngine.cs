@@ -425,9 +425,11 @@ internal static class ScanEngine
                 $"Could not determine a directory for path '{path}'.");
         }
 
+        // Sharing the conversion temp suffix means this file is excluded from future
+        // scans by DirectoryTraversal's existing rule, rather than needing a second one.
         string tempPath = Path.Combine(
             directory,
-            $"{Path.GetFileName(path)}.{Guid.NewGuid():N}.bak.tmp");
+            $"{Path.GetFileName(path)}.{Guid.NewGuid():N}.bak.{EncodingConverter.TEMP_FILE_SUFFIX}");
 
         try
         {

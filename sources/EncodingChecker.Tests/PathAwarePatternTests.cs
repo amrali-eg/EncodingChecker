@@ -35,12 +35,13 @@ public sealed class PathAwarePatternTests : IDisposable
         }
     }
 
-    private HashSet<string> Scan(string includePattern)
+    private HashSet<string> Scan(string includePattern, string? excludePattern = null)
     {
         var options = new ScanDirectoryOptions
         {
             BaseDirectory = _root,
             IncludePatterns = [includePattern],
+            ExcludePatterns = excludePattern is null ? null : [excludePattern],
             Action = ScanAction.Detect,
         };
 
@@ -83,5 +84,28 @@ public sealed class PathAwarePatternTests : IDisposable
         HashSet<string> withBackslash = Scan(@"src\*.cs");
 
         Assert.Equal(withSlash, withBackslash);
+    }
+
+    [Fact]
+    public void SeparatorFreeInclude_MatchesFileAtNestedDepth()
+    {
+        // b.cs only exists at src/nested/b.cs; a separator-free mask must still find it
+        // there, per the documented "matches the filename at any depth" contract.
+        HashSet<string> found = Scan("b.cs");
+
+        Assert.Equal(new HashSet<string> { "src/nested/b.cs" }, found);
+    }
+
+    [Fact]
+    public void SeparatorFreeExclude_ExcludesNestedFile_ButNotASimilarlyNamedOne()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "Properties"));
+        File.WriteAllText(Path.Combine(_root, "Properties", "AssemblyInfo.cs"), "x");
+        File.WriteAllText(Path.Combine(_root, "Properties", "AssemblyInfoHelper.cs"), "x");
+
+        HashSet<string> found = Scan("*.cs", excludePattern: "AssemblyInfo.cs");
+
+        Assert.DoesNotContain("Properties/AssemblyInfo.cs", found);
+        Assert.Contains("Properties/AssemblyInfoHelper.cs", found);
     }
 }

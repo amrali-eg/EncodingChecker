@@ -58,6 +58,50 @@ public sealed class ReportSelfExclusionTests : IDisposable
     }
 
     [Fact]
+    public void ReportInsideScannedTree_WithRelativeBaseDirectory_IsExcludedFromALaterScan()
+    {
+        // The bug this guards: excludedFullPath is always absolute, but a relative
+        // BaseDirectory (e.g. "-BasePath .") makes enumerated file paths relative too,
+        // so a naive string comparison never matches and a later run rescans its own
+        // report as ordinary input.
+        string sourcePath = Path.Combine(_root, "source.txt");
+        File.WriteAllText(sourcePath, TestContent.Multilingual, new UTF8Encoding(false));
+
+        string reportPath = Path.Combine(_root, "report.csv");
+
+        string originalDirectory = Environment.CurrentDirectory;
+
+        try
+        {
+            Environment.CurrentDirectory = _root;
+
+            var options = new ScanDirectoryOptions
+            {
+                BaseDirectory = ".",
+                IncludePatterns = ["*"],
+                ExcludedFullPath = Path.GetFullPath(reportPath),
+                Action = ScanAction.Detect,
+            };
+
+            var firstRun = new List<ConversionReportEntry>();
+            ScanEngine.ScanDirectory(options, firstRun.Add, CancellationToken.None);
+            Assert.Single(firstRun);
+
+            File.WriteAllText(reportPath, "File,Encoding,BOM,Target,BOM,Result\r\n", new UTF8Encoding(false));
+
+            var secondRun = new List<ConversionReportEntry>();
+            ScanEngine.ScanDirectory(options, secondRun.Add, CancellationToken.None);
+
+            ConversionReportEntry onlyEntry = Assert.Single(secondRun);
+            Assert.DoesNotContain("report.csv", onlyEntry.FilePath, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Environment.CurrentDirectory = originalDirectory;
+        }
+    }
+
+    [Fact]
     public void ReportOutsideScannedTree_ExcludedFullPathHasNoEffect()
     {
         string sourcePath = Path.Combine(_root, "source.txt");

@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace EncodingChecker.Tests;
 
@@ -62,7 +63,7 @@ public sealed class BackupIntegrityTests : IDisposable
     public void Backup_SuccessfulConversion_LeavesNoTempArtifactBehind()
     {
         // Backup is now temp-file-then-atomic-replace, not a plain File.Copy -
-        // confirm the "*.bak.<guid>.tmp" sibling never survives.
+        // confirm the "*.bak.<TEMP_FILE_SUFFIX>" sibling never survives.
         string path = Path.Combine(_root, "convert-me.txt");
         File.WriteAllText(path, TestContent.Multilingual, new UTF8Encoding(false));
 
@@ -80,8 +81,8 @@ public sealed class BackupIntegrityTests : IDisposable
 
         Assert.Equal(ConversionRowResult.Converted, Assert.Single(entries).Result);
         Assert.True(File.Exists(path + ".bak"));
-        // Temp filename shape: "<name>.<guid>.bak.tmp" - the guid precedes ".bak.tmp".
-        Assert.Empty(Directory.GetFiles(_root, "*.bak.tmp"));
+        // Temp filename shape: "<name>.<guid>.bak.<TEMP_FILE_SUFFIX>".
+        Assert.Empty(Directory.GetFiles(_root, $"*.bak.{EncodingConverter.TEMP_FILE_SUFFIX}"));
     }
 
     [Fact]
@@ -150,6 +151,33 @@ public sealed class BackupIntegrityTests : IDisposable
         ConversionReportEntry onlyEntry = Assert.Single(secondRun);
         Assert.Equal(path, onlyEntry.FilePath);
         Assert.False(File.Exists(backupPath + ".bak"));
+    }
+
+    [Theory]
+    [InlineData("convert-me.txt.abc123456789abcdef.bak.unicodechecker.tmp", false)] // new backup temp shape
+    [InlineData("convert-me.txt.ABC123456789ABCDEF.BAK.UNICODECHECKER.TMP", false)] // case-insensitive
+    [InlineData("convert-me.txt.bak", false)]                                       // installed backup
+    [InlineData("convert-me.txt.abc123456789abcdef.unicodechecker.tmp", false)]     // normal converter temp
+    [InlineData("convert-me.txt.tmp", true)]                                        // ordinary .tmp, not ours
+    [InlineData("convert-me.txt.abc.unicodechecker.tmpx", true)]                    // near-miss suffix
+    [InlineData("convert-me.txt", true)]
+    public void BackupTempFileShape_IsExcludedFromEnumeration_LikeOtherToolGeneratedFiles(
+        string fileName, bool expectedCandidate)
+    {
+        File.WriteAllText(Path.Combine(_root, fileName), "x");
+
+        List<Regex> matchAll = DirectoryTraversal.CompilePatterns(["*"], defaultToMatchAll: true);
+
+        var found = DirectoryTraversal.EnumerateFiles(
+            _root,
+            includeSubdirectories: false,
+            matchAll,
+            [],
+            excludedFullPath: null,
+            onWarning: null).ToList();
+
+        bool isCandidate = found.Any(f => Path.GetFileName(f) == fileName);
+        Assert.Equal(expectedCandidate, isCandidate);
     }
 
     [Fact]

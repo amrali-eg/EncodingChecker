@@ -118,8 +118,12 @@ internal static class DirectoryTraversal
                 if (IsAlwaysExcludedFile(fileName))
                     continue;
 
+                // excludedFullPath is always absolute (Path.GetFullPath'd by the caller), but
+                // file is rooted at baseDirectory as given, which may itself be relative (e.g.
+                // -BasePath "."); compare full paths so the exclusion still matches instead of
+                // silently doing nothing.
                 if (excludedFullPath is not null &&
-                    string.Equals(file, excludedFullPath, StringComparison.OrdinalIgnoreCase))
+                    string.Equals(Path.GetFullPath(file), excludedFullPath, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
@@ -213,13 +217,25 @@ internal static class DirectoryTraversal
         return
         [
             .. effectivePatterns.Select(mask =>
-                new Regex(
-                    "^" +
+            {
+                // A separator-free mask must match the filename at any depth, not just
+                // at the scan root, so it needs an optional directory prefix.
+                bool hasSeparator = mask.Contains('/') || mask.Contains('\\');
+
+                string body =
                     Regex.Escape(mask.Replace('\\', '/'))
                         .Replace(@"\*", ".*")
-                        .Replace(@"\?", ".") +
-                    "$",
-                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled))
+                        .Replace(@"\?", ".");
+
+                string anchored =
+                    hasSeparator
+                        ? "^" + body + "$"
+                        : "^(?:.*/)?" + body + "$";
+
+                return new Regex(
+                    anchored,
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+            })
         ];
     }
 }
