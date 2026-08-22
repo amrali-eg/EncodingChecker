@@ -11,6 +11,9 @@ namespace EncodingChecker
         /// <summary>No change was needed.</summary>
         Unchanged,
 
+        /// <summary>Encoding could not be determined, so no action was attempted.</summary>
+        Skipped,
+
         /// <summary>Successfully converted, or would be under a dry run.</summary>
         Converted,
 

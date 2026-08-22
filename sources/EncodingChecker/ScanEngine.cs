@@ -209,7 +209,10 @@ namespace EncodingChecker
                 processItem: entry =>
                 {
                     if (entry.SourceEncoding == "(Unknown)")
+                    {
+                        entry.Result = ConversionRowResult.Skipped;
                         return entry;
+                    }
 
                     Encoding sourceEncoding;
 
@@ -288,6 +291,9 @@ namespace EncodingChecker
             switch (options.Action)
             {
                 case ScanAction.Detect:
+                    if (sourceCharset == "(Unknown)")
+                        entry.Result = ConversionRowResult.Skipped;
+
                     break;
 
                 case ScanAction.Validate:
@@ -321,6 +327,10 @@ namespace EncodingChecker
                             options.TargetWriteBom,
                             options.WhatIf,
                             options.Backup);
+                    }
+                    else
+                    {
+                        entry.Result = ConversionRowResult.Skipped;
                     }
 
                     break;

@@ -385,6 +385,7 @@ namespace EncodingChecker
             Console.Out.WriteLine(
                 $"Total: {entries.Count}  " +
                 $"Unchanged: {byResult.GetValueOrDefault(ConversionRowResult.Unchanged)}  " +
+                $"Skipped: {byResult.GetValueOrDefault(ConversionRowResult.Skipped)}  " +
                 $"Converted: {byResult.GetValueOrDefault(ConversionRowResult.Converted)}  " +
                 $"Invalid: {byResult.GetValueOrDefault(ConversionRowResult.Invalid)}  " +
                 $"Error: {byResult.GetValueOrDefault(ConversionRowResult.Error)}");

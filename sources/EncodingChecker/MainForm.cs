@@ -790,6 +790,11 @@ namespace EncodingChecker
                 Debug.WriteLine(
                     $"Conversion failed for {entry.FilePath}: {entry.Diagnostic}");
             }
+            else if (entry.Result == ConversionRowResult.Skipped)
+            {
+                Debug.WriteLine(
+                    $"Conversion skipped for {entry.FilePath}: encoding could not be determined.");
+            }
             // Unchanged: already matched the target; nothing was written, row stays as-is.
         }
 
