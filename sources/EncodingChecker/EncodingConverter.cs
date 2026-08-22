@@ -284,7 +284,23 @@ internal static class EncodingConverter
             cancellationToken.ThrowIfCancellationRequested();
 
             // Sanity-check that the source did not change during conversion.
+            // A point-in-time race check, not a complete TOCTOU guarantee: the source
+            // could still change between this check and installation below.
             FileInfo recheckInfo = new(sourcePath);
+
+            if (IsReparsePoint(recheckInfo))
+            {
+                return Failure(
+                    ConversionErrorCode.ReparsePointRejected,
+                    "The source became a symbolic link or other reparse point during " +
+                    "conversion; installation was rejected.",
+                    sourceEncoding,
+                    targetEncoding) with
+                {
+                    SourceBytes = sourceBytesProcessed,
+                    TargetBytes = targetBytesWritten,
+                };
+            }
 
             if (recheckInfo.Length != capturedLength ||
                 recheckInfo.LastWriteTimeUtc != capturedLastWriteUtc)
