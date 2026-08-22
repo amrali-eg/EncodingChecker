@@ -12,6 +12,10 @@ jobs:
   release:
     runs-on: windows-latest
 
+    env:
+      CODE_SIGNING_CERT: ${{ secrets.CODE_SIGNING_CERT }}
+      CODE_SIGNING_CERT_PASSWORD: ${{ secrets.CODE_SIGNING_CERT_PASSWORD }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -32,10 +36,7 @@ jobs:
         run: dotnet publish sources\EncodingChecker\EncodingChecker.csproj -p:PublishProfile=SelfContainedRelease
 
       - name: Code-sign executables
-        if: ${{ secrets.CODE_SIGNING_CERT != '' && secrets.CODE_SIGNING_CERT_PASSWORD != '' }}
-        env:
-          CODE_SIGNING_CERT: ${{ secrets.CODE_SIGNING_CERT }}
-          CODE_SIGNING_CERT_PASSWORD: ${{ secrets.CODE_SIGNING_CERT_PASSWORD }}
+        if: ${{ env.CODE_SIGNING_CERT != '' && env.CODE_SIGNING_CERT_PASSWORD != '' }}
         shell: pwsh
         run: |
           $certPath = Join-Path $env:RUNNER_TEMP "codesign.pfx"
