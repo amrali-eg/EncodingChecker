@@ -58,6 +58,8 @@ partial class MainForm
         lstConvert = new System.Windows.Forms.ComboBox();
         btnConvert = new System.Windows.Forms.Button();
         chkSelectDeselectAll = new System.Windows.Forms.CheckBox();
+        chkCreateBackup = new System.Windows.Forms.CheckBox();
+        chkPreviewChanges = new System.Windows.Forms.CheckBox();
         btnCancel = new System.Windows.Forms.Button();
         lblBaseDirectory = new System.Windows.Forms.Label();
         lblFileMasks = new System.Windows.Forms.Label();
@@ -68,73 +70,73 @@ partial class MainForm
         colDirectory = new System.Windows.Forms.ColumnHeader();
         statusBar.SuspendLayout();
         SuspendLayout();
-        // 
+        //
         // lblBaseDirectory
-        // 
+        //
         resources.ApplyResources(lblBaseDirectory, "lblBaseDirectory");
         lblBaseDirectory.Name = "lblBaseDirectory";
-        // 
+        //
         // lblFileMasks
-        // 
+        //
         resources.ApplyResources(lblFileMasks, "lblFileMasks");
         lblFileMasks.Name = "lblFileMasks";
-        // 
+        //
         // lblValidCharsets
-        // 
+        //
         resources.ApplyResources(lblValidCharsets, "lblValidCharsets");
         lblValidCharsets.Name = "lblValidCharsets";
-        // 
+        //
         // colEncoding
-        // 
+        //
         resources.ApplyResources(colEncoding, "colEncoding");
-        // 
+        //
         // colFileName
-        // 
+        //
         resources.ApplyResources(colFileName, "colFileName");
-        // 
+        //
         // colFileExt
-        // 
+        //
         resources.ApplyResources(colFileExt, "colFileExt");
-        // 
+        //
         // colDirectory
-        // 
+        //
         resources.ApplyResources(colDirectory, "colDirectory");
-        // 
+        //
         // btnBrowseDirectories
-        // 
+        //
         resources.ApplyResources(btnBrowseDirectories, "btnBrowseDirectories");
         btnBrowseDirectories.Name = "btnBrowseDirectories";
         btnBrowseDirectories.UseVisualStyleBackColor = true;
         btnBrowseDirectories.Click += OnBrowseDirectories;
-        // 
+        //
         // chkIncludeSubdirectories
-        // 
+        //
         resources.ApplyResources(chkIncludeSubdirectories, "chkIncludeSubdirectories");
         chkIncludeSubdirectories.Name = "chkIncludeSubdirectories";
         chkIncludeSubdirectories.UseVisualStyleBackColor = true;
-        // 
+        //
         // txtFileMasks
-        // 
+        //
         txtFileMasks.AcceptsReturn = true;
         resources.ApplyResources(txtFileMasks, "txtFileMasks");
         txtFileMasks.Name = "txtFileMasks";
-        // 
+        //
         // lstValidCharsets
-        // 
+        //
         lstValidCharsets.CheckOnClick = true;
         lstValidCharsets.FormattingEnabled = true;
         resources.ApplyResources(lstValidCharsets, "lstValidCharsets");
         lstValidCharsets.Name = "lstValidCharsets";
-        // 
+        //
         // btnValidate
-        // 
+        //
         resources.ApplyResources(btnValidate, "btnValidate");
         btnValidate.Name = "btnValidate";
         btnValidate.UseVisualStyleBackColor = true;
         btnValidate.Click += OnAction;
-        // 
+        //
         // lstResults
-        // 
+        //
         resources.ApplyResources(lstResults, "lstResults");
         lstResults.CheckBoxes = true;
         lstResults.Columns.AddRange(new System.Windows.Forms.ColumnHeader[] { colEncoding, colFileName, colFileExt, colDirectory });
@@ -146,123 +148,137 @@ partial class MainForm
         lstResults.View = System.Windows.Forms.View.Details;
         lstResults.ColumnClick += OnResultColumnClick;
         lstResults.ItemChecked += OnResultItemChecked;
-        // 
+        //
         // imgsResults
-        // 
+        //
         imgsResults.ColorDepth = System.Windows.Forms.ColorDepth.Depth32Bit;
         imgsResults.ImageStream = (System.Windows.Forms.ImageListStreamer)resources.GetObject("imgsResults.ImageStream");
         imgsResults.TransparentColor = System.Drawing.Color.Transparent;
         imgsResults.Images.SetKeyName(0, "Successful");
         imgsResults.Images.SetKeyName(1, "Failed");
         imgsResults.Images.SetKeyName(2, "Warning");
-        // 
+        //
         // dlgBrowseDirectories
-        // 
+        //
         resources.ApplyResources(dlgBrowseDirectories, "dlgBrowseDirectories");
-        // 
+        //
         // statusBar
-        // 
+        //
         statusBar.Items.AddRange(new System.Windows.Forms.ToolStripItem[] { tlnkHelp, tlnkAbout, tlnkExport, btnExportReport, actionProgress, actionStatus });
         resources.ApplyResources(statusBar, "statusBar");
         statusBar.Name = "statusBar";
-        // 
+        //
         // tlnkHelp
-        // 
+        //
         tlnkHelp.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
         tlnkHelp.IsLink = true;
         tlnkHelp.Name = "tlnkHelp";
         resources.ApplyResources(tlnkHelp, "tlnkHelp");
         tlnkHelp.Click += OnHelp;
-        // 
+        //
         // tlnkAbout
-        // 
+        //
         tlnkAbout.IsLink = true;
         tlnkAbout.Name = "tlnkAbout";
         resources.ApplyResources(tlnkAbout, "tlnkAbout");
         tlnkAbout.Click += OnAbout;
-        // 
+        //
         // tlnkExport
-        // 
+        //
         tlnkExport.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
         tlnkExport.IsLink = true;
         tlnkExport.Name = "tlnkExport";
         resources.ApplyResources(tlnkExport, "tlnkExport");
         tlnkExport.Click += OnExport;
-        // 
+        //
         // btnExportReport
-        // 
+        //
         btnExportReport.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
         resources.ApplyResources(btnExportReport, "btnExportReport");
         btnExportReport.ForeColor = System.Drawing.Color.Blue;
         btnExportReport.Name = "btnExportReport";
         btnExportReport.ShowDropDownArrow = false;
         btnExportReport.Click += OnExportReport;
-        // 
+        //
         // actionProgress
-        // 
+        //
         actionProgress.Name = "actionProgress";
         resources.ApplyResources(actionProgress, "actionProgress");
         actionProgress.Style = System.Windows.Forms.ProgressBarStyle.Continuous;
-        // 
+        //
         // actionStatus
-        // 
+        //
         actionStatus.Name = "actionStatus";
         resources.ApplyResources(actionStatus, "actionStatus");
-        // 
+        //
         // btnView
-        // 
+        //
         resources.ApplyResources(btnView, "btnView");
         btnView.Name = "btnView";
         btnView.UseVisualStyleBackColor = true;
         btnView.Click += OnAction;
-        // 
+        //
         // lstBaseDirectory
-        // 
+        //
         lstBaseDirectory.AllowDrop = true;
         resources.ApplyResources(lstBaseDirectory, "lstBaseDirectory");
         lstBaseDirectory.FormattingEnabled = true;
         lstBaseDirectory.Name = "lstBaseDirectory";
         lstBaseDirectory.DragDrop += OnBaseDirectoryDragDrop;
         lstBaseDirectory.DragEnter += OnBaseDirectoryDragEnter;
-        // 
+        //
         // lblConvert
-        // 
+        //
         resources.ApplyResources(lblConvert, "lblConvert");
         lblConvert.Name = "lblConvert";
-        // 
+        //
         // lstConvert
-        // 
+        //
         lstConvert.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
         resources.ApplyResources(lstConvert, "lstConvert");
         lstConvert.FormattingEnabled = true;
         lstConvert.Name = "lstConvert";
-        // 
+        //
         // btnConvert
-        // 
+        //
         resources.ApplyResources(btnConvert, "btnConvert");
         btnConvert.Name = "btnConvert";
         btnConvert.UseVisualStyleBackColor = true;
         btnConvert.Click += OnConvert;
-        // 
+        //
         // chkSelectDeselectAll
-        // 
+        //
         resources.ApplyResources(chkSelectDeselectAll, "chkSelectDeselectAll");
         chkSelectDeselectAll.Name = "chkSelectDeselectAll";
         chkSelectDeselectAll.UseVisualStyleBackColor = true;
         chkSelectDeselectAll.CheckedChanged += OnSelectDeselectAll;
-        // 
+        //
         // btnCancel
-        // 
+        //
         resources.ApplyResources(btnCancel, "btnCancel");
         btnCancel.Name = "btnCancel";
         btnCancel.UseVisualStyleBackColor = true;
         btnCancel.Click += OnCancelAction;
-        // 
+        //
+        // chkCreateBackup
+        //
+        resources.ApplyResources(chkCreateBackup, "chkCreateBackup");
+        chkCreateBackup.Name = "chkCreateBackup";
+        chkCreateBackup.UseVisualStyleBackColor = true;
+        //
+        // chkPreviewChanges
+        //
+        resources.ApplyResources(chkPreviewChanges, "chkPreviewChanges");
+        chkPreviewChanges.Name = "chkPreviewChanges";
+        chkPreviewChanges.UseVisualStyleBackColor = true;
+        //
         // MainForm
-        // 
+        //
         AllowDrop = true;
         resources.ApplyResources(this, "$this");
         AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+        Controls.Add(chkCreateBackup);
+        Controls.Add(chkPreviewChanges);
         Controls.Add(btnCancel);
         Controls.Add(chkSelectDeselectAll);
         Controls.Add(btnConvert);
@@ -317,5 +333,7 @@ partial class MainForm
     private System.Windows.Forms.ImageList imgsResults;
     private System.Windows.Forms.ToolStripStatusLabel tlnkHelp;
     private System.Windows.Forms.ToolStripDropDownButton btnExportReport;
+    private System.Windows.Forms.CheckBox chkCreateBackup;
+    private System.Windows.Forms.CheckBox chkPreviewChanges;
 }
 

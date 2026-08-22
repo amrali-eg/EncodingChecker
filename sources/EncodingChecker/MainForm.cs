@@ -30,6 +30,8 @@ public partial class MainForm : Form
         internal required List<ConversionReportEntry> Entries;
         internal required string TargetBaseCharset;
         internal required bool TargetWriteBom;
+        internal required bool WhatIf;
+        internal required bool Backup;
         internal required ConcurrentBag<ConversionReportEntry> Completed;
         internal CancellationToken CancellationToken;
     }
@@ -519,6 +521,8 @@ public partial class MainForm : Form
             Entries = entries,
             TargetBaseCharset = targetBaseCharset,
             TargetWriteBom = writeBom,
+            WhatIf = chkPreviewChanges.Checked,
+            Backup = chkCreateBackup.Checked,
             Completed = completed,
             CancellationToken = _actionCancellation.Token,
         };
@@ -606,7 +610,9 @@ public partial class MainForm : Form
                 args.TargetWriteBom,
                 ScanEngine.DefaultMaxParallelism,
                 onEntry: args.Completed.Add,
-                args.CancellationToken);
+                args.CancellationToken,
+                whatIf: args.WhatIf,
+                backup: args.Backup);
         }
         catch (OperationCanceledException)
         {
@@ -984,6 +990,12 @@ public partial class MainForm : Form
         chkSelectDeselectAll.Enabled = false;
         chkSelectDeselectAll.CheckState =
             CheckState.Unchecked;
+
+        // Convert-only options; their checked state is the user's choice and must
+        // persist across runs, so only Enabled changes here - never CheckState.
+        chkCreateBackup.Enabled = false;
+        chkPreviewChanges.Enabled = false;
+
         btnExportReport.Visible = false;
 
         btnCancel.Visible = true;
@@ -1007,6 +1019,8 @@ public partial class MainForm : Form
             lstConvert.Enabled = true;
             btnConvert.Enabled = true;
             chkSelectDeselectAll.Enabled = true;
+            chkCreateBackup.Enabled = true;
+            chkPreviewChanges.Enabled = true;
 
             if (_currentAction == CurrentAction.Validate &&
                 lstValidCharsets.CheckedItems.Count > 0)

@@ -127,6 +127,60 @@ public sealed class CancellationTests : IDisposable
     }
 
     [Fact]
+    public void ConvertFiles_WhatIf_CancelledFromCallback_StopsRatherThanScanningEverything()
+    {
+        // Preview (MainForm's chkPreviewChanges -> ConvertFiles' whatIf parameter) does no
+        // writing, hashing, or backup, so it finishes too fast for a real GUI cancellation
+        // click to ever observe mid-run - confirmed empirically via live UI automation
+        // against an 80+ MB / 400-file workload. MaxParallelism 1 makes this deterministic
+        // instead: the first delivered entry cancels the run, proving the same
+        // ScanEngine.ConvertFiles -> RunParallel -> Parallel.ForEach cancellation path
+        // Cancel-during-Backup already exercises also protects whatIf: true.
+        var originals = new Dictionary<string, byte[]>();
+
+        for (int i = 0; i < 12; i++)
+        {
+            string path = Path.Combine(_root, $"file{i:D2}.txt");
+            File.WriteAllText(path, TestContent.Ascii, Encoding.ASCII);
+            originals[path] = File.ReadAllBytes(path);
+        }
+
+        var entries = originals.Keys
+            .Select(path => new ConversionReportEntry
+            {
+                FilePath = path,
+                SourceEncoding = "us-ascii",
+                TargetEncoding = "utf-8-bom",
+            })
+            .ToList();
+
+        using var cts = new CancellationTokenSource();
+        int deliveredCount = 0;
+
+        Assert.ThrowsAny<OperationCanceledException>(() =>
+            ScanEngine.ConvertFiles(
+                entries,
+                "utf-8",
+                targetWriteBom: true,
+                maxParallelism: 1,
+                onEntry: _ =>
+                {
+                    Interlocked.Increment(ref deliveredCount);
+                    cts.Cancel();
+                },
+                cts.Token,
+                whatIf: true));
+
+        // The run stopped early rather than delivering every entry anyway.
+        Assert.True(
+            deliveredCount < entries.Count,
+            "Cancellation did not stop the run; every entry was still delivered.");
+
+        // Preview never writes regardless of cancellation, but confirm it anyway.
+        Assert.All(originals, pair => Assert.Equal(pair.Value, File.ReadAllBytes(pair.Key)));
+    }
+
+    [Fact]
     public void ConvertFiles_PreCancelledToken_ThrowsAndConvertsNothing()
     {
         string path = Path.Combine(_root, "convert-me.txt");
