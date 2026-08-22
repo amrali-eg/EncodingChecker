@@ -64,36 +64,43 @@ public sealed class ListViewColumnSorterTests
     }
 
     [Fact]
-    public void PrimaryColumnCaseOnlyDifference_IsNotTreatedAsATie()
+    public void PrimaryColumnCaseOnlyDifference_IsTreatedAsATie()
     {
-        // Documents a real bug, not a design choice (flagged separately for a fix):
-        // the primary comparison is case-insensitive, but CompareRemainingColumns'
-        // tiebreak loop starts at index 0 instead of after SortColumn, so it
-        // redundantly re-compares column 0 ordinally and never truly ties.
+        // The primary comparison is case-insensitive, so "Apple"/"apple" tie on column 0.
+        // The tiebreak must skip column 0 (already compared), not redundantly re-compare
+        // it ordinally - otherwise a case-only difference would decide the order.
         var sorter = new ListViewColumnSorter { SortColumn = 0, Order = SortOrder.Ascending };
 
         ListViewItem x = Row("Apple", "same");
         ListViewItem y = Row("apple", "same");
 
-        int result = sorter.Compare(x, y);
-
-        Assert.NotEqual(0, result);
-        Assert.Equal(string.CompareOrdinal("Apple", "apple") < 0, result < 0);
+        Assert.Equal(0, sorter.Compare(x, y));
     }
 
     [Fact]
-    public void PrimaryColumnCaseOnlyDifference_WinsOverARealDifferenceInALaterColumn()
+    public void PrimaryColumnCaseOnlyDifference_FallsThroughToRealDifferenceInLaterColumn()
     {
-        // Same bug: column 1 genuinely differs, but the redundant column-0 recheck
-        // fires first and decides the result before column 1 is ever reached.
         var sorter = new ListViewColumnSorter { SortColumn = 0, Order = SortOrder.Ascending };
 
-        ListViewItem x = Row("Apple", "zzz");
-        ListViewItem y = Row("apple", "aaa");
+        // Column 0 ties (case-insensitive); column 1 genuinely differs and must decide.
+        ListViewItem x = Row("Apple", "aaa");
+        ListViewItem y = Row("apple", "zzz");
 
-        int result = sorter.Compare(x, y);
+        Assert.True(sorter.Compare(x, y) < 0);
+        Assert.True(sorter.Compare(y, x) > 0);
+    }
 
-        Assert.Equal(string.CompareOrdinal("Apple", "apple") < 0, result < 0);
+    [Fact]
+    public void TiebreakSkipsSortColumnWhenNotFirst()
+    {
+        // Same case-only-tie check with SortColumn = 1, to confirm the tiebreak skips
+        // whichever column was already compared, not always index 0.
+        var sorter = new ListViewColumnSorter { SortColumn = 1, Order = SortOrder.Ascending };
+
+        ListViewItem x = Row("same", "Apple");
+        ListViewItem y = Row("same", "apple");
+
+        Assert.Equal(0, sorter.Compare(x, y));
     }
 
     [Fact]
