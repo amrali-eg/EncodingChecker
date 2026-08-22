@@ -6,6 +6,8 @@ File Encoding Checker detects, validates, and converts the text encoding of one 
 
 Requires the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download) (Windows only).
 
+Each [release](https://github.com/amrali-eg/EncodingChecker/releases) publishes two single-file builds: `EncodingChecker.zip` (framework-dependent, requires the .NET 10 Desktop Runtime above) and `EncodingChecker-selfcontained.zip` (larger, but runs on a machine with no .NET runtime installed).
+
 ![form image](./form.png "File Encoding Checker Form Preview")
 
 ## Highlights
