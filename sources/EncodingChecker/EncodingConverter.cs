@@ -283,8 +283,23 @@ internal static class EncodingConverter
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Sanity-check that the source did not change during conversion.
+            // Point-in-time check only, not a full TOCTOU guarantee - the source
+            // could still change between here and the install below.
             FileInfo recheckInfo = new(sourcePath);
+
+            if (IsReparsePoint(recheckInfo))
+            {
+                return Failure(
+                    ConversionErrorCode.ReparsePointRejected,
+                    "The source became a symbolic link or other reparse point during " +
+                    "conversion; installation was rejected.",
+                    sourceEncoding,
+                    targetEncoding) with
+                {
+                    SourceBytes = sourceBytesProcessed,
+                    TargetBytes = targetBytesWritten,
+                };
+            }
 
             if (recheckInfo.Length != capturedLength ||
                 recheckInfo.LastWriteTimeUtc != capturedLastWriteUtc)
@@ -1144,27 +1159,7 @@ internal static class EncodingConverter
                         clearedAttributes.Value & ~FileAttributes.ReadOnly);
                 }
 
-                if (destinationExists)
-                {
-                    try
-                    {
-                        // Ignore metadata outside this converter's preservation contract.
-                        File.Replace(
-                            tempPath,
-                            destinationPath,
-                            destinationBackupFileName: null,
-                            ignoreMetadataErrors: true);
-                    }
-                    catch (PlatformNotSupportedException)
-                    {
-                        // Fallback is not guaranteed to be atomic.
-                        File.Move(tempPath, destinationPath, overwrite: true);
-                    }
-                }
-                else
-                {
-                    File.Move(tempPath, destinationPath);
-                }
+                ReplaceOrMove(tempPath, destinationPath, destinationExists);
             }
             catch (Exception replaceEx) when (
                 replaceEx is IOException or UnauthorizedAccessException
@@ -1243,6 +1238,77 @@ internal static class EncodingConverter
         {
             errorMessage = $"Failed to install the converted file: {ex.Message}";
             return ConversionErrorCode.ReplacementError;
+        }
+    }
+
+    /// <summary>
+    /// Replaces <paramref name="destinationPath"/> with <paramref name="tempPath"/> using
+    /// <see cref="File.Replace(string, string, string?, bool)"/> when the destination
+    /// exists (falling back to <see cref="File.Move(string, string, bool)"/> only if the
+    /// platform doesn't support File.Replace), or a plain move when it doesn't.
+    /// </summary>
+    private static void ReplaceOrMove(
+        string tempPath,
+        string destinationPath,
+        bool destinationExists)
+    {
+        if (destinationExists)
+        {
+            try
+            {
+                // Ignore metadata outside this converter's preservation contract.
+                File.Replace(
+                    tempPath,
+                    destinationPath,
+                    destinationBackupFileName: null,
+                    ignoreMetadataErrors: true);
+            }
+            catch (PlatformNotSupportedException)
+            {
+                // Fallback is not guaranteed to be atomic.
+                File.Move(tempPath, destinationPath, overwrite: true);
+            }
+        }
+        else
+        {
+            File.Move(tempPath, destinationPath);
+        }
+    }
+
+    /// <summary>
+    /// Atomically installs a backup file: replaces (or creates) <paramref name="destinationPath"/>
+    /// with the already-written <paramref name="tempPath"/>, reusing the same
+    /// <see cref="ReplaceOrMove"/> logic as the main conversion's install step, temporarily
+    /// clearing and restoring a ReadOnly destination attribute if needed. Unlike
+    /// <see cref="AtomicReplace"/>, failures propagate as ordinary exceptions rather than a
+    /// <see cref="ConversionErrorCode"/> - backup writes don't need that richer contract, since
+    /// the caller already has its own simple "backup failed" error path.
+    /// </summary>
+    internal static void AtomicReplaceForBackup(string tempPath, string destinationPath)
+    {
+        var destinationInfo = new FileInfo(destinationPath);
+        bool destinationExists = destinationInfo.Exists;
+
+        FileAttributes? clearedAttributes =
+            destinationExists && destinationInfo.Attributes.HasFlag(FileAttributes.ReadOnly)
+                ? destinationInfo.Attributes
+                : null;
+
+        if (clearedAttributes is not null)
+        {
+            File.SetAttributes(
+                destinationPath,
+                clearedAttributes.Value & ~FileAttributes.ReadOnly);
+        }
+
+        try
+        {
+            ReplaceOrMove(tempPath, destinationPath, destinationExists);
+        }
+        finally
+        {
+            if (clearedAttributes is not null && File.Exists(destinationPath))
+                File.SetAttributes(destinationPath, clearedAttributes.Value);
         }
     }
 

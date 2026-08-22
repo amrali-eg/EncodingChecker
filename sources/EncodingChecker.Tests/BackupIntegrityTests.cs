@@ -10,7 +10,6 @@ public sealed class BackupIntegrityTests : IDisposable
     public BackupIntegrityTests()
     {
         _root = Directory.CreateTempSubdirectory("ec_backup_").FullName;
-        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
     }
 
     public void Dispose()
@@ -60,6 +59,32 @@ public sealed class BackupIntegrityTests : IDisposable
     }
 
     [Fact]
+    public void Backup_SuccessfulConversion_LeavesNoTempArtifactBehind()
+    {
+        // Backup is now temp-file-then-atomic-replace, not a plain File.Copy -
+        // confirm the "*.bak.<guid>.tmp" sibling never survives.
+        string path = Path.Combine(_root, "convert-me.txt");
+        File.WriteAllText(path, TestContent.Multilingual, new UTF8Encoding(false));
+
+        var options = new ScanDirectoryOptions
+        {
+            BaseDirectory = _root,
+            Action = ScanAction.Convert,
+            TargetCharset = "utf-16",
+            TargetWriteBom = true,
+            Backup = true,
+        };
+
+        var entries = new List<ConversionReportEntry>();
+        ScanEngine.ScanDirectory(options, entries.Add, CancellationToken.None);
+
+        Assert.Equal(ConversionRowResult.Converted, Assert.Single(entries).Result);
+        Assert.True(File.Exists(path + ".bak"));
+        // Temp filename shape: "<name>.<guid>.bak.tmp" - the guid precedes ".bak.tmp".
+        Assert.Empty(Directory.GetFiles(_root, "*.bak.tmp"));
+    }
+
+    [Fact]
     public void Backup_OverwritesAnyPreviousBackupFile()
     {
         string path = Path.Combine(_root, "convert-me.txt");
@@ -89,10 +114,8 @@ public sealed class BackupIntegrityTests : IDisposable
     [Fact]
     public void Backup_WildcardInclude_NeverScansItsOwnBakOrTempFiles()
     {
-        // Regression test: -Include "*" combined with -Backup must not re-scan the
-        // .bak files it just created, across repeated runs - doing so used to cascade
-        // (.bak, .bak.bak, ...) and race a file's own backup write against another
-        // worker independently reading/converting that same .bak as its own entry.
+        // Regression test: -Include "*" with -Backup must not re-scan its own .bak
+        // output - that used to cascade (.bak.bak, ...) and race backup writes.
         string path = Path.Combine(_root, "convert-me.txt");
         File.WriteAllText(path, TestContent.Multilingual, new UnicodeEncoding(false, true));
 

@@ -265,6 +265,7 @@ publish/
 *.pubxml
 # Used by the release workflow; contains no secrets.
 !sources/EncodingChecker/Properties/PublishProfiles/FolderProfile.pubxml
+!sources/EncodingChecker/Properties/PublishProfiles/SelfContainedRelease.pubxml
 *.publishproj
 
 # Microsoft Azure Web App publish settings. Comment the next line if you want to

@@ -12,6 +12,10 @@ jobs:
   release:
     runs-on: windows-latest
 
+    env:
+      CODE_SIGNING_CERT: ${{ secrets.CODE_SIGNING_CERT }}
+      CODE_SIGNING_CERT_PASSWORD: ${{ secrets.CODE_SIGNING_CERT_PASSWORD }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -25,18 +29,49 @@ jobs:
       - name: Test
         run: dotnet test sources\EncodingChecker.sln --configuration Release --no-build
 
-      - name: Publish single-file executable
+      - name: Publish framework-dependent single-file executable
         run: dotnet publish sources\EncodingChecker\EncodingChecker.csproj -p:PublishProfile=FolderProfile
+
+      - name: Publish self-contained single-file executable
+        run: dotnet publish sources\EncodingChecker\EncodingChecker.csproj -p:PublishProfile=SelfContainedRelease
+
+      - name: Code-sign executables
+        if: ${{ env.CODE_SIGNING_CERT != '' && env.CODE_SIGNING_CERT_PASSWORD != '' }}
+        shell: pwsh
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP "codesign.pfx"
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:CODE_SIGNING_CERT))
+
+          try {
+            $signtool = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter "signtool.exe" |
+              Where-Object { $_.FullName -like "*\x64\*" } |
+              Select-Object -First 1 -ExpandProperty FullName
+
+            if (-not $signtool) {
+              throw "signtool.exe not found on this runner image."
+            }
+
+            & $signtool sign /f $certPath /p $env:CODE_SIGNING_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+              "sources\EncodingChecker\bin\Release\net10.0-windows\publish\win-x64\EncodingChecker.exe" `
+              "sources\EncodingChecker\bin\Release\net10.0-windows\publish\win-x64-selfcontained\EncodingChecker.exe"
+
+            if ($LASTEXITCODE -ne 0) {
+              throw "signtool exited with code $LASTEXITCODE."
+            }
+          } finally {
+            Remove-Item $certPath -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Package
         shell: pwsh
         run: |
           Compress-Archive -Path "sources\EncodingChecker\bin\Release\net10.0-windows\publish\win-x64\*" -DestinationPath "EncodingChecker.zip"
+          Compress-Archive -Path "sources\EncodingChecker\bin\Release\net10.0-windows\publish\win-x64-selfcontained\*" -DestinationPath "EncodingChecker-selfcontained.zip"
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
-          gh release create "${{ github.ref_name }}" EncodingChecker.zip
+          gh release create "${{ github.ref_name }}" EncodingChecker.zip EncodingChecker-selfcontained.zip
           --title "${{ github.ref_name }}"
           --generate-notes

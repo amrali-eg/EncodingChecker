@@ -135,7 +135,7 @@ public sealed class ScanEngineValidationTests : IDisposable
     }
 
     [Fact]
-    public void ScanDirectory_EmptyFile_IsUnknownAndUnchanged_NotAnError()
+    public void ScanDirectory_EmptyFile_IsUnknownAndSkipped_NotAnError()
     {
         File.WriteAllBytes(Path.Combine(_root, "empty.txt"), []);
 
@@ -150,7 +150,9 @@ public sealed class ScanEngineValidationTests : IDisposable
 
         ConversionReportEntry entry = Assert.Single(entries);
         Assert.Equal("(Unknown)", entry.SourceEncoding);
-        Assert.Equal(ConversionRowResult.Unchanged, entry.Result);
+        // Undetectable encoding is Skipped, not Unchanged - "Unchanged" would misleadingly
+        // imply the file was compared against a target and already matched it.
+        Assert.Equal(ConversionRowResult.Skipped, entry.Result);
     }
 
     [Fact]
@@ -172,6 +174,49 @@ public sealed class ScanEngineValidationTests : IDisposable
 
         ConversionReportEntry entry = Assert.Single(entries);
         Assert.Equal("(Unknown)", entry.SourceEncoding);
+        Assert.Equal(ConversionRowResult.Skipped, entry.Result);
+    }
+
+    [Fact]
+    public void ConvertFiles_BinaryFile_IsSkipped_NotConvertedAndBytesUnchanged()
+    {
+        var random = new Random(5678);
+        byte[] randomBytes = new byte[4096];
+        random.NextBytes(randomBytes);
+        string path = Path.Combine(_root, "binary.dat");
+        File.WriteAllBytes(path, randomBytes);
+
+        // Convert mode over a file whose encoding couldn't be detected: must be Skipped,
+        // not silently Unchanged (which would misleadingly imply it already matched
+        // "utf-8"), and must never be written to.
+        var scanOptions = new ScanDirectoryOptions
+        {
+            BaseDirectory = _root,
+            Action = ScanAction.Convert,
+            TargetCharset = "utf-8",
+        };
+
+        var scanned = new List<ConversionReportEntry>();
+        ScanEngine.ScanDirectory(scanOptions, scanned.Add, CancellationToken.None);
+
+        ConversionReportEntry scanEntry = Assert.Single(scanned);
+        Assert.Equal(ConversionRowResult.Skipped, scanEntry.Result);
+        Assert.Equal(randomBytes, File.ReadAllBytes(path));
+
+        // ConvertFiles (the GUI's "convert previously-scanned entries" path) must reach
+        // the same conclusion independently, not just inherit it from the prior scan.
+        var converted = new ConcurrentBag<ConversionReportEntry>();
+        ScanEngine.ConvertFiles(
+            [scanEntry],
+            "utf-8",
+            targetWriteBom: false,
+            ScanEngine.DefaultMaxParallelism,
+            converted.Add,
+            CancellationToken.None);
+
+        ConversionReportEntry convertEntry = Assert.Single(converted);
+        Assert.Equal(ConversionRowResult.Skipped, convertEntry.Result);
+        Assert.Equal(randomBytes, File.ReadAllBytes(path));
     }
 
     [Fact]
