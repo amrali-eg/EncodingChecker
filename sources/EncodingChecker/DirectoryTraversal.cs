@@ -33,6 +33,11 @@ internal static class DirectoryTraversal
     {
         // Do not traverse symlinks or junctions.
         AttributesToSkip = FileAttributes.ReparsePoint,
+
+        // Default (true) silently drops access-denied entries instead of throwing,
+        // which would defeat the onWarning reporting below for the most common
+        // real-world enumeration failure (an ACL-denied subdirectory).
+        IgnoreInaccessible = false,
     };
 
     /// <summary>
