@@ -379,8 +379,8 @@
     <value>
         AAEAAAD/////AQAAAAAAAAAMAgAAAEZTeXN0ZW0uV2luZG93cy5Gb3JtcywgQ3VsdHVyZT1uZXV0cmFs
         LCBQdWJsaWNLZXlUb2tlbj1iNzdhNWM1NjE5MzRlMDg5BQEAAAAmU3lzdGVtLldpbmRvd3MuRm9ybXMu
-        SW1hZ2VMaXN0U3RyZWFtZXIBAAAABERhdGEHAgIAAAAJAwAAAA8DAAAAcgsAAAJNU0Z0AUkBTAIBAQMB
-        AAH8AQAB/AEAARABAAEQAQAE/wEhAQAI/wFCAU0BNgcAATYDAAEoAwABQAMAARADAAEBAQABIAYAARD/
+        SW1hZ2VMaXN0U3RyZWFtZXIBAAAABERhdGEHAgIAAAAJAwAAAA8DAAAAcAsAAAJNU0Z0AUkBTAIBAQMB
+        AAEMAQEBDAEBARABAAEQAQAE/wEhAQAI/wFCAU0BNgcAATYDAAEoAwABQAMAARADAAEBAQABIAYAARD/
         AFcAAwIBAwMGAQgIAAMHAQkDCgENAwoBDQMKAQ0DCgENAwkBDAgAAwUBBgMCAQMIAAMEAQUDCQQMAQ8D
         DQERAwcBCQQCAwQBBQMEAQUEAgMGAQcDDQERAwwBDwMJAQwDBAEFSAADBgEHAwwEDwETAxEBFgMSARcD
         CQELAxABFQMNAREDEwEZAxIBGAMRARYDDwETAwwBDwMGAQcIAAMMARADCgENA0YBfwJVAVcBtAMhATAD
@@ -396,39 +396,39 @@
         DwEUAZEB/wEPARQBkQH/AQ8BFAGQAf8DVgGzA0oBigEPARQBkAH/AQ8BFAGRAf8BDwEUAZEB/wEPARQB
         kQH/AlUBVwG0AwYBCAwAAzYBVwEHAYsB6wH/AQcBiwHrAf8BBQGKAesB/wEEAYoB6wH/AfQB+gH+Bf8B
         FgGNAesB/wECAYoB6wH/AQcBiwHrAf8BBwGLAesB/wNGAX5UAANNAZIBIgGsAVwB/wEiAa0BXQH/AR8B
-        rQFcAf8BIAGtAVwB/wEiAa0BXQH/AVsBfAFcAfgDFQEcIAACRgFHAYEBDwEVAZkB/wEPARUBmQH/AQ8B
+        rQFcAf8BIAGtAVwB/wEiAa0BXQH/AVwBfAFcAfgDFQEcIAACRgFHAYEBDwEVAZkB/wEPARUBmQH/AQ8B
         FQGZAf8BDwEVAZgB/wEPARUBmAH/AQ8BFQGZAf8BDwEVAZkB/wEPARUBmQH/AlUBVwG0FAADXQHMAQUB
         kQHsAf8BBQGRAewB/wEFAZEB7AH/AQABjAHsAf8BRwGxAfIB/wFWAbIB8gH/AQABiwHrAf8BBQGRAewB
         /wEFAZEB7AH/AQUBkQHsAf8BXQFlAWcB6gMEAQVIAAQBA00BkwEgAbQBZgH/AR8BtAFmAf8BHQG0AWUB
-        /wE0AYIBXwH7ASoBuQFuAf8BHQG0AWUB/wEgAbQBZgH/A1kBuyQAAkYBRwGAAisBfgH8AQ8BFQGhAf8B
-        DwEVAaEB/wEPARUBoQH/AQ8BFQGhAf8BDwEVAaEB/wJVAVcBsRQAAwsBDgFLAnwB+AEDAZcB7gH/AQMB
+        /wE0AYABXwH7ASoBuQFuAf8BHQG0AWUB/wEgAbQBZgH/A1kBuyQAAkYBRwGAAisBfgH8AQ8BFQGhAf8B
+        DwEVAaEB/wEPARUBoQH/AQ8BFQGhAf8BDwEVAaEB/wJVAVcBsRQAAwsBDgFPAnwB+AEDAZcB7gH/AQMB
         lwHuAf8BAwGXAe4B/wEAAZAB7QH/AbgB4gH6Af8BzQHhAfoB/wEAAY0B7AH/AQIBmAHuAf8BAwGXAe4B
         /wEDAZcB7gH/AQMBlwHuAf8DHQEoSAADBgEIAUABtAGDAf0BGgG7AW8B/wEaAbsBbwH/AVMCaAH0Ax4B
         KwNEAXgBIAG9AXIB/wEcAbwBcAH/AR0BvAFwAf8DOwFkJAADWgHHARABFgGoAf8BEAEWAagB/wEQARYB
         qAH/ARABFgGoAf8DYgHuAwMBBBQAAxUBHAECAZ4B7wH/AQEBnQHvAf8BAQGdAe8B/wEBAZ0B7wH/AQAB
         mAHuAf8B0wHvAfwB/wHrAe8B/AH/AQABkwHtAf8BAAGeAe8B/wEBAZ0B7wH/AQEBnQHvAf8BAQGeAe8B
-        /wMmATlMAAMpAT0BKwF+AXgB/AFbAXwBeQH4AyMBMwQABAEDXwHVARgBwAGCAf8BGgHBAYIB/wFBAX0B
+        /wMmATlMAAMpAT0BKwF+AXgB/AFcAXwBeQH4AyMBMwQABAEDXwHVARgBwAGCAf8BGgHBAYIB/wFBAXkB
         agH5Ax0BKBwAA0sBjQEQARcBsAH/ARABFwGwAf8BDwEWAbAB/wEPARUBrwH/ARABFwGwAf8BEAEXAbAB
-        /wJYAVoBvQMEAQUQAAMIAQoBUwFoAWkB9AEAAaMB8AH/AQABpAHwAf8BAAGjAfAB/wEAAaEB8AH/Ad0B
-        8wH9Af8B9wH1Af0B/wEIAZsB7gH/AQABpQHwAf8BAAGkAfAB/wEAAaMB8AH/AQQBpgHxAf8DGQEiUAAD
-        HgEqAxsBJgwAAyABLQEjAcYBjQH/ARIBwgGHAf8BFgHDAYgB/wFbAmEB3gMLAQ4UAANLAY0BEAEXAbgB
-        /wEQARcBuQH/AQ8BFQG4Af8BEwEcAbwB/wEWAR8BvgH/AQ4BFQG3Af8BEAEXAbkB/wEQARcBuAH/A1oB
-        vwMDAQQQAAFYAloBvQEAAasB8gH/AQABqQHyAf8BAAGoAfIB/wEAAaoB8gH/AekB+AH+Av8B+wH+Af8B
-        FwGjAfAB/wEAAaoB8gH/AQABqQHyAf8BAAGqAfIB/wFdAWEBYwHfBAFoAANAAW8BGQHHAZAB/wEPAcUB
-        jQH/AREBxQGNAf8BWwJfAdADDgESCAAEAQNLAYwBEQEYAcAB/wERARgBwAH/AQ8BFgHAAf8BEwEbAcIB
-        /wJSAVQBqANFAXwBFgEgAcUB/wEPARYBvwH/AREBGAHAAf8BEQEYAcAB/wNaAb8DCQELDAADKgFAAQwB
-        tgH0Af8BAAGuAfMB/wEAAa8B8wH/AQABsAHzAf8B9wH9A/8B/QH+Af8BEwGlAfEB/wEAAbAB8wH/AQAB
-        rgHzAf8BCgG2AfQB/wM7AWNwAAFRAlIBpAESAckBlQH/AQ4ByAGUAf8BIgHLAZgB/wMdASgIAAMIAQoB
-        GAEhAcsB/wEQARYBxwH/ARABFgHHAf8BEwEcAcoB/wJVAVcBtAgAAkYBRwGBARcBIAHLAf8BDwEWAccB
-        /wEPARYBxwH/ARYBHgHKAf8DJAE1EAADSQGGAQ8BvAH2Af8BAAG2AfUB/wEAAbIB9AH/AUMBzAH4Af8B
-        WwHLAfcB/wEAAa4B8wH/AQABtgH1Af8BDAG8AfYB/wFSAlQBqHgAA1YBsAFXAloBwgMeASoQAAM2AVgB
-        GgElAdQB/wEVAR8B0gH/AlUBVwG0EAACRgFHAYEBGAEiAdMB/wEXASEB0wH/A0sBjQQBFAABPwJAAW4B
-        XgJoAfABDgHBAfcB/wEAAbsB9gH/AQABuwH2Af8BDAHBAfcB/wFBAX8BiAH5A0kBhpwAAzEBTQJHAUgB
-        gxgAAz0BaQNAAXEgAAMMARADNQFWAUcCSAGDA0kBhwM5AV4DEwEa/wBVAAFCAU0BPgcAAT4DAAEoAwAB
-        QAMAARADAAEBAQABAQUAAYAXAAP/AQAG/wIAAv8BmAEZAYABAQIAAYABAQGAAQEBgAEBAgABgAEBAsEB
-        8AEHAgAB+AF/AYABgQHgAQMCAAHwAT8BwAEBAcABAwIAAeABHwHgAQcBwAEBAgABgAEfAfABDwGAAQEC
-        AAGAAQ8B+AEPAYABAQIAAcIBBwHwAQcBgAEBAgAB5wEDAeABAwHAAQECAAH/AYEBgAEBAcABAwIAAf8B
-        wQKBAeABBwIAAf8B4wHDAcEB8AEPAgAC/wLnAfgBHwIABv8CAAs=
+        /wJYAVoBvQMEAQUQAAMIAQoBUwJoAfQBAAGjAfAB/wEAAaQB8AH/AQABowHwAf8BAAGhAfAB/wHdAfMB
+        /QH/AfcB9QH9Af8BCAGbAe4B/wEAAaUB8AH/AQABpAHwAf8BAAGjAfAB/wEEAaYB8QH/AxkBIlAAAx4B
+        KgMbASYMAAMgAS0BIwHGAY0B/wESAcIBhwH/ARYBwwGIAf8BWwJhAd4DCwEOFAADSwGNARABFwG4Af8B
+        EAEXAbkB/wEPARUBuAH/ARMBHAG8Af8BFgEfAb4B/wEOARUBtwH/ARABFwG5Af8BEAEXAbgB/wNaAb8D
+        AwEEEAABWAJaAb0BAAGrAfIB/wEAAakB8gH/AQABqAHyAf8BAAGqAfIB/wHpAfgB/gL/AfsB/gH/ARcB
+        owHwAf8BAAGqAfIB/wEAAakB8gH/AQABqgHyAf8BXQFhAWMB3wQBaAADQAFvARkBxwGQAf8BDwHFAY0B
+        /wERAcUBjQH/AVsCXwHQAw4BEggABAEDSwGMAREBGAHAAf8BEQEYAcAB/wEPARYBwAH/ARMBGwHCAf8C
+        UgFUAagDRQF8ARYBIAHFAf8BDwEWAb8B/wERARgBwAH/AREBGAHAAf8DWgG/AwkBCwwAAyoBQAEMAbYB
+        9AH/AQABrgHzAf8BAAGvAfMB/wEAAbAB8wH/AfcB/QP/Af0B/gH/ARMBpQHxAf8BAAGwAfMB/wEAAa4B
+        8wH/AQoBtgH0Af8DOwFjcAABUQJSAaQBEgHJAZUB/wEOAcgBlAH/ASIBywGYAf8DHQEoCAADCAEKARgB
+        IQHLAf8BEAEWAccB/wEQARYBxwH/ARMBHAHKAf8CVQFXAbQIAAJGAUcBgQEXASABywH/AQ8BFgHHAf8B
+        DwEWAccB/wEWAR4BygH/AyQBNRAAA0kBhgEPAbwB9gH/AQABtgH1Af8BAAGyAfQB/wFDAcwB+AH/AVsB
+        ywH3Af8BAAGuAfMB/wEAAbYB9QH/AQwBvAH2Af8BUgJUAah4AANWAbABVwJaAcIDHgEqEAADNgFYARoB
+        JQHUAf8BFQEfAdIB/wJVAVcBtBAAAkYBRwGBARgBIgHTAf8BFwEhAdMB/wNLAY0EARQAAT8CQAFuAV4C
+        aAHwAQ4BwQH3Af8BAAG7AfYB/wEAAbsB9gH/AQwBwQH3Af8BQQF7AYYB+QNJAYacAAMxAU0CRwFIAYMY
+        AAM9AWkDQAFxIAADDAEQAzUBVgFHAkgBgwNJAYcDOQFeAxMBGv8AVQABQgFNAT4HAAE+AwABKAMAAUAD
+        AAEQAwABAQEAAQEFAAGAFwAD/wEABv8CAAL/AZgBGQGAAQECAAGAAQEBgAEBAYABAQIAAYABAQLBAfAB
+        BwIAAfgBfwGAAYEB4AEDAgAB8AE/AcABAQHAAQMCAAHgAR8B4AEHAcABAQIAAYABHwHwAQ8BgAEBAgAB
+        gAEPAfgBDwGAAQECAAHCAQcB8AEHAYABAQIAAecBAwHgAQMBwAEBAgAB/wGBAYABAQHAAQMCAAH/AcEC
+        gQHgAQcCAAH/AeMBwwHBAfABDwIAAv8C5wH4AR8CAAb/AgAL
 </value>
   </data>
   <data name="lstResults.TabIndex" type="System.Int32, mscorlib">
@@ -455,27 +455,6 @@
   <metadata name="statusBar.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
     <value>184, 17</value>
   </metadata>
-  <data name="statusBar.Location" type="System.Drawing.Point, System.Drawing">
-    <value>0, 497</value>
-  </data>
-  <data name="statusBar.Size" type="System.Drawing.Size, System.Drawing">
-    <value>700, 22</value>
-  </data>
-  <data name="statusBar.TabIndex" type="System.Int32, mscorlib">
-    <value>16</value>
-  </data>
-  <data name="&gt;&gt;statusBar.Name" xml:space="preserve">
-    <value>statusBar</value>
-  </data>
-  <data name="&gt;&gt;statusBar.Type" xml:space="preserve">
-    <value>System.Windows.Forms.StatusStrip, System.Windows.Forms, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
-  </data>
-  <data name="&gt;&gt;statusBar.Parent" xml:space="preserve">
-    <value>$this</value>
-  </data>
-  <data name="&gt;&gt;statusBar.ZOrder" xml:space="preserve">
-    <value>9</value>
-  </data>
   <data name="tlnkHelp.Size" type="System.Drawing.Size, System.Drawing">
     <value>32, 17</value>
   </data>
@@ -526,6 +505,27 @@
   </data>
   <data name="actionStatus.Size" type="System.Drawing.Size, System.Drawing">
     <value>0, 17</value>
+  </data>
+  <data name="statusBar.Location" type="System.Drawing.Point, System.Drawing">
+    <value>0, 497</value>
+  </data>
+  <data name="statusBar.Size" type="System.Drawing.Size, System.Drawing">
+    <value>700, 22</value>
+  </data>
+  <data name="statusBar.TabIndex" type="System.Int32, mscorlib">
+    <value>16</value>
+  </data>
+  <data name="&gt;&gt;statusBar.Name" xml:space="preserve">
+    <value>statusBar</value>
+  </data>
+  <data name="&gt;&gt;statusBar.Type" xml:space="preserve">
+    <value>System.Windows.Forms.StatusStrip, System.Windows.Forms, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </data>
+  <data name="&gt;&gt;statusBar.Parent" xml:space="preserve">
+    <value>$this</value>
+  </data>
+  <data name="&gt;&gt;statusBar.ZOrder" xml:space="preserve">
+    <value>9</value>
   </data>
   <data name="btnView.Location" type="System.Drawing.Point, System.Drawing">
     <value>10, 187</value>
@@ -689,6 +689,66 @@
   <data name="&gt;&gt;chkSelectDeselectAll.ZOrder" xml:space="preserve">
     <value>3</value>
   </data>
+  <data name="chkCreateBackup.AutoSize" type="System.Boolean, mscorlib">
+    <value>True</value>
+  </data>
+  <data name="chkCreateBackup.Enabled" type="System.Boolean, mscorlib">
+    <value>False</value>
+  </data>
+  <data name="chkCreateBackup.Location" type="System.Drawing.Point, System.Drawing">
+    <value>425, 79</value>
+  </data>
+  <data name="chkCreateBackup.Size" type="System.Drawing.Size, System.Drawing">
+    <value>243, 17</value>
+  </data>
+  <data name="chkCreateBackup.TabIndex" type="System.Int32, mscorlib">
+    <value>18</value>
+  </data>
+  <data name="chkCreateBackup.Text" xml:space="preserve">
+    <value>Back up original files before converting (.bak)</value>
+  </data>
+  <data name="&gt;&gt;chkCreateBackup.Name" xml:space="preserve">
+    <value>chkCreateBackup</value>
+  </data>
+  <data name="&gt;&gt;chkCreateBackup.Type" xml:space="preserve">
+    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </data>
+  <data name="&gt;&gt;chkCreateBackup.Parent" xml:space="preserve">
+    <value>$this</value>
+  </data>
+  <data name="&gt;&gt;chkCreateBackup.ZOrder" xml:space="preserve">
+    <value>0</value>
+  </data>
+  <data name="chkPreviewChanges.AutoSize" type="System.Boolean, mscorlib">
+    <value>True</value>
+  </data>
+  <data name="chkPreviewChanges.Enabled" type="System.Boolean, mscorlib">
+    <value>False</value>
+  </data>
+  <data name="chkPreviewChanges.Location" type="System.Drawing.Point, System.Drawing">
+    <value>425, 102</value>
+  </data>
+  <data name="chkPreviewChanges.Size" type="System.Drawing.Size, System.Drawing">
+    <value>217, 17</value>
+  </data>
+  <data name="chkPreviewChanges.TabIndex" type="System.Int32, mscorlib">
+    <value>19</value>
+  </data>
+  <data name="chkPreviewChanges.Text" xml:space="preserve">
+    <value>Preview changes without modifying files</value>
+  </data>
+  <data name="&gt;&gt;chkPreviewChanges.Name" xml:space="preserve">
+    <value>chkPreviewChanges</value>
+  </data>
+  <data name="&gt;&gt;chkPreviewChanges.Type" xml:space="preserve">
+    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </data>
+  <data name="&gt;&gt;chkPreviewChanges.Parent" xml:space="preserve">
+    <value>$this</value>
+  </data>
+  <data name="&gt;&gt;chkPreviewChanges.ZOrder" xml:space="preserve">
+    <value>1</value>
+  </data>
   <data name="btnCancel.Location" type="System.Drawing.Point, System.Drawing">
     <value>564, 187</value>
   </data>
@@ -715,66 +775,6 @@
   </data>
   <data name="&gt;&gt;btnCancel.ZOrder" xml:space="preserve">
     <value>2</value>
-  </data>
-  <data name="chkCreateBackup.AutoSize" type="System.Boolean, mscorlib">
-    <value>True</value>
-  </data>
-  <data name="chkCreateBackup.Enabled" type="System.Boolean, mscorlib">
-    <value>False</value>
-  </data>
-  <data name="chkCreateBackup.Location" type="System.Drawing.Point, System.Drawing">
-    <value>426, 113</value>
-  </data>
-  <data name="chkCreateBackup.Size" type="System.Drawing.Size, System.Drawing">
-    <value>257, 17</value>
-  </data>
-  <data name="chkCreateBackup.TabIndex" type="System.Int32, mscorlib">
-    <value>18</value>
-  </data>
-  <data name="chkCreateBackup.Text" xml:space="preserve">
-    <value>Back up original files before converting (.bak)</value>
-  </data>
-  <data name="&gt;&gt;chkCreateBackup.Name" xml:space="preserve">
-    <value>chkCreateBackup</value>
-  </data>
-  <data name="&gt;&gt;chkCreateBackup.Type" xml:space="preserve">
-    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
-  </data>
-  <data name="&gt;&gt;chkCreateBackup.Parent" xml:space="preserve">
-    <value>$this</value>
-  </data>
-  <data name="&gt;&gt;chkCreateBackup.ZOrder" xml:space="preserve">
-    <value>3</value>
-  </data>
-  <data name="chkPreviewChanges.AutoSize" type="System.Boolean, mscorlib">
-    <value>True</value>
-  </data>
-  <data name="chkPreviewChanges.Enabled" type="System.Boolean, mscorlib">
-    <value>False</value>
-  </data>
-  <data name="chkPreviewChanges.Location" type="System.Drawing.Point, System.Drawing">
-    <value>425, 136</value>
-  </data>
-  <data name="chkPreviewChanges.Size" type="System.Drawing.Size, System.Drawing">
-    <value>217, 17</value>
-  </data>
-  <data name="chkPreviewChanges.TabIndex" type="System.Int32, mscorlib">
-    <value>19</value>
-  </data>
-  <data name="chkPreviewChanges.Text" xml:space="preserve">
-    <value>Preview changes without modifying files</value>
-  </data>
-  <data name="&gt;&gt;chkPreviewChanges.Name" xml:space="preserve">
-    <value>chkPreviewChanges</value>
-  </data>
-  <data name="&gt;&gt;chkPreviewChanges.Type" xml:space="preserve">
-    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
-  </data>
-  <data name="&gt;&gt;chkPreviewChanges.Parent" xml:space="preserve">
-    <value>$this</value>
-  </data>
-  <data name="&gt;&gt;chkPreviewChanges.ZOrder" xml:space="preserve">
-    <value>3</value>
   </data>
   <metadata name="$this.Localizable" type="System.Boolean, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
     <value>True</value>

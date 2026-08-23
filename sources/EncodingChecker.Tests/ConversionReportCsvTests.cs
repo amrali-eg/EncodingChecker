@@ -21,12 +21,47 @@ public sealed class ConversionReportCsvTests
         };
 
     [Fact]
+    public void WriteCsv_HeaderColumnNames_AreAllDistinct_SoStrictParsersCanReadTheReport()
+    {
+        // Regression guard: the header used to end "...,Target,BOM,Result" with two
+        // columns both named "BOM", which made PowerShell's Import-Csv fail outright
+        // ("The member BOM is already present") - the report's main consumer on Windows.
+        string csv = ConversionReport.ToCsvString(
+        [
+            Entry(sourceEncoding: "us-ascii", sourceHasBom: false,
+                  targetEncoding: "utf-8", targetHasBom: true,
+                  result: ConversionRowResult.Converted),
+        ]);
+
+        string[] lines = csv.Split(
+            [Environment.NewLine],
+            StringSplitOptions.RemoveEmptyEntries);
+
+        string[] headers = lines[0].Split(',');
+
+        Assert.Equal(6, headers.Length);
+        Assert.Equal(headers.Length, headers.Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(
+            ["File", "Encoding", "BOM", "Target", "BOM2", "Result"],
+            headers);
+
+        // Every column still carries its expected value, positionally.
+        string[] values = lines[1].Split(',');
+        Assert.Equal(headers.Length, values.Length);
+        Assert.Equal("us-ascii", values[1]);   // Encoding  (source)
+        Assert.Equal("No", values[2]);         // BOM       (source)
+        Assert.Equal("utf-8", values[3]);      // Target
+        Assert.Equal("Yes", values[4]);        // BOM2      (target)
+        Assert.Equal("Converted", values[5]);  // Result
+    }
+
+    [Fact]
     public void WriteCsv_FirstLine_IsTheFixedHeaderRow()
     {
         string csv = ConversionReport.ToCsvString([]);
 
         string firstLine = csv.Split(["\r\n", "\n"], StringSplitOptions.None)[0];
-        Assert.Equal("File,Encoding,BOM,Target,BOM,Result", firstLine);
+        Assert.Equal("File,Encoding,BOM,Target,BOM2,Result", firstLine);
     }
 
     [Fact]
@@ -34,7 +69,7 @@ public sealed class ConversionReportCsvTests
     {
         string csv = ConversionReport.ToCsvString([]);
 
-        Assert.Equal("File,Encoding,BOM,Target,BOM,Result" + Environment.NewLine, csv);
+        Assert.Equal("File,Encoding,BOM,Target,BOM2,Result" + Environment.NewLine, csv);
     }
 
     [Fact]

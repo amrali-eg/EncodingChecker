@@ -51,15 +51,22 @@ public partial class MainForm : Form
     private CancellationTokenSource? _actionCancellation;
     private bool _closeRequested;
 
-    // Set by OnConvert, read back by ConvertWorkerCompleted; never touched by the worker thread.
+    // Set by OnConvert and read by ConvertWorkerCompleted; never touched by the worker.
     private Dictionary<string, ListViewItem>? _convertItemsByPath;
     private string? _convertTargetLabel;
 
-    // Filled by the worker thread, read by ConvertWorkerCompleted once it finishes.
-    // RunWorkerCompletedEventArgs.Result cannot carry this: its getter throws
-    // InvalidOperationException whenever the operation was cancelled, which is exactly
-    // when the partial results still need to be applied to the list.
+    // Written by the worker and read after completion. e.Result cannot be used
+    // because its getter throws when the operation is cancelled.
     private ConcurrentBag<ConversionReportEntry>? _convertResults;
+
+    // Set by OnConvert and read by ConvertWorkerCompleted to distinguish
+    // actual conversion from preview ("would be converted").
+    private bool _convertWasPreview;
+
+    // Indices into imgsResults (see SetKeyName calls in MainForm.Designer.cs).
+    // Reuses the existing Warning icon for the preview/would-change state.
+    private const int RESULT_ICON_SUCCESS = 0;
+    private const int RESULT_ICON_WOULD_CHANGE = 2;
 
     private const int RESULTS_COLUMN_CHARSET = 0;
     private const int RESULTS_COLUMN_FILE_NAME = 1;
@@ -509,6 +516,7 @@ public partial class MainForm : Form
         _convertItemsByPath = itemsByPath;
         _convertTargetLabel = targetLabel;
         _convertResults = completed;
+        _convertWasPreview = chkPreviewChanges.Checked;
         _currentAction = CurrentAction.Convert;
 
         UpdateControlsOnActionStart();
@@ -718,10 +726,12 @@ public partial class MainForm : Form
         string targetLabel = _convertTargetLabel!;
         Dictionary<string, ListViewItem> itemsByPath = _convertItemsByPath!;
         ConcurrentBag<ConversionReportEntry> completed = _convertResults ?? [];
+        bool wasPreview = _convertWasPreview;
 
         _convertItemsByPath = null;
         _convertTargetLabel = null;
         _convertResults = null;
+        _convertWasPreview = false;
 
         if (e.Error != null)
         {
@@ -750,7 +760,7 @@ public partial class MainForm : Form
                 continue;
             }
 
-            UpdateResultItem(item, entry, targetLabel);
+            UpdateResultItem(item, entry, targetLabel, wasPreview);
 
             switch (entry.Result)
             {
@@ -778,25 +788,44 @@ public partial class MainForm : Form
 
         btnExportReport.Visible = lstResults.Items.Count > 0;
 
-        string statusMessage = e.Cancelled
-            ? $"Conversion cancelled: {convertedCount} converted, " +
-              $"{unchangedCount} unchanged, {errorCount} failed"
-            : $"Conversion complete: {convertedCount} converted, " +
-              $"{unchangedCount} unchanged, {errorCount} failed";
+        // Preview writes nothing, so the summary must not claim files were converted.
+        string statusMessage = wasPreview
+            ? (e.Cancelled
+                ? $"Preview cancelled: {convertedCount} file(s) would be converted, " +
+                  $"{unchangedCount} unchanged, {errorCount} failed"
+                : $"Preview complete: {convertedCount} file(s) would be converted, " +
+                  $"{unchangedCount} unchanged, {errorCount} failed")
+            : (e.Cancelled
+                ? $"Conversion cancelled: {convertedCount} converted, " +
+                  $"{unchangedCount} unchanged, {errorCount} failed"
+                : $"Conversion complete: {convertedCount} converted, " +
+                  $"{unchangedCount} unchanged, {errorCount} failed");
 
         UpdateControlsOnActionDone(statusMessage);
     }
 
-    // Single place that formats a row from its ConversionReportEntry.
-    private static void UpdateResultItem(
+    // Formats one result row. Kept internal so preview/convert presentation
+    // behavior can be tested without creating a real form.
+    internal static void UpdateResultItem(
         ListViewItem item,
         ConversionReportEntry entry,
-        string targetLabel)
+        string targetLabel,
+        bool wasPreview)
     {
         if (entry.Result == ConversionRowResult.Converted)
         {
+            // Under preview nothing was written, so the row must keep describing the
+            // file as it still is on disk: same charset, still checked so a follow-up
+            // real Convert doesn't silently skip it. Only the icon changes, marking
+            // "this would be converted".
+            if (wasPreview)
+            {
+                item.ImageIndex = RESULT_ICON_WOULD_CHANGE;
+                return;
+            }
+
             item.Checked = false;
-            item.ImageIndex = 0;
+            item.ImageIndex = RESULT_ICON_SUCCESS;
             item.SubItems[RESULTS_COLUMN_CHARSET].Text = targetLabel;
         }
         else if (entry.Result == ConversionRowResult.Error)
@@ -809,7 +838,7 @@ public partial class MainForm : Form
             Debug.WriteLine(
                 $"Conversion skipped for {entry.FilePath}: encoding could not be determined.");
         }
-        // Unchanged: already matched the target; nothing was written, row stays as-is.
+        // Unchanged: already matches the target; leave the row unchanged.
     }
 
     #endregion
@@ -988,11 +1017,23 @@ public partial class MainForm : Form
         lstConvert.Enabled = false;
         btnConvert.Enabled = false;
         chkSelectDeselectAll.Enabled = false;
-        chkSelectDeselectAll.CheckState =
-            CheckState.Unchecked;
 
-        // Convert-only options; their checked state is the user's choice and must
-        // persist across runs, so only Enabled changes here - never CheckState.
+        // Reset only the tri-state widget; without detaching this handler, CheckedChanged
+        // calls OnSelectDeselectAll and clears all row selections. Preview must preserve
+        // those selections for a later real Convert.
+        chkSelectDeselectAll.CheckedChanged -= OnSelectDeselectAll;
+
+        try
+        {
+            chkSelectDeselectAll.CheckState =
+                CheckState.Unchecked;
+        }
+        finally
+        {
+            chkSelectDeselectAll.CheckedChanged += OnSelectDeselectAll;
+        }
+
+        // Preserve the user's option choices across runs; disable only while the action runs.
         chkCreateBackup.Enabled = false;
         chkPreviewChanges.Enabled = false;
 
@@ -1056,11 +1097,9 @@ public partial class MainForm : Form
         actionStatus.Text = statusMessage;
     }
 
-    // Matches the encodings reported by UtfUnknown.Core.CodepageName. UTF-7 is
-    // deliberately excluded: .NET disabled it by default for security reasons (see
-    // SYSLIB0001 - UTF-7 content can be crafted to evade validation that assumes a
-    // different encoding), so Encoding.GetEncoding throws NotSupportedException for
-    // it. Omitting it here documents that instead of leaving it implicit.
+    // Matches encodings reported by UtfUnknown.Core.CodepageName.
+    // UTF-7 is intentionally excluded because .NET disables it by default (SYSLIB0001)
+    // and Encoding.GetEncoding throws NotSupportedException.
     private static readonly string[] SupportedCharsets =
     [
         "ascii", "utf-8", "utf-16le", "utf-16be",

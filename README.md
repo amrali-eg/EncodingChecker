@@ -21,6 +21,11 @@ Each [release](https://github.com/amrali-eg/EncodingChecker/releases) publishes 
 
 Launch `EncodingChecker.exe` with no arguments. Pick a directory and file filters, choose **View** to detect encodings, **Validate** against a set of accepted charsets, or **Convert** to a target encoding. Results can be exported to CSV.
 
+Two options apply to **Convert**:
+
+- **Back up original files before converting (.bak)** — keeps each original as `<file>.bak` before it is replaced. The equivalent of the CLI's `-Backup`.
+- **Preview changes without modifying files** — reports which files *would* be converted without writing anything and without creating any `.bak`. Previewed rows keep their current encoding and stay selected, so you can review the result and then convert for real. The equivalent of the CLI's `-WhatIf`.
+
 ## Command-line usage
 
 Launch `EncodingChecker.exe` with arguments to run in console mode instead. Run `EncodingChecker.exe -?` (or `-h`, `/?`, `--help`) at any time to print this from the tool itself.
@@ -39,6 +44,7 @@ EncodingChecker.exe
     [-MaxParallelism <N>]         # Default: min(logical processor count, 4)
     [-WhatIf]                     # Convert mode: report without writing
     [-Backup]                     # Convert mode: write "<file>.bak" before overwriting
+                                   # (ignored under -WhatIf, which writes nothing)
     [-Quiet]                      # Suppress per-file rows; print only a summary
     [-Verbose]                    # Print error detail and a result breakdown
     [-FailOnChanges]              # Non-zero exit code if any file needs (or, under
@@ -47,7 +53,11 @@ EncodingChecker.exe
 
 `-Include`/`-Exclude` are comma-separated wildcard patterns. A pattern with no `/` or `\` matches just the filename (e.g. `*.cs` matches at any depth); a pattern containing a separator matches the path relative to `-BasePath` instead (e.g. `src/*.cs` matches only under `src`, `\` and `/` behave the same way). `.git`, `.svn`, `.hg`, `.vs`, `.idea`, `bin`, `obj`, `node_modules`, `packages`, `dist`, `build`, and `target` directories are always skipped. Convert, Validate, and Detect-only are mutually exclusive modes.
 
-Exit codes: `0` clean, `1` usage/argument error, `2` `-FailOnChanges` triggered, `3` one or more files failed to process, `4` cancelled (Ctrl+C).
+`-Backup` only ever writes a `.bak` when a real conversion happens: a file that already matches the target is left alone, and under `-WhatIf` nothing is written at all, so no backup is created.
+
+Exit codes: `0` clean, `1` usage/argument error (nothing was scanned), `2` `-FailOnChanges` triggered, `3` the run did not complete cleanly — one or more files failed to process, the scan itself failed, or the `-Report` file could not be written, `4` cancelled (Ctrl+C).
+
+The CSV report (and `-DetectOnly`'s stdout) uses the columns `File,Encoding,BOM,Target,BOM2,Result`, where `Encoding`/`BOM` describe the original file and `Target`/`BOM2` the encoding and BOM state it was (or would be) converted to.
 
 Examples:
 
