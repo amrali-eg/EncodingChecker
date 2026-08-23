@@ -806,14 +806,21 @@ public partial class MainForm : Form
         UpdateControlsOnActionDone(statusMessage);
     }
 
-    // Formats one result row. Kept internal so preview/convert presentation
-    // behavior can be tested without creating a real form.
+    // Reconciles one result row with the outcome of processing it. Kept internal so
+    // preview/convert presentation behavior can be tested without creating a real form.
     internal static void UpdateResultItem(
         ListViewItem item,
         ConversionReportEntry entry,
         string targetLabel,
         bool wasPreview)
     {
+        // The row's own entry is what OnExportReport writes to CSV, so it has to be the
+        // entry that produced this presentation. Processing normally mutates the entry
+        // in place, but ScanEngine.RunParallel substitutes a fresh error entry if a file
+        // throws, and that substitute would otherwise never reach the row - leaving the
+        // CSV reporting a stale pre-error result while the row displayed the failure.
+        item.Tag = entry;
+
         if (entry.Result == ConversionRowResult.Converted)
         {
             // Under preview nothing was written, so the row must keep describing the
