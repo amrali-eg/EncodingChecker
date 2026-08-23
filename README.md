@@ -57,7 +57,7 @@ EncodingChecker.exe
 
 Exit codes: `0` clean, `1` usage/argument error (nothing was scanned), `2` `-FailOnChanges` triggered, `3` the run did not complete cleanly — one or more files failed to process, the scan itself failed, or the `-Report` file could not be written, `4` cancelled (Ctrl+C).
 
-The CSV report (and `-DetectOnly`'s stdout) uses the columns `File,Encoding,BOM,Target,BOM2,Result`, where `Encoding`/`BOM` describe the original file and `Target`/`BOM2` the encoding and BOM state it was (or would be) converted to.
+The CSV report (and `-DetectOnly`'s stdout) uses the columns `File,Encoding,BOM,Target,TargetBOM,Result`, where `Encoding`/`BOM` describe the original file and `Target`/`TargetBOM` the encoding and BOM state it was (or would be) converted to.
 
 Examples:
 

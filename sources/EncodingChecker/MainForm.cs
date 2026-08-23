@@ -64,8 +64,10 @@ public partial class MainForm : Form
     private bool _convertWasPreview;
 
     // Indices into imgsResults (see SetKeyName calls in MainForm.Designer.cs).
-    // Reuses the existing Warning icon for the preview/would-change state.
+    // Reuses the existing Failed and Warning icons; the Warning icon carries the
+    // preview/would-change state.
     private const int RESULT_ICON_SUCCESS = 0;
+    private const int RESULT_ICON_FAILED = 1;
     private const int RESULT_ICON_WOULD_CHANGE = 2;
 
     private const int RESULTS_COLUMN_CHARSET = 0;
@@ -830,6 +832,10 @@ public partial class MainForm : Form
         }
         else if (entry.Result == ConversionRowResult.Error)
         {
+            // The row keeps its charset and stays checked so the failure can be
+            // retried; only the icon marks it as failed.
+            item.ImageIndex = RESULT_ICON_FAILED;
+
             Debug.WriteLine(
                 $"Conversion failed for {entry.FilePath}: {entry.Diagnostic}");
         }

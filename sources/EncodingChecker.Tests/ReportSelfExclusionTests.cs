@@ -49,7 +49,7 @@ public sealed class ReportSelfExclusionTests : IDisposable
         ScanEngine.ScanDirectory(options, firstRun.Add, CancellationToken.None);
         Assert.Equal(sourcePath, Assert.Single(firstRun).FilePath);
 
-        File.WriteAllText(reportPath, "File,Encoding,BOM,Target,BOM2,Result\r\n", new UTF8Encoding(false));
+        File.WriteAllText(reportPath, "File,Encoding,BOM,Target,TargetBOM,Result\r\n", new UTF8Encoding(false));
 
         // Run 2: the report file now exists in the scanned tree; a broad -Include "*"
         // must still not pick it up, since it's excluded by exact full path.
@@ -88,7 +88,7 @@ public sealed class ReportSelfExclusionTests : IDisposable
             ScanEngine.ScanDirectory(options, firstRun.Add, CancellationToken.None);
             Assert.Single(firstRun);
 
-            File.WriteAllText(reportPath, "File,Encoding,BOM,Target,BOM2,Result\r\n", new UTF8Encoding(false));
+            File.WriteAllText(reportPath, "File,Encoding,BOM,Target,TargetBOM,Result\r\n", new UTF8Encoding(false));
 
             var secondRun = new List<ConversionReportEntry>();
             ScanEngine.ScanDirectory(options, secondRun.Add, CancellationToken.None);

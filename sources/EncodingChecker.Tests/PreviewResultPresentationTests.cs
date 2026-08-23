@@ -15,6 +15,12 @@ public sealed class PreviewResultPresentationTests
 {
     private const int CharsetColumn = 0;
 
+    // Positions in imgsResults; see the SetKeyName calls in MainForm.Designer.cs.
+    // SetKeyName runs in InitializeComponent, not in the resource stream, so a
+    // form-less test can only address these images by index.
+    private const int SuccessIcon = 0;
+    private const int FailedIcon = 1;
+
     private static ListViewItem Row(string charset) =>
         new([charset, "f.txt", ".txt", @"C:\dir"]);
 
@@ -68,7 +74,7 @@ public sealed class PreviewResultPresentationTests
         // Unchanged pre-existing behaviour for an actual conversion.
         Assert.Equal("utf-8-bom", item.SubItems[CharsetColumn].Text);
         Assert.False(item.Checked);
-        Assert.Equal(0, item.ImageIndex);
+        Assert.Equal(SuccessIcon, item.ImageIndex);
     }
 
     [Fact]
@@ -86,13 +92,10 @@ public sealed class PreviewResultPresentationTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void Error_KeepsTheExistingErrorPresentation_AndNeverTheWouldChangeIcon(bool wasPreview)
+    public void Error_UsesTheFailedIcon_KeepsCharset_AndStaysChecked(bool wasPreview)
     {
         ListViewItem item = Row("us-ascii");
         item.Checked = true;
-
-        ListViewItem previewSuccess = Row("us-ascii");
-        MainForm.UpdateResultItem(previewSuccess, Entry(ConversionRowResult.Converted), "utf-8-bom", wasPreview: true);
 
         MainForm.UpdateResultItem(
             item,
@@ -100,11 +103,26 @@ public sealed class PreviewResultPresentationTests
             targetLabel: "utf-8-bom",
             wasPreview: wasPreview);
 
-        // Error presentation is untouched by this change: no icon is applied and the
-        // row keeps its original charset, so a failure can never be mistaken for a
-        // successful preview.
+        // Nothing was written, so the row keeps its charset and stays selected for a
+        // retry; only the icon marks the failure.
         Assert.Equal("us-ascii", item.SubItems[CharsetColumn].Text);
-        Assert.NotEqual(previewSuccess.ImageIndex, item.ImageIndex);
+        Assert.True(item.Checked);
+        Assert.Equal(FailedIcon, item.ImageIndex);
+    }
+
+    [Fact]
+    public void Error_And_PreviewWouldChange_AreVisuallyDistinguishable()
+    {
+        ListViewItem failed = Row("us-ascii");
+        ListViewItem previewed = Row("us-ascii");
+        ListViewItem converted = Row("us-ascii");
+
+        MainForm.UpdateResultItem(failed, Entry(ConversionRowResult.Error), "utf-8-bom", wasPreview: false);
+        MainForm.UpdateResultItem(previewed, Entry(ConversionRowResult.Converted), "utf-8-bom", wasPreview: true);
+        MainForm.UpdateResultItem(converted, Entry(ConversionRowResult.Converted), "utf-8-bom", wasPreview: false);
+
+        // All three outcomes a Convert run can produce must be tellable apart at a glance.
+        Assert.Equal(3, new[] { failed.ImageIndex, previewed.ImageIndex, converted.ImageIndex }.Distinct().Count());
     }
 
     [Theory]

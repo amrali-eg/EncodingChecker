@@ -42,7 +42,7 @@ public sealed class ConversionReportCsvTests
         Assert.Equal(6, headers.Length);
         Assert.Equal(headers.Length, headers.Distinct(StringComparer.Ordinal).Count());
         Assert.Equal(
-            ["File", "Encoding", "BOM", "Target", "BOM2", "Result"],
+            ["File", "Encoding", "BOM", "Target", "TargetBOM", "Result"],
             headers);
 
         // Every column still carries its expected value, positionally.
@@ -51,7 +51,7 @@ public sealed class ConversionReportCsvTests
         Assert.Equal("us-ascii", values[1]);   // Encoding  (source)
         Assert.Equal("No", values[2]);         // BOM       (source)
         Assert.Equal("utf-8", values[3]);      // Target
-        Assert.Equal("Yes", values[4]);        // BOM2      (target)
+        Assert.Equal("Yes", values[4]);        // TargetBOM      (target)
         Assert.Equal("Converted", values[5]);  // Result
     }
 
@@ -61,7 +61,7 @@ public sealed class ConversionReportCsvTests
         string csv = ConversionReport.ToCsvString([]);
 
         string firstLine = csv.Split(["\r\n", "\n"], StringSplitOptions.None)[0];
-        Assert.Equal("File,Encoding,BOM,Target,BOM2,Result", firstLine);
+        Assert.Equal("File,Encoding,BOM,Target,TargetBOM,Result", firstLine);
     }
 
     [Fact]
@@ -69,7 +69,7 @@ public sealed class ConversionReportCsvTests
     {
         string csv = ConversionReport.ToCsvString([]);
 
-        Assert.Equal("File,Encoding,BOM,Target,BOM2,Result" + Environment.NewLine, csv);
+        Assert.Equal("File,Encoding,BOM,Target,TargetBOM,Result" + Environment.NewLine, csv);
     }
 
     [Fact]
