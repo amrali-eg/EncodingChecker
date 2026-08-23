@@ -51,24 +51,20 @@ public partial class MainForm : Form
     private CancellationTokenSource? _actionCancellation;
     private bool _closeRequested;
 
-    // Set by OnConvert, read back by ConvertWorkerCompleted; never touched by the worker thread.
+    // Set by OnConvert and read by ConvertWorkerCompleted; never touched by the worker.
     private Dictionary<string, ListViewItem>? _convertItemsByPath;
     private string? _convertTargetLabel;
 
-    // Filled by the worker thread, read by ConvertWorkerCompleted once it finishes.
-    // RunWorkerCompletedEventArgs.Result cannot carry this: its getter throws
-    // InvalidOperationException whenever the operation was cancelled, which is exactly
-    // when the partial results still need to be applied to the list.
+    // Written by the worker and read after completion. e.Result cannot be used
+    // because its getter throws when the operation is cancelled.
     private ConcurrentBag<ConversionReportEntry>? _convertResults;
 
-    // Set by OnConvert from chkPreviewChanges, read back by ConvertWorkerCompleted.
-    // ConversionRowResult.Converted means "converted" *or* "would be converted under a
-    // dry run", so the presentation layer needs this to tell the two apart.
+    // Set by OnConvert and read by ConvertWorkerCompleted to distinguish
+    // actual conversion from preview ("would be converted").
     private bool _convertWasPreview;
 
-    // Indices into imgsResults (see the SetKeyName calls in MainForm.Designer.cs).
-    // "Warning" is reused for the preview/would-change state: it already exists, and
-    // is visually distinct from both the success icon and an untouched row.
+    // Indices into imgsResults (see SetKeyName calls in MainForm.Designer.cs).
+    // Reuses the existing Warning icon for the preview/would-change state.
     private const int RESULT_ICON_SUCCESS = 0;
     private const int RESULT_ICON_WOULD_CHANGE = 2;
 
@@ -808,9 +804,8 @@ public partial class MainForm : Form
         UpdateControlsOnActionDone(statusMessage);
     }
 
-    // Single place that formats a row from its ConversionReportEntry.
-    // internal so the preview/convert presentation contract can be tested against a
-    // standalone ListViewItem, without needing a real form (see MainForm's tests).
+    // Formats one result row. Kept internal so preview/convert presentation
+    // behavior can be tested without creating a real form.
     internal static void UpdateResultItem(
         ListViewItem item,
         ConversionReportEntry entry,
@@ -843,7 +838,7 @@ public partial class MainForm : Form
             Debug.WriteLine(
                 $"Conversion skipped for {entry.FilePath}: encoding could not be determined.");
         }
-        // Unchanged: already matched the target; nothing was written, row stays as-is.
+        // Unchanged: already matches the target; leave the row unchanged.
     }
 
     #endregion
@@ -1023,11 +1018,9 @@ public partial class MainForm : Form
         btnConvert.Enabled = false;
         chkSelectDeselectAll.Enabled = false;
 
-        // Resetting the tri-state box is a widget reset, not a data operation: without
-        // this guard it raises CheckedChanged -> OnSelectDeselectAll, which clears every
-        // row's checked state. Preview in particular must leave the user's selection
-        // intact so a follow-up real Convert still has files to act on. Same
-        // detach/reattach pattern OnResultItemChecked already uses.
+        // Reset only the tri-state widget; without detaching this handler, CheckedChanged
+        // calls OnSelectDeselectAll and clears all row selections. Preview must preserve
+        // those selections for a later real Convert.
         chkSelectDeselectAll.CheckedChanged -= OnSelectDeselectAll;
 
         try
@@ -1040,8 +1033,7 @@ public partial class MainForm : Form
             chkSelectDeselectAll.CheckedChanged += OnSelectDeselectAll;
         }
 
-        // Convert-only options; their checked state is the user's choice and must
-        // persist across runs, so only Enabled changes here - never CheckState.
+        // Preserve the user's option choices across runs; disable only while the action runs.
         chkCreateBackup.Enabled = false;
         chkPreviewChanges.Enabled = false;
 
@@ -1105,11 +1097,9 @@ public partial class MainForm : Form
         actionStatus.Text = statusMessage;
     }
 
-    // Matches the encodings reported by UtfUnknown.Core.CodepageName. UTF-7 is
-    // deliberately excluded: .NET disabled it by default for security reasons (see
-    // SYSLIB0001 - UTF-7 content can be crafted to evade validation that assumes a
-    // different encoding), so Encoding.GetEncoding throws NotSupportedException for
-    // it. Omitting it here documents that instead of leaving it implicit.
+    // Matches encodings reported by UtfUnknown.Core.CodepageName.
+    // UTF-7 is intentionally excluded because .NET disables it by default (SYSLIB0001)
+    // and Encoding.GetEncoding throws NotSupportedException.
     private static readonly string[] SupportedCharsets =
     [
         "ascii", "utf-8", "utf-16le", "utf-16be",
