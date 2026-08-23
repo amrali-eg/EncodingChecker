@@ -111,7 +111,7 @@ internal static class Program
     }
 
     private const string UsageText = """
-        EncodingChecker v3.2
+        EncodingChecker v3.3
 
         Usage:
 
