@@ -61,6 +61,17 @@ public partial class MainForm : Form
     // when the partial results still need to be applied to the list.
     private ConcurrentBag<ConversionReportEntry>? _convertResults;
 
+    // Set by OnConvert from chkPreviewChanges, read back by ConvertWorkerCompleted.
+    // ConversionRowResult.Converted means "converted" *or* "would be converted under a
+    // dry run", so the presentation layer needs this to tell the two apart.
+    private bool _convertWasPreview;
+
+    // Indices into imgsResults (see the SetKeyName calls in MainForm.Designer.cs).
+    // "Warning" is reused for the preview/would-change state: it already exists, and
+    // is visually distinct from both the success icon and an untouched row.
+    private const int RESULT_ICON_SUCCESS = 0;
+    private const int RESULT_ICON_WOULD_CHANGE = 2;
+
     private const int RESULTS_COLUMN_CHARSET = 0;
     private const int RESULTS_COLUMN_FILE_NAME = 1;
     private const int RESULTS_COLUMN_FILE_EXT = 2;
@@ -509,6 +520,7 @@ public partial class MainForm : Form
         _convertItemsByPath = itemsByPath;
         _convertTargetLabel = targetLabel;
         _convertResults = completed;
+        _convertWasPreview = chkPreviewChanges.Checked;
         _currentAction = CurrentAction.Convert;
 
         UpdateControlsOnActionStart();
@@ -718,10 +730,12 @@ public partial class MainForm : Form
         string targetLabel = _convertTargetLabel!;
         Dictionary<string, ListViewItem> itemsByPath = _convertItemsByPath!;
         ConcurrentBag<ConversionReportEntry> completed = _convertResults ?? [];
+        bool wasPreview = _convertWasPreview;
 
         _convertItemsByPath = null;
         _convertTargetLabel = null;
         _convertResults = null;
+        _convertWasPreview = false;
 
         if (e.Error != null)
         {
@@ -750,7 +764,7 @@ public partial class MainForm : Form
                 continue;
             }
 
-            UpdateResultItem(item, entry, targetLabel);
+            UpdateResultItem(item, entry, targetLabel, wasPreview);
 
             switch (entry.Result)
             {
@@ -778,25 +792,45 @@ public partial class MainForm : Form
 
         btnExportReport.Visible = lstResults.Items.Count > 0;
 
-        string statusMessage = e.Cancelled
-            ? $"Conversion cancelled: {convertedCount} converted, " +
-              $"{unchangedCount} unchanged, {errorCount} failed"
-            : $"Conversion complete: {convertedCount} converted, " +
-              $"{unchangedCount} unchanged, {errorCount} failed";
+        // Preview writes nothing, so the summary must not claim files were converted.
+        string statusMessage = wasPreview
+            ? (e.Cancelled
+                ? $"Preview cancelled: {convertedCount} file(s) would be converted, " +
+                  $"{unchangedCount} unchanged, {errorCount} failed"
+                : $"Preview complete: {convertedCount} file(s) would be converted, " +
+                  $"{unchangedCount} unchanged, {errorCount} failed")
+            : (e.Cancelled
+                ? $"Conversion cancelled: {convertedCount} converted, " +
+                  $"{unchangedCount} unchanged, {errorCount} failed"
+                : $"Conversion complete: {convertedCount} converted, " +
+                  $"{unchangedCount} unchanged, {errorCount} failed");
 
         UpdateControlsOnActionDone(statusMessage);
     }
 
     // Single place that formats a row from its ConversionReportEntry.
-    private static void UpdateResultItem(
+    // internal so the preview/convert presentation contract can be tested against a
+    // standalone ListViewItem, without needing a real form (see MainForm's tests).
+    internal static void UpdateResultItem(
         ListViewItem item,
         ConversionReportEntry entry,
-        string targetLabel)
+        string targetLabel,
+        bool wasPreview)
     {
         if (entry.Result == ConversionRowResult.Converted)
         {
+            // Under preview nothing was written, so the row must keep describing the
+            // file as it still is on disk: same charset, still checked so a follow-up
+            // real Convert doesn't silently skip it. Only the icon changes, marking
+            // "this would be converted".
+            if (wasPreview)
+            {
+                item.ImageIndex = RESULT_ICON_WOULD_CHANGE;
+                return;
+            }
+
             item.Checked = false;
-            item.ImageIndex = 0;
+            item.ImageIndex = RESULT_ICON_SUCCESS;
             item.SubItems[RESULTS_COLUMN_CHARSET].Text = targetLabel;
         }
         else if (entry.Result == ConversionRowResult.Error)
@@ -988,8 +1022,23 @@ public partial class MainForm : Form
         lstConvert.Enabled = false;
         btnConvert.Enabled = false;
         chkSelectDeselectAll.Enabled = false;
-        chkSelectDeselectAll.CheckState =
-            CheckState.Unchecked;
+
+        // Resetting the tri-state box is a widget reset, not a data operation: without
+        // this guard it raises CheckedChanged -> OnSelectDeselectAll, which clears every
+        // row's checked state. Preview in particular must leave the user's selection
+        // intact so a follow-up real Convert still has files to act on. Same
+        // detach/reattach pattern OnResultItemChecked already uses.
+        chkSelectDeselectAll.CheckedChanged -= OnSelectDeselectAll;
+
+        try
+        {
+            chkSelectDeselectAll.CheckState =
+                CheckState.Unchecked;
+        }
+        finally
+        {
+            chkSelectDeselectAll.CheckedChanged += OnSelectDeselectAll;
+        }
 
         // Convert-only options; their checked state is the user's choice and must
         // persist across runs, so only Enabled changes here - never CheckState.
