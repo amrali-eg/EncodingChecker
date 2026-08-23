@@ -55,7 +55,10 @@ internal static class ConversionReport
         ArgumentNullException.ThrowIfNull(entries);
         ArgumentNullException.ThrowIfNull(writer);
 
-        writer.WriteLine("File,Encoding,BOM,Target,BOM,Result");
+        // The target BOM column is "BOM2", not a second "BOM": duplicate header names
+        // make the report unparseable by strict CSV consumers (PowerShell's Import-Csv
+        // fails outright with "The member BOM is already present").
+        writer.WriteLine("File,Encoding,BOM,Target,BOM2,Result");
 
         foreach (ConversionReportEntry entry in entries)
         {
