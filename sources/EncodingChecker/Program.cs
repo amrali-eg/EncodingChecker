@@ -143,10 +143,10 @@ internal static class Program
                    combined with -DetectOnly.
               [-DetectOnly]
                    Read-only detection mode. Writes
-                   File,Encoding,BOM,Target,BOM2,Result CSV rows to
-                   stdout, where BOM is the source's BOM state and BOM2
-                   the target's (Target/BOM2/Result always mirror the
-                   source here, since nothing changes).
+                   File,Encoding,BOM,Target,TargetBOM,Result CSV rows to
+                   stdout, where BOM is the source's BOM state and
+                   TargetBOM the target's (Target/TargetBOM/Result always
+                   mirror the source here, since nothing changes).
                    Nothing is modified. -Target, -WhatIf, -Backup,
                    -FailOnChanges, -Quiet, and -Verbose have no effect.
                    Cannot be combined with -Validate.

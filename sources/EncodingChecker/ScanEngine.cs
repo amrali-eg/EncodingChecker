@@ -78,6 +78,9 @@ internal static class ScanEngine
     internal static readonly int DefaultMaxParallelism =
         Math.Min(Environment.ProcessorCount, 4);
 
+    /// <summary>Charset label for a file whose encoding could not be established.</summary>
+    internal const string UNKNOWN_CHARSET = "(Unknown)";
+
     #region Public API
 
     /// <summary>
@@ -212,7 +215,21 @@ internal static class ScanEngine
             getPath: entry => entry.FilePath,
             processItem: entry =>
             {
-                if (entry.SourceEncoding == "(Unknown)")
+                // A row this tool already converted no longer matches its original scan
+                // data, so the label recorded at install time wins. Decoding the new file
+                // with the old encoding can silently produce mojibake that neither strict
+                // decoding nor hash verification catches, since both would use the same
+                // wrong encoding.
+                string effectiveLabel =
+                    entry.CurrentCharsetLabel
+                    ?? FormatCharsetLabel(entry.SourceEncoding, entry.SourceHasBom);
+
+                ParseCharsetLabel(
+                    effectiveLabel,
+                    out string sourceCharset,
+                    out bool sourceHasBom);
+
+                if (sourceCharset == UNKNOWN_CHARSET)
                 {
                     entry.Result = ConversionRowResult.Skipped;
                     return entry;
@@ -222,7 +239,7 @@ internal static class ScanEngine
 
                 try
                 {
-                    sourceEncoding = Encoding.GetEncoding(entry.SourceEncoding);
+                    sourceEncoding = Encoding.GetEncoding(sourceCharset);
                 }
                 catch (ArgumentException)
                 {
@@ -234,6 +251,8 @@ internal static class ScanEngine
                     entry,
                     entry.FilePath,
                     sourceEncoding,
+                    sourceCharset,
+                    sourceHasBom,
                     targetCharset,
                     targetEncoding,
                     targetWriteBom,
@@ -282,7 +301,7 @@ internal static class ScanEngine
             detected.GetPreamble().Length > 0;
 
         string sourceCharset =
-            detected?.WebName ?? "(Unknown)";
+            detected?.WebName ?? UNKNOWN_CHARSET;
 
         var entry = new ConversionReportEntry
         {
@@ -297,7 +316,7 @@ internal static class ScanEngine
         switch (options.Action)
         {
             case ScanAction.Detect:
-                if (sourceCharset == "(Unknown)")
+                if (sourceCharset == UNKNOWN_CHARSET)
                     entry.Result = ConversionRowResult.Skipped;
 
                 break;
@@ -307,7 +326,7 @@ internal static class ScanEngine
                     FormatCharsetLabel(sourceCharset, hasBom);
 
                 bool isValid =
-                    sourceCharset != "(Unknown)" &&
+                    sourceCharset != UNKNOWN_CHARSET &&
                     options.ValidCharsets is not null &&
                     options.ValidCharsets.Contains(
                         label,
@@ -328,6 +347,8 @@ internal static class ScanEngine
                         entry,
                         path,
                         detected,
+                        sourceCharset,
+                        hasBom,
                         options.TargetCharset!,
                         targetEncoding!,
                         options.TargetWriteBom,
@@ -353,6 +374,8 @@ internal static class ScanEngine
         ConversionReportEntry entry,
         string path,
         Encoding sourceEncoding,
+        string sourceCharset,
+        bool sourceHasBom,
         string targetCharset,
         Encoding targetEncoding,
         bool targetWriteBom,
@@ -363,12 +386,14 @@ internal static class ScanEngine
         entry.TargetEncoding = targetCharset;
         entry.TargetHasBom = targetWriteBom;
 
+        // Compared against the file's current state, not entry.SourceEncoding, which
+        // stays at its original-scan value for reporting even after a conversion.
         bool alreadyMatches =
             string.Equals(
-                entry.SourceEncoding,
+                sourceCharset,
                 targetCharset,
                 StringComparison.OrdinalIgnoreCase) &&
-            entry.SourceHasBom == targetWriteBom;
+            sourceHasBom == targetWriteBom;
 
         if (alreadyMatches)
         {
@@ -422,14 +447,33 @@ internal static class ScanEngine
         if (result.ErrorCode == ConversionErrorCode.Cancelled)
             throw new OperationCanceledException(cancellationToken);
 
+        // Gated on whether the file was actually replaced, not on overall success:
+        // MetadataRestoreFailed reports Success == false after the replacement has
+        // already been installed, so the file on disk is the target encoding even
+        // though the row is an error.
+        if (result.ReplacementCommitted == true)
+        {
+            entry.CurrentCharsetLabel =
+                FormatCharsetLabel(targetCharset, targetWriteBom);
+        }
+        else if (result.ReplacementCommitted is null)
+        {
+            // The replacement outcome is unknown, so neither the original scan data nor
+            // the target describes the file reliably. "(Unknown)" makes a later
+            // conversion skip the row instead of decoding it with a guess.
+            entry.CurrentCharsetLabel = UNKNOWN_CHARSET;
+        }
+
         entry.Result =
             result.Success
                 ? ConversionRowResult.Converted
                 : ConversionRowResult.Error;
 
-        if (!result.Success)
-            entry.Diagnostic =
-                $"{result.ErrorCode}: {result.ErrorMessage}";
+        // Cleared on success so a retry that succeeds doesn't keep the previous failure.
+        entry.Diagnostic =
+            result.Success
+                ? null
+                : $"{result.ErrorCode}: {result.ErrorMessage}";
     }
 
     /// <summary>

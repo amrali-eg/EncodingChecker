@@ -39,6 +39,15 @@ internal sealed class ConversionReportEntry
 
     internal ConversionRowResult Result { get; set; }
 
+    /// <summary>
+    /// The charset label the file actually has on disk once this tool has changed it,
+    /// or <see langword="null"/> while <see cref="SourceEncoding"/>/<see cref="SourceHasBom"/>
+    /// still describe it. A converted row keeps its original scan values for reporting, so
+    /// without this a second conversion would decode the new file with the old encoding.
+    /// Internal state; not included in CSV output.
+    /// </summary>
+    internal string? CurrentCharsetLabel { get; set; }
+
     /// <summary>Additional error detail; not included in CSV output.</summary>
     internal string? Diagnostic { get; set; }
 }
@@ -55,10 +64,10 @@ internal static class ConversionReport
         ArgumentNullException.ThrowIfNull(entries);
         ArgumentNullException.ThrowIfNull(writer);
 
-        // The target BOM column is "BOM2", not a second "BOM": duplicate header names
+        // The target BOM column is "TargetBOM", not a second "BOM": duplicate header names
         // make the report unparseable by strict CSV consumers (PowerShell's Import-Csv
         // fails outright with "The member BOM is already present").
-        writer.WriteLine("File,Encoding,BOM,Target,BOM2,Result");
+        writer.WriteLine("File,Encoding,BOM,Target,TargetBOM,Result");
 
         foreach (ConversionReportEntry entry in entries)
         {
