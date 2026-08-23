@@ -59,6 +59,57 @@ EncodingChecker.exe -BasePath . -Include "*.cpp,*.hpp" -Target "utf-8" -WhatIf
 EncodingChecker.exe -BasePath . -Include "*" -Validate "utf-8,utf-8-bom" -Report report.csv -FailOnChanges
 ```
 
+## Safety model
+
+These are the guarantees the implementation actually provides.
+
+- Unicode content is decoded and re-encoded through a strict `Decoder`/`Encoder`
+  pair (`DecoderFallback.ExceptionFallback` / `EncoderFallback.ExceptionFallback`):
+  malformed input is rejected rather than silently replaced. There is no
+  raw-byte conversion path — every encoding, Unicode or legacy, goes through
+  decode/re-encode.
+- Every write is verified before installation by re-decoding the temporary
+  file and comparing a SHA-256 hash of its *decoded* content and BOM state
+  against the source, so an encoder that silently substitutes an
+  unrepresentable character (e.g. Windows-1252 writing `?` instead of
+  throwing) is caught and reported as an error instead of corrupting the
+  file.
+- The source file is never rewritten in place: conversion writes to a new
+  temporary file beside the destination, which is verified before it is
+  installed.
+- Immediately before installation, the destination is revalidated (length
+  and last-write time) so a file changed elsewhere during conversion is not
+  silently overwritten. **This is a point-in-time race check, not a
+  complete elimination of every possible TOCTOU window.**
+- Original file attributes and timestamps are preserved: applied to the
+  temporary file before installation, so the final file's metadata is
+  correct atomically along with its content.
+- With `-Backup`, the original is copied to `<file>.bak` *before* the main
+  file is replaced; if the backup fails, the main conversion is aborted and
+  the original is left untouched. A previously read-only `.bak` is still
+  replaced correctly.
+- `-BasePath` itself is rejected if it is a symbolic link, junction, or
+  other reparse point. Reparse-point subdirectories are skipped during
+  traversal, and a file that is (or becomes) a reparse point is rejected at
+  the point of installation.
+- `.bak` files and the tool's own abandoned temporary files — both the
+  conversion temp file and the `-Backup` install's own temp file — are
+  automatically excluded from scanning, including under a broad
+  `-Include "*"`, so a later run never treats its own output as input.
+- Installation uses .NET's `File.Replace` where supported; a plain,
+  non-atomic move is used only when that platform support is genuinely
+  unavailable, never as a silent fallback after a real replacement
+  failure.
+- Cleanup of the temporary file after a failure clears any inherited
+  ReadOnly attribute before deleting it, and a cleanup failure can never
+  replace or mask the actual error being reported — conversion results are
+  returned as structured data, not thrown, so the result is already
+  finalized before cleanup ever runs.
+- Cancellation (Ctrl+C in the CLI) is observed between files and at
+  multiple points within a single file's conversion; a cancelled run never
+  leaves a half-written destination, because the destination is only
+  touched by the final install step.
+
 ## Supported charsets
 
 Over forty charsets, matching what [UtfUnknown](https://github.com/CharsetDetector/UTF-unknown) can report and .NET can encode/decode:
