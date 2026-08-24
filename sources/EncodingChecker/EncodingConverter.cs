@@ -1211,14 +1211,27 @@ internal static class EncodingConverter
 
             replacementCommitted = true;
 
-            // For a different destination, restore its original ReadOnly state.
-            if (!sameFile && clearedAttributes is not null)
+            // Restore the destination's original ReadOnly state when the installed file
+            // does not already carry it.
+            //
+            // For a different destination it never does, so this always applies, as
+            // before. For a same-file replacement the temp normally arrives holding the
+            // original attributes - but only because they were applied to it before
+            // installation, which PreserveAttributes = false skips. Keying off the
+            // installed file's actual state rather than sameFile alone stops ReadOnly
+            // being dropped silently in that combination.
+            if (clearedAttributes is not null)
             {
                 try
                 {
-                    File.SetAttributes(
-                        destinationPath,
-                        clearedAttributes.Value);
+                    if (!sameFile ||
+                        !File.GetAttributes(destinationPath)
+                            .HasFlag(FileAttributes.ReadOnly))
+                    {
+                        File.SetAttributes(
+                            destinationPath,
+                            clearedAttributes.Value);
+                    }
                 }
                 catch (Exception ex) when (
                     ex is IOException or UnauthorizedAccessException
@@ -1305,10 +1318,61 @@ internal static class EncodingConverter
         {
             ReplaceOrMove(tempPath, destinationPath, destinationExists);
         }
-        finally
+        catch (Exception replaceEx) when (
+            replaceEx is IOException or UnauthorizedAccessException
+                or ArgumentException or NotSupportedException)
         {
-            if (clearedAttributes is not null && File.Exists(destinationPath))
+            // The replacement failure is the real error. Restoring ReadOnly from a plain
+            // finally would let a failing SetAttributes throw over it, reporting an
+            // attribute problem instead of why the backup actually failed - so the
+            // rollback is attempted here and only ever added as context, matching
+            // AtomicReplace's handling of the same situation.
+            string? rollbackError = TryRestoreReadOnly(destinationPath, clearedAttributes);
+
+            if (rollbackError is null)
+                throw;
+
+            throw new IOException(
+                $"{replaceEx.Message} The original ReadOnly attribute could also not " +
+                $"be restored: {rollbackError}",
+                replaceEx);
+        }
+
+        // Replacement succeeded; a restoration failure here is itself the primary error.
+        string? restoreError = TryRestoreReadOnly(destinationPath, clearedAttributes);
+
+        if (restoreError is not null)
+        {
+            throw new IOException(
+                $"The backup was written, but the original ReadOnly attribute could " +
+                $"not be restored: {restoreError}");
+        }
+    }
+
+
+    /// <summary>
+    /// Restores previously cleared attributes, returning the failure message instead of
+    /// throwing so a caller can decide whether it outranks an error already in flight.
+    /// </summary>
+    private static string? TryRestoreReadOnly(
+        string destinationPath,
+        FileAttributes? clearedAttributes)
+    {
+        if (clearedAttributes is null)
+            return null;
+
+        try
+        {
+            if (File.Exists(destinationPath))
                 File.SetAttributes(destinationPath, clearedAttributes.Value);
+
+            return null;
+        }
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException
+                or ArgumentException or NotSupportedException)
+        {
+            return ex.Message;
         }
     }
 

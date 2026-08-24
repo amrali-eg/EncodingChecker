@@ -117,8 +117,8 @@ internal static class Program
 
           EncodingChecker.exe
               -BasePath <directory>
-              [-Include "<pattern1,pattern2,...>"]
-              [-Exclude "<pattern1,pattern2,...>"]
+              [-Include "<pattern1,pattern2,...>"]   # repeatable; patterns accumulate
+              [-Exclude "<pattern1,pattern2,...>"]   # repeatable; patterns accumulate
                    Wildcard patterns. A pattern with no "/" or "\"
                    matches just the filename, at any depth. One
                    containing a separator matches the path relative
@@ -140,7 +140,7 @@ internal static class Program
                    Validate without writing anything. Files whose current
                    encoding isn't in this list are reported as Invalid.
                    May be combined with -FailOnChanges. Cannot be
-                   combined with -DetectOnly.
+                   combined with -DetectOnly or -Target.
               [-DetectOnly]
                    Read-only detection mode. Writes
                    File,Encoding,BOM,Target,TargetBOM,Result CSV rows to
@@ -439,7 +439,9 @@ internal static class Program
                         error = "-Include requires a value.";
                         return false;
                     }
-                    options.Include = SplitCommaList(include);
+                    // Accumulate: repeating the option used to discard the earlier
+                    // patterns silently, so only the last one took effect.
+                    options.Include.AddRange(SplitCommaList(include));
                     break;
 
                 case "exclude":
@@ -451,7 +453,9 @@ internal static class Program
                         error = "-Exclude requires a value.";
                         return false;
                     }
-                    options.Exclude = SplitCommaList(exclude);
+                    // Accumulates for the same reason as -Include, keeping the two
+                    // options consistent with each other.
+                    options.Exclude.AddRange(SplitCommaList(exclude));
                     break;
 
                 case "target":
@@ -614,6 +618,20 @@ internal static class Program
         {
             error =
                 "-DetectOnly cannot be combined with -Validate.";
+            return false;
+        }
+
+        // Validate and Convert are separate modes. Accepting both silently ran Validate
+        // and ignored -Target, so a caller expecting files to be converted was told
+        // nothing while nothing was converted.
+        if (options is
+            {
+                ValidateCharsets: not null,
+                Target: not null
+            })
+        {
+            error =
+                "-Validate cannot be combined with -Target.";
             return false;
         }
 

@@ -85,8 +85,9 @@ internal static class ScanEngine
 
     /// <summary>
     /// Scans the base directory and processes matching files with bounded parallelism.
-    /// Skips excluded directories, reparse points, the tool's own backup/temp files,
-    /// and likely binary files.
+    /// Traversal skips excluded directories, reparse points, and the tool's own
+    /// backup/temp files. Likely binary files are not filtered here: they are rejected
+    /// later, during encoding detection, and reported as Skipped.
     /// </summary>
     /// <remarks>
     /// <paramref name="onEntry"/> is invoked concurrently from worker threads; callers
