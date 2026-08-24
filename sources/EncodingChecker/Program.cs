@@ -206,7 +206,9 @@ internal static class Program
           EncodingChecker.exe -BasePath D:\NetworkShare -Include "*.txt" -Target "utf-8" -MaxParallelism 2 -FailOnChanges
         """;
 
-    private static int RunConsoleMode(string[] args)
+    // Internal so ExitCodeContractTests can pin the exit codes, which are a published
+    // CLI contract shared with LineEndingNormalizer.
+    internal static int RunConsoleMode(string[] args)
     {
         if (args.Length == 1 &&
             args[0] is "/?" or "-?" or "/h" or "-h" or "--help")
