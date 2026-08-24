@@ -152,14 +152,17 @@ internal static class TextValidation
             switch (Rune.GetUnicodeCategory(rune))
             {
                 //
-                // Treat PrivateUse characters as non-text.
+                // Control and private-use characters are excluded from the printable
+                // ratio rather than rejecting the sample outright.
+                //
+                // Rejecting on the first private-use scalar made a whole file
+                // undetectable over one character - icon-font glyphs in markup are the
+                // common case - and did so inconsistently, since only the first 500
+                // scalars are examined, so the same character later in the file was
+                // accepted. Excluding them still rejects a buffer that is largely
+                // private-use, which is the binary evidence the check exists to find.
                 //
                 case UnicodeCategory.PrivateUse:
-                    return false;
-
-                //
-                // Control characters are excluded from the printable ratio.
-                //
                 case UnicodeCategory.Control:
                     break;
 
