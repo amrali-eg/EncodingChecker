@@ -1,6 +1,6 @@
 [![CI](https://github.com/amrali-eg/EncodingChecker/actions/workflows/ci.yml/badge.svg)](https://github.com/amrali-eg/EncodingChecker/actions/workflows/ci.yml)
 
-# EncodingChecker v3.3.1
+# EncodingChecker v3.4.0
 
 File Encoding Checker detects, validates, and converts the text encoding of one or more files. It runs either as a Windows GUI app or as a command-line tool for scripting and CI, and shares one detection/conversion engine between both.
 
@@ -33,8 +33,8 @@ Launch `EncodingChecker.exe` with arguments to run in console mode instead. Run 
 ```
 EncodingChecker.exe
     -BasePath <directory>
-    [-Include "<pattern1,pattern2,...>"]
-    [-Exclude "<pattern1,pattern2,...>"]
+    [-Include "<pattern1,pattern2,...>"]   # repeatable; patterns accumulate
+    [-Exclude "<pattern1,pattern2,...>"]   # repeatable; patterns accumulate
 
     -Target "<encoding>"          # Convert mode (default); e.g. "utf-8" or "utf-8-bom"
     -Validate "<charset1,...>"    # Validate mode: flag files not in this list
@@ -51,7 +51,7 @@ EncodingChecker.exe
                                    # -Validate, fails) conversion — useful as a CI gate
 ```
 
-`-Include`/`-Exclude` are comma-separated wildcard patterns. A pattern with no `/` or `\` matches just the filename (e.g. `*.cs` matches at any depth); a pattern containing a separator matches the path relative to `-BasePath` instead (e.g. `src/*.cs` matches only under `src`, `\` and `/` behave the same way). `.git`, `.svn`, `.hg`, `.vs`, `.idea`, `bin`, `obj`, `node_modules`, `packages`, `dist`, `build`, and `target` directories are always skipped. Convert, Validate, and Detect-only are mutually exclusive modes.
+`-Include`/`-Exclude` are comma-separated wildcard patterns, and both options may be repeated — patterns from every occurrence accumulate, so `-Include "*.cs" -Include "*.txt"` is equivalent to `-Include "*.cs,*.txt"`. A pattern with no `/` or `\` matches just the filename (e.g. `*.cs` matches at any depth); a pattern containing a separator matches the path relative to `-BasePath` instead (e.g. `src/*.cs` matches only under `src`, `\` and `/` behave the same way). `.git`, `.svn`, `.hg`, `.vs`, `.idea`, `bin`, `obj`, `node_modules`, `packages`, `dist`, `build`, and `target` directories are always skipped. Convert, Validate, and Detect-only are mutually exclusive modes.
 
 `-Backup` only ever writes a `.bak` when a real conversion happens: a file that already matches the target is left alone, and under `-WhatIf` nothing is written at all, so no backup is created.
 
