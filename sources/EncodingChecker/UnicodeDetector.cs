@@ -241,16 +241,32 @@ internal static class UnicodeDetector
         bool leCandidate = true;
 
         //
-        // For valid Unicode scalar values (U+0000..U+10FFFF), the most
-        // significant UTF-32 byte is always zero.
+        // For valid Unicode scalar values (U+0000..U+10FFFF), the most significant
+        // UTF-32 byte is always zero and the next one never exceeds 0x10.
+        //
+        // Testing both bounds matters because CheckUtf32 runs before CheckUtf16: in
+        // ASCII-range UTF-16 every other byte is zero, so the most-significant-byte test
+        // alone leaves a candidate alive for the whole buffer and pays a full strict
+        // UTF-32 decode before IsValidText rejects it. The second byte fails on the first
+        // code unit instead.
+        //
+        // This bounds the scalar range only. Surrogates (U+D800..U+DFFF) have a zero in
+        // this position and still reach IsValidText, which remains the authoritative
+        // validation stage.
         //
         for (int i = 0; i < buffer.Length; i += 4)
         {
-            if (beCandidate && buffer[i] != 0)
+            if (beCandidate &&
+                (buffer[i] != 0 || buffer[i + 1] > 0x10))
+            {
                 beCandidate = false;
+            }
 
-            if (leCandidate && buffer[i + 3] != 0)
+            if (leCandidate &&
+                (buffer[i + 3] != 0 || buffer[i + 2] > 0x10))
+            {
                 leCandidate = false;
+            }
 
             // Early rejection if neither byte order is plausible.
             if (!beCandidate && !leCandidate)
