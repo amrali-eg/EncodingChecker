@@ -14,9 +14,14 @@ namespace EncodingChecker.Tests;
 /// </summary>
 public sealed class PrivateUseAreaDetectionTests
 {
-    // U+F015 is the Font Awesome "home" glyph; U+E000 is the first private-use scalar.
-    private const string HomeIcon = "";
-    private const string FirstPua = "";
+    // Private-use characters render as nothing and have been silently emptied by
+    // file-editing tools in this repository before. TheFixtureConstantsAreActuallyPrivateUse
+    // below fails loudly if that happens, rather than leaving these tests asserting
+    // against ordinary text.
+    private const string HomeIcon = "";     // Font Awesome "home"
+    private const string ProfileIcon = "";
+    private const string SaveIcon = "";
+    private const string FirstPua = "";     // first private-use scalar
 
     private static string? Detect(string text, Encoding encoding) =>
         TextEncoding.DetectFromBuffer(encoding.GetBytes(text))?.WebName;
@@ -30,17 +35,34 @@ public sealed class PrivateUseAreaDetectionTests
         [new UnicodeEncoding(false, false), "utf-16"],
     ];
 
+    [Fact]
+    public void TheFixtureConstantsAreActuallyPrivateUse()
+    {
+        // If any of these were emptied or flattened to ordinary characters, every test
+        // below would still pass while testing nothing.
+        foreach (string s in new[] { HomeIcon, ProfileIcon, SaveIcon, FirstPua })
+        {
+            Rune rune = Assert.Single(s.EnumerateRunes());
+
+            Assert.Equal(
+                System.Globalization.UnicodeCategory.PrivateUse,
+                Rune.GetUnicodeCategory(rune));
+        }
+    }
+
     [Theory]
     [MemberData(nameof(Encodings))]
     public void IconFontMarkup_IsDetected(Encoding encoding, string expected)
     {
         // The reported case: markup carrying icon glyphs was skipped entirely.
         string markup =
-            $"<nav class=\"menu\">\n" +
-            $"  <i class=\"icon\">{HomeIcon}</i> Home\n" +
-            $"  <i class=\"icon\"></i> Profile\n" +
-            $"  <i class=\"icon\"></i> Save\n" +
-            $"</nav>\n";
+            $"""
+             <nav class="menu">
+               <i class="icon">{HomeIcon}</i> Home
+               <i class="icon">{ProfileIcon}</i> Profile
+               <i class="icon">{SaveIcon}</i> Save
+             </nav>
+             """;
 
         Assert.Equal(expected, Detect(markup, encoding));
     }
