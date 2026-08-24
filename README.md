@@ -57,6 +57,8 @@ EncodingChecker.exe
 
 Exit codes: `0` clean, `1` usage/argument error (nothing was scanned), `2` `-FailOnChanges` triggered, `3` the run did not complete cleanly — one or more files failed to process, the scan itself failed, or the `-Report` file could not be written, `4` cancelled (Ctrl+C).
 
+These are the same codes as [LineEndingNormalizer](https://github.com/amrali-eg/LineEndingNormalizer), a companion Windows CLI tool that normalizes line endings, so a script driving both can share one exit-code mapping. It additionally returns `5` for a missing base directory and `6` for a reparse-point `-BasePath`, both of which are reported here as `1` — so no code means two different things across the two tools, and treating `1`, `5` and `6` alike handles either.
+
 The CSV report (and `-DetectOnly`'s stdout) uses the columns `File,Encoding,BOM,Target,TargetBOM,Result`, where `Encoding`/`BOM` describe the original file and `Target`/`TargetBOM` the encoding and BOM state it was (or would be) converted to.
 
 Examples:
