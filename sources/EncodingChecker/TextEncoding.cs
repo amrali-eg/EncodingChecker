@@ -96,7 +96,7 @@ internal static class TextEncoding
         if (!stream.CanSeek)
         {
             throw new ArgumentException(
-                @"The stream must be seekable.",
+                "The stream must be seekable.",
                 nameof(stream));
         }
 

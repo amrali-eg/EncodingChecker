@@ -4,18 +4,9 @@ using System.Text;
 namespace EncodingChecker;
 
 /// <summary>
-/// Detects Unicode text encodings from raw byte buffers.
-///
-/// Supported encodings:
-/// - ASCII
-/// - UTF-8 (with or without BOM)
-/// - UTF-16 Little Endian (with or without BOM)
-/// - UTF-16 Big Endian (with or without BOM)
-/// - UTF-32 Little Endian (with or without BOM)
-/// - UTF-32 Big Endian (with or without BOM)
-///
-/// BOM-less Unicode encodings are identified using encoding-specific
-/// byte-level heuristics and confirmed using <see cref="TextValidation"/>.
+/// Detects UTF-8, UTF-16, and UTF-32 encodings with or without a BOM.
+/// BOM-less encodings are identified using byte-level heuristics and
+/// validated with <see cref="TextValidation"/>.
 /// </summary>
 internal static class UnicodeDetector
 {
@@ -168,8 +159,8 @@ internal static class UnicodeDetector
 
 
     /// <summary>
-    /// Runs BOM-less Unicode encoding detection in a fixed order:
-    /// UTF-32, UTF-16, ASCII, then UTF-8.
+    /// Detects BOM-less Unicode encodings in this order:
+    /// UTF-32, UTF-16, then UTF-8.
     /// </summary>
     private static Encoding? CheckBomless(
         ReadOnlySpan<byte> buffer)
@@ -178,8 +169,7 @@ internal static class UnicodeDetector
         // Detection order:
         //   1. UTF-32
         //   2. UTF-16
-        //   3. ASCII
-        //   4. UTF-8
+        //   3. UTF-8
         //
         // Unknown or unsupported encodings return null.
 
@@ -200,12 +190,6 @@ internal static class UnicodeDetector
             return utf16;
 
         //
-        // ASCII-only data is also valid UTF-8, so classify it separately first.
-        //
-        if (IsAscii(buffer))
-            return Encoding.ASCII;
-
-        //
         // UTF-8 without BOM.
         //
         Encoding? utf8 = CheckUtf8(buffer);
@@ -215,6 +199,7 @@ internal static class UnicodeDetector
 
         //
         // Unknown or unsupported encoding.
+        // Handled downstream by UtfUnknown.
         //
         return null;
     }
@@ -419,31 +404,6 @@ internal static class UnicodeDetector
 
 
     /// <summary>
-    /// Determines whether the buffer contains only 7-bit ASCII bytes.
-    /// </summary>
-    private static bool IsAscii(
-        ReadOnlySpan<byte> buffer)
-    {
-        //
-        // ASCII-only data is valid UTF-8, but normally provides insufficient
-        // evidence to classify the sample specifically as UTF-8.
-        //
-        foreach (byte b in buffer)
-        {
-            if (b != 0x09 &&
-                b != 0x0A &&
-                b != 0x0D &&
-                (b < 0x20 || b > 0x7E))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-
-    /// <summary>
     /// Detects BOM-less UTF-8 in the specified buffer.
     /// </summary>
     /// <param name="buffer">Buffer to examine.</param>
@@ -454,6 +414,13 @@ internal static class UnicodeDetector
         ReadOnlySpan<byte> buffer)
     {
         if (buffer.IsEmpty)
+            return null;
+
+        //
+        // Ignore ASCII and escape sequences used by stateful 7-bit encodings
+        // (ISO-2022-JP/KR/CN, HZ-GB-2312); handled downstream by UtfUnknown.
+        //
+        if (Ascii.IsValid(buffer))
             return null;
 
         //
