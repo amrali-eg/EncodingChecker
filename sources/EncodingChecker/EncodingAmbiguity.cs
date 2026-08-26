@@ -282,8 +282,14 @@ internal static class EncodingAmbiguity
         if (detectedIsDetermined)
             competing = [];
 
+        // Structurally determined is not the same as text-equivalent, and the difference
+        // matters as soon as anything shows the class to a user. The dismissed codecs here
+        // do read these bytes differently; they were set aside because they have no hold
+        // on them, not because they agree. Calling that "several codecs, same text" states
+        // something false about the file.
         AmbiguityClass classification =
             competing.Count > 0 ? AmbiguityClass.TextChanging
+            : detectedIsDetermined ? AmbiguityClass.Unambiguous
             : candidates.Count > 1 ? AmbiguityClass.TextEquivalent
             : AmbiguityClass.Unambiguous;
 

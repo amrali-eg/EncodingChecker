@@ -100,6 +100,8 @@ internal static class Program
         internal List<string> Exclude = [];
         internal string? Target;
         internal string? From;
+        internal string? PlanPath;
+        internal string? ApplyPath;
         internal string? ValidateCharsets;
         internal bool DetectOnly;
         internal string? ReportPath;
@@ -146,6 +148,26 @@ internal static class Program
                    output is still verified to hold exactly the same
                    text, and a failed backup still aborts. Convert mode
                    only.
+
+              Preflight:
+              [-Plan <path>]
+                   Write a conversion plan and change nothing. The plan
+                   records, for every file, what would happen and why:
+                   the encoding, whether it was detected or specified,
+                   whether the bytes identify it uniquely, and which
+                   files could come out with different text.
+
+              [-Apply <path>]
+                   Carry out a plan written by -Plan. Every file is
+                   checked against the hash it had when the plan was
+                   made; if any has changed, nothing is converted. A
+                   plan approved for one set of files is not applied to
+                   a different one.
+
+                   Nothing is detected a second time: the encodings,
+                   the target, and the backup setting all come from the
+                   plan, so -BasePath, -Target, -From, and -Backup are
+                   rejected here rather than silently ignored.
 
               Modes:
                    Conversion is the default mode.
@@ -218,8 +240,120 @@ internal static class Program
 
           EncodingChecker.exe -BasePath . -Include "*.txt" -From "windows-1252" -Target "utf-8"
 
+          EncodingChecker.exe -BasePath . -Include "*" -Target "utf-8" -Plan plan.json
+          EncodingChecker.exe -Apply plan.json
+
           EncodingChecker.exe -BasePath D:\NetworkShare -Include "*.txt" -Target "utf-8" -MaxParallelism 2 -FailOnChanges
         """;
+
+    /// <summary>
+    /// Carries out a plan written by -Plan, after confirming it still describes the
+    /// files on disk.
+    /// </summary>
+    private static int ApplyPlan(CliOptions options)
+    {
+        ConversionPlan? plan = ConversionPlan.Load(options.ApplyPath!, out string? loadError);
+
+        if (plan is null)
+        {
+            Console.Error.WriteLine($"The plan could not be read: {loadError}");
+            return 1;
+        }
+
+        // The whole reason a plan exists. Re-detecting here would make the preview a
+        // demonstration rather than a promise: a second pass can reach different
+        // conclusions, and it was the first that the user approved.
+        IReadOnlyList<string> stale = plan.FindStaleFiles();
+
+        if (stale.Count > 0)
+        {
+            Console.Error.WriteLine(
+                $"The plan no longer describes these files, so nothing was converted:");
+
+            foreach (string entry in stale.Take(20))
+                Console.Error.WriteLine($"  {entry}");
+
+            if (stale.Count > 20)
+                Console.Error.WriteLine($"  ...and {stale.Count - 20} more.");
+
+            Console.Error.WriteLine();
+            Console.Error.WriteLine(
+                "Re-run -Plan to produce a plan for the files as they are now.");
+            return 3;
+        }
+
+        List<ConversionReportEntry> entries =
+        [
+            .. plan.Files
+                .Where(f => f.Action == PlannedAction.Convert)
+                .Select(f => new ConversionReportEntry
+                {
+                    FilePath = f.Path,
+                    SourceEncoding = f.SourceEncoding,
+                    SourceHasBom = f.SourceHasBom,
+                    TargetEncoding = plan.TargetEncoding,
+                    TargetHasBom = plan.TargetHasBom,
+                    // The plan already settled this. Re-deriving it would be the second
+                    // detection pass the plan exists to avoid.
+                    Ambiguity = f.Ambiguity,
+                    AmbiguityReason = f.AmbiguityReason,
+                    CompetingEncodings = f.CompetingEncodings,
+                    SourceEncodingWasSpecified = f.SourceWasSpecified,
+                })
+        ];
+
+        var completed = new List<ConversionReportEntry>();
+
+        using var cancellation = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;
+            cancellation.Cancel();
+        };
+
+        try
+        {
+            ScanEngine.ConvertFiles(
+                entries,
+                plan.TargetEncoding,
+                plan.TargetHasBom,
+                options.MaxParallelism ?? ScanEngine.DefaultMaxParallelism,
+                whatIf: false,
+                backup: plan.BackupEnabled,
+                completed.Add,
+                cancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            Console.Error.WriteLine("Cancelled.");
+            return 4;
+        }
+
+        foreach (ConversionReportEntry entry in completed
+                     .Where(e => e.Result == ConversionRowResult.Error))
+        {
+            Console.Error.WriteLine($"Error: {entry.FilePath}: {entry.Diagnostic}");
+        }
+
+        Dictionary<ConversionRowResult, int> byResult =
+            completed.GroupBy(e => e.Result).ToDictionary(g => g.Key, g => g.Count());
+
+        int Count(ConversionRowResult result) => byResult.GetValueOrDefault(result);
+
+        int failed = Count(ConversionRowResult.Error);
+
+        // Every planned file is accounted for. A file that the plan scheduled but that
+        // the run left alone is the interesting case, so it must not disappear into a
+        // difference between two totals.
+        Console.Out.WriteLine(
+            $"Applied plan: {Count(ConversionRowResult.Converted)} converted, "
+            + $"{Count(ConversionRowResult.Unchanged)} already in the target encoding, "
+            + $"{Count(ConversionRowResult.Skipped)} skipped, "
+            + $"{failed} failed, "
+            + $"{plan.Files.Count - entries.Count} not scheduled for conversion.");
+
+        return failed > 0 ? 3 : 0;
+    }
 
     // Internal so ExitCodeContractTests can pin the exit codes, which are a published
     // CLI contract shared with LineEndingNormalizer.
@@ -245,6 +379,13 @@ internal static class Program
             Console.Error.WriteLine(validationError);
             return 1;
         }
+
+        if (!string.IsNullOrWhiteSpace(options.ApplyPath))
+            return ApplyPlan(options);
+
+        // A plan is a dry run that is written down, so it must not modify anything.
+        if (!string.IsNullOrWhiteSpace(options.PlanPath))
+            options.WhatIf = true;
 
         ScanAction action = options.DetectOnly
             ? ScanAction.Detect
@@ -376,6 +517,43 @@ internal static class Program
             }
         }
 
+        if (!string.IsNullOrWhiteSpace(options.PlanPath))
+        {
+            ConversionPlan plan = ConversionPlan.FromEntries(
+                entries,
+                options.BasePath!,
+                targetCharset!,
+                targetWriteBom,
+                options.Backup,
+                options.From);
+
+            string? saveError = plan.Save(options.PlanPath!);
+
+            if (saveError != null)
+            {
+                Console.Error.WriteLine($"Failed to write the plan: {saveError}");
+                return 3;
+            }
+
+            if (!options.Quiet)
+            {
+                Console.Out.WriteLine();
+                Console.Out.WriteLine(plan.Summarize());
+            }
+
+            // A refusal is one of the answers a preflight exists to give, so it does not
+            // make the preflight itself a failure. Returning 3 here would make the
+            // ordinary sequence - plan, read it, apply it - unreachable for exactly the
+            // directories this was built for.
+            if (options.FailOnChanges &&
+                plan.Files.Any(f => f.Action == PlannedAction.Convert))
+            {
+                return 2;
+            }
+
+            return 0;
+        }
+
         if (entries.Any(e => e.Result == ConversionRowResult.Error))
             return 3;
 
@@ -496,6 +674,22 @@ internal static class Program
                     }
                     break;
 
+                case "plan":
+                    if (!TryTakeValue(args, ref i, out options.PlanPath))
+                    {
+                        error = "-Plan requires a value.";
+                        return false;
+                    }
+                    break;
+
+                case "apply":
+                    if (!TryTakeValue(args, ref i, out options.ApplyPath))
+                    {
+                        error = "-Apply requires a value.";
+                        return false;
+                    }
+                    break;
+
                 case "validate":
                     if (!TryTakeValue(
                             args,
@@ -573,7 +767,8 @@ internal static class Program
     private static readonly HashSet<string> KnownFlagNames =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            "basepath", "include", "exclude", "target", "from", "validate",
+            "basepath", "include", "exclude", "target", "from", "plan", "apply",
+            "validate",
             "detectonly", "report", "maxparallelism", "failonchanges",
             "whatif", "backup", "quiet", "verbose",
         };
@@ -616,6 +811,57 @@ internal static class Program
         CliOptions options,
         [NotNullWhen(false)] out string? error)
     {
+        if (!string.IsNullOrWhiteSpace(options.PlanPath) &&
+            !string.IsNullOrWhiteSpace(options.ApplyPath))
+        {
+            error = "-Plan writes a plan and -Apply executes one; use them in "
+                    + "separate runs so the plan can be reviewed in between.";
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.ApplyPath))
+        {
+            if (!File.Exists(options.ApplyPath))
+            {
+                error = $"The plan file '{options.ApplyPath}' does not exist.";
+                return false;
+            }
+
+            if (options.DetectOnly || !string.IsNullOrWhiteSpace(options.ValidateCharsets))
+            {
+                error = "-Apply performs a conversion; it cannot be combined with "
+                        + "-DetectOnly or -Validate.";
+                return false;
+            }
+
+            // The plan already fixes each of these, so accepting them here would let a
+            // user write a flag that reads as an instruction and is silently ignored -
+            // -Backup being the one that matters, since it would appear to ask for
+            // originals to be kept while the plan says otherwise.
+            string? overridden =
+                options.BasePath != null ? "-BasePath"
+                : options.Target != null ? "-Target"
+                : options.From != null ? "-From"
+                : options.Backup ? "-Backup"
+                : null;
+
+            if (overridden != null)
+            {
+                error = $"{overridden} has no effect with -Apply: a plan already records "
+                        + "the files, the source and target encodings, and whether "
+                        + "originals are backed up. Re-run -Plan to change any of them.";
+                return false;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.PlanPath) &&
+            (options.DetectOnly || !string.IsNullOrWhiteSpace(options.ValidateCharsets)))
+        {
+            error = "-Plan previews a conversion; it cannot be combined with "
+                    + "-DetectOnly or -Validate.";
+            return false;
+        }
+
         if (!string.IsNullOrWhiteSpace(options.From))
         {
             if (options.DetectOnly || !string.IsNullOrWhiteSpace(options.ValidateCharsets))
@@ -634,6 +880,13 @@ internal static class Program
                 error = $"'{options.From}' is not a recognized encoding.";
                 return false;
             }
+        }
+
+        // A plan already names every file, so -Apply supplies its own scope.
+        if (!string.IsNullOrWhiteSpace(options.ApplyPath))
+        {
+            error = null;
+            return true;
         }
 
         if (string.IsNullOrWhiteSpace(options.BasePath))
