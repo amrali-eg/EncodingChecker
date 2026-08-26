@@ -75,17 +75,22 @@ EncodingChecker.exe -BasePath . -Include "*" -Validate "utf-8,utf-8-bom" -Report
 
 These are the guarantees the implementation actually provides.
 
-- Unicode content is decoded and re-encoded through a strict `Decoder`/`Encoder`
-  pair (`DecoderFallback.ExceptionFallback` / `EncoderFallback.ExceptionFallback`):
-  malformed input is rejected rather than silently replaced. There is no
-  raw-byte conversion path — every encoding, Unicode or legacy, goes through
-  decode/re-encode.
-- Every write is verified before installation by re-decoding the temporary
-  file and comparing a SHA-256 hash of its *decoded* content and BOM state
-  against the source, so an encoder that silently substitutes an
-  unrepresentable character (e.g. Windows-1252 writing `?` instead of
-  throwing) is caught and reported as an error instead of corrupting the
-  file.
+- Content is decoded and re-encoded through a strict `Decoder`/`Encoder` pair:
+  malformed input, and content the target cannot represent, are rejected rather
+  than silently replaced. There is no raw-byte conversion path — every encoding,
+  Unicode or legacy, goes through decode/re-encode.
+  <br>Strictness is enforced by rebuilding the encoding with its fallbacks
+  supplied up front (`TextEncoding.Strict`). Assigning `Decoder.Fallback` or
+  `Encoder.Fallback` *after* `GetDecoder()`/`GetEncoder()` is silently ignored by
+  the `CodePagesEncodingProvider` encodings — the codec has already taken its
+  fallbacks from the parent `Encoding` — which is exactly the defect the
+  [independent audit](#independent-audit) found in v3.5.0 and earlier.
+- Every write is verified before installation by re-decoding the temporary file
+  and comparing a SHA-256 hash of its *decoded* content and BOM state against the
+  source. This is a backstop behind the strict codecs, not the primary defence:
+  because it compares decoded source against decoded target, a decoder that
+  substitutes silently would produce agreeing hashes. Strict codecs are what
+  prevent that; the hash catches anything they cannot.
 - The source file is never rewritten in place: conversion writes to a new
   temporary file beside the destination, which is verified before it is
   installed.
@@ -121,6 +126,75 @@ These are the guarantees the implementation actually provides.
   multiple points within a single file's conversion; a cancelled run never
   leaves a half-written destination, because the destination is only
   touched by the final install step.
+
+## Independent audit
+
+EncodingChecker's conversion is audited end to end against four public corpora —
+**5,078 files** — by a separate harness:
+**[CorpusTesters](https://github.com/amrali-eg/CorpusTesters)**.
+
+The audit answers one question per file, with no normalization of any kind and no
+replacement characters permitted:
+
+```
+strict-decode(original bytes, reference codec + BOM)
+    == strict-decode(converted bytes, target codec)
+```
+
+Ground truth comes from each corpus's own manifest or catalogue, never from
+filenames and never from compatibility metadata. Source corpora are treated as
+read-only: each is copied into a working directory and only the copy is
+converted, verified after every run against the corpora's published SHA-256
+hashes.
+
+### Results for v3.6.0
+
+Measured over the files EC actually **rewrote** — files it skipped or left
+byte-identical cannot have lost anything:
+
+| Source | Rewritten | Text preserved |
+|---|---:|---:|
+| Unicode + ASCII | 1,832 | 1,825 (**99.62%**) |
+| Legacy code page (.NET has a codec) | 2,022 | 1,602 (79.23%) |
+| No .NET codec exists | 112 | 21 (18.75%) |
+
+Four metrics are reported separately rather than blended into one accuracy
+figure, because a single number would average silent data loss against files that
+merely happened to be ASCII:
+
+| Metric | Result |
+|---|---|
+| Detection accuracy (exact codec identity) | 3756/4964 (75.7%) |
+| Strict-decoding correctness | **5023/5023 (100%)** |
+| Codec conformance | 90 divergences |
+| End-to-end text preservation | 4094/4742 (86.3%) |
+
+**Unicode and ASCII input is effectively safe.** All three failures are BOM-less
+UTF-16BE detected as UTF-16LE. **Legacy input carries the residual risk**, and it
+is a detection problem rather than a conversion one: single-byte code pages are
+mutually decodable, so `windows-1252` text is perfectly valid `iso-8859-1` text
+and nothing in the bytes distinguishes them. Given the correct codec, 569 of
+those files convert exactly.
+
+The 90 codec divergences are known Microsoft-vs-Unicode mapping differences in
+the Japanese and Chinese code pages (U+301C wave dash versus U+FF5E fullwidth
+tilde, and similar) — properties of .NET's code-page tables, not of this tool.
+
+### What it found
+
+The audit's PHASE 0 establishes what the build under test actually does before
+judging any file, and that is how the strict-fallback defect fixed in v3.6.0
+([#36](https://github.com/amrali-eg/EncodingChecker/pull/36)) was found: files
+whose bytes their own codec could not represent were being converted with
+substituted characters and reported as `Converted`.
+
+Blast radius, stated plainly: **4 files out of 5,078**. It was a latent
+correctness hole, not mass corruption — it rarely fired because detection usually
+picks a codec that *can* decode the bytes. Before and after the fix, across all
+four corpora: **8 files changed outcome, all improvements, zero regressions.**
+
+Every figure above is reproducible; the harness, its methodology and its raw
+per-file evidence are documented in the CorpusTesters repository.
 
 ## Supported charsets
 
