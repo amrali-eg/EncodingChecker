@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Buffers;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -59,6 +59,59 @@ internal sealed record ConversionOptions
     /// Ignored for a different destination. Defaults to <see langword="false"/>.
     /// </summary>
     internal bool PreserveTimestamps { get; init; }
+
+    /// <summary>
+    /// Invoked after verification succeeds and before the converted file is installed,
+    /// to record how this conversion can be undone. Returns <see langword="null"/> on
+    /// success, or a message describing why the record could not be written.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately inside the safety boundary rather than after it. Recovery information
+    /// written once the original has already been replaced is recovery information that
+    /// might not exist when it is needed, which is the gap it exists to close: a
+    /// conversion is only reversible for someone who still knows which codec produced it.
+    /// A failure here therefore aborts the conversion with the original intact.
+    /// </remarks>
+    internal Func<ConversionRecord, string?>? RecordConversion { get; init; }
+}
+
+/// <summary>
+/// Everything needed to reverse or independently reconstruct one conversion, without
+/// reference to any external report.
+/// </summary>
+internal sealed record ConversionRecord
+{
+    internal required string SourcePath { get; init; }
+
+    internal required long SourceBytes { get; init; }
+
+    /// <summary>SHA-256 of the source file's bytes, before conversion.</summary>
+    internal required string SourceSha256 { get; init; }
+
+    /// <summary>SHA-256 over the decoded source text, independent of encoding.</summary>
+    internal required string SourceTextSha256 { get; init; }
+
+    /// <summary>SHA-256 over the decoded converted text. Equal to the source text hash
+    /// on a verified conversion; recorded so that equality is checkable later.</summary>
+    internal required string OutputTextSha256 { get; init; }
+
+    internal required string SourceEncoding { get; init; }
+
+    /// <summary>
+    /// The code page, which identifies the codec unambiguously where a name may not:
+    /// "cp949" and "ks_c_5601-1987" name one encoding, and only the number says so.
+    /// </summary>
+    internal required int SourceCodePage { get; init; }
+
+    internal required bool SourceHasBom { get; init; }
+
+    internal required string TargetEncoding { get; init; }
+
+    internal required int TargetCodePage { get; init; }
+
+    internal required bool TargetHasBom { get; init; }
+
+    internal required long UnicodeScalars { get; init; }
 }
 
 /// <summary>Progress reported by bytes processed.</summary>
@@ -184,6 +237,10 @@ internal static class EncodingConverter
         long sourceBytesProcessed = 0;
         long targetBytesWritten = 0;
 
+        // Whether the source carried a BOM, captured for the conversion record,
+        // which is written after the stream that observed it has closed.
+        bool sourceHadBom = false;
+
         try
         {
             bool sameFile = IsSameFile(sourcePath, destinationPath);
@@ -238,6 +295,7 @@ internal static class EncodingConverter
                     () => ConsumePreambleIfPresent(sourceStream, sourceEncoding));
 
                 sourceBytesProcessed += sourcePreambleLength;
+                sourceHadBom = sourcePreambleLength > 0;
 
                 if (options.WriteBom)
                 {
@@ -341,6 +399,64 @@ internal static class EncodingConverter
                     BomVerificationPassed = verification.BomVerified,
                     ReplacementCommitted = false,
                 };
+            }
+
+            // Record how to undo this, before anything is overwritten. Ordered here on
+            // purpose: the backup already exists, the conversion is verified, and the
+            // original is still in place, so a failure to record leaves nothing to
+            // recover from and nothing needing recovery.
+            if (options.RecordConversion is not null)
+            {
+                // Hashed only when a record is being written, so the extra pass is not
+                // paid for by conversions that do not need it.
+                string sourceFileSha;
+                try
+                {
+                    sourceFileSha = ComputeFileSha256(sourcePath);
+                }
+                catch (Exception ex) when (
+                    ex is IOException or UnauthorizedAccessException)
+                {
+                    sourceFileSha = string.Empty;
+                }
+
+                string? recordError = options.RecordConversion(new ConversionRecord
+                {
+                    SourcePath = sourcePath,
+                    SourceBytes = sourceBytesProcessed,
+                    SourceSha256 = sourceFileSha,
+                    SourceTextSha256 = System.Convert.ToHexStringLower(sourceDigest.Hash),
+                    OutputTextSha256 = System.Convert.ToHexStringLower(sourceDigest.Hash),
+                    SourceEncoding = sourceEncoding.WebName,
+                    SourceCodePage = sourceEncoding.CodePage,
+                    SourceHasBom = sourceHadBom,
+                    TargetEncoding = targetEncoding.WebName,
+                    TargetCodePage = targetEncoding.CodePage,
+                    TargetHasBom = options.WriteBom,
+                    UnicodeScalars = verification.ScalarsCompared,
+                });
+
+                if (recordError is not null)
+                {
+                    return new ConversionResult
+                    {
+                        Success = false,
+                        ErrorCode = ConversionErrorCode.TargetWriteError,
+                        ErrorMessage =
+                            "Conversion and verification succeeded, but the record needed to "
+                            + $"reverse it could not be written: {recordError} The original "
+                            + "was left unmodified rather than replaced with a conversion "
+                            + "that could not be undone.",
+                        SourceEncoding = sourceEncoding,
+                        TargetEncoding = targetEncoding,
+                        SourceBytes = sourceBytesProcessed,
+                        TargetBytes = targetBytesWritten,
+                        UnicodeScalarsVerified = verification.ScalarsCompared,
+                        VerificationPassed = true,
+                        BomVerificationPassed = true,
+                        ReplacementCommitted = false,
+                    };
+                }
             }
 
             // Final cancellation checkpoint before installation.
@@ -845,6 +961,14 @@ internal static class EncodingConverter
     /// Hashes the exact decoded UTF-16 content and returns scalar/code-unit counts.
     /// No normalization is performed.
     /// </summary>
+    /// <summary>SHA-256 over a file's raw bytes.</summary>
+    private static string ComputeFileSha256(string path)
+    {
+        using FileStream stream = OpenReadShared(path, DEFAULT_BUFFER_SIZE);
+        using var sha = SHA256.Create();
+        return System.Convert.ToHexStringLower(sha.ComputeHash(stream));
+    }
+
     private static ContentDigest ComputeContentDigest(
         Stream stream,
         Encoding encoding,
