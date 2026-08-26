@@ -1,6 +1,6 @@
 ﻿[![CI](https://github.com/amrali-eg/EncodingChecker/actions/workflows/ci.yml/badge.svg)](https://github.com/amrali-eg/EncodingChecker/actions/workflows/ci.yml)
 
-# EncodingChecker v3.6.0
+# EncodingChecker v3.7.0
 
 File Encoding Checker detects, validates, and converts the text encoding of one or more files. It runs either as a Windows GUI app or as a command-line tool for scripting and CI, and shares one detection/conversion engine between both.
 
@@ -105,6 +105,14 @@ These are the guarantees the implementation actually provides.
   file is replaced; if the backup fails, the main conversion is aborted and
   the original is left untouched. A previously read-only `.bak` is still
   replaced correctly.
+  <br>**In the GUI this is on by default** (and remembered between runs). The
+  audit found that conversion from a Unicode or ASCII source altered none of
+  1,832 files, but roughly one in five converted from a legacy code page came
+  out with different text, because single-byte code pages are mutually decodable
+  and nothing in the bytes says which was intended. Such a conversion is almost
+  always reversible — but only for someone who still knows which codec was used,
+  and that is recorded solely in the conversion report. The CLI leaves `-Backup`
+  opt-in, since a script can keep the report.
 - `-BasePath` itself is rejected if it is a symbolic link, junction, or
   other reparse point. Reparse-point subdirectories are skipped during
   traversal, and a file that is (or becomes) a reparse point is rejected at

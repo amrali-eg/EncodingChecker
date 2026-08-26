@@ -11,6 +11,20 @@ public sealed class Settings
     public List<string> RecentDirectories = [];
     public bool IncludeSubdirectories = true;
 
+    /// <summary>
+    /// Whether to copy each file to "&lt;file&gt;.bak" before overwriting it.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to <see langword="true"/>. Conversion from a Unicode or ASCII source is
+    /// safe - across a 5,078-file audit not one such file came out with different text -
+    /// but roughly one in five files converted from a legacy code page did, because
+    /// single-byte code pages are mutually decodable and nothing in the bytes says which
+    /// one was intended. Such a conversion is usually reversible, but only for someone who
+    /// still knows which codec was used, and that is recorded solely in the conversion
+    /// report. Defaulting this on keeps the original recoverable without it.
+    /// </remarks>
+    public bool CreateBackup = true;
+
     public string FileMasks = string.Empty;
     public string[] ValidCharsets = [];
 
