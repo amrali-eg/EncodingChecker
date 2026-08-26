@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -862,10 +862,17 @@ public partial class MainForm : Form
     {
         string settingsFileName = GetSettingsFileName();
 
-        if (!File.Exists(settingsFileName))
-            return;
+        // A missing file is the first run, not a reason to skip applying
+        // settings: the defaults on Settings are the intended startup state, and
+        // returning here left them unapplied so the checkboxes showed whatever
+        // the designer happened to set.
+        Settings settings = new();
 
-        Settings settings;
+        if (!File.Exists(settingsFileName))
+        {
+            ApplySettings(settings);
+            return;
+        }
 
         try
         {
@@ -891,6 +898,12 @@ public partial class MainForm : Form
             settings = new Settings();
         }
 
+        ApplySettings(settings);
+    }
+
+    /// <summary>Applies loaded or default settings to the form.</summary>
+    private void ApplySettings(Settings settings)
+    {
         _settings = settings;
 
         if (settings.RecentDirectories.Count > 0)
@@ -911,6 +924,9 @@ public partial class MainForm : Form
 
         chkIncludeSubdirectories.Checked =
             settings.IncludeSubdirectories;
+
+        chkCreateBackup.Checked =
+            settings.CreateBackup;
 
         // Restore CRLF for the multiline textbox; XmlSerializer writes LF.
         txtFileMasks.Text = settings.FileMasks
@@ -941,6 +957,9 @@ public partial class MainForm : Form
     {
         _settings.IncludeSubdirectories =
             chkIncludeSubdirectories.Checked;
+
+        _settings.CreateBackup =
+            chkCreateBackup.Checked;
 
         _settings.FileMasks =
             txtFileMasks.Text;
