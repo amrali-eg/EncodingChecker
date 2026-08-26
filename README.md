@@ -14,6 +14,8 @@ Each [release](https://github.com/amrali-eg/EncodingChecker/releases) publishes 
 
 - Layered detection: byte-order-mark and heuristic checks for Unicode encodings, [UtfUnknown](https://github.com/CharsetDetector/UTF-unknown) for legacy code pages, each candidate independently verified by strict decoding before being trusted.
 - Lossless, safe conversion: every write is verified afterward by comparing a SHA-256 hash of the decoded content, so a silent encoder substitution (e.g. an unrepresentable character) is caught and reported as an error instead of corrupting the file.
+- Refuses to convert files whose encoding the bytes do not determine, naming the encodings actually in conflict, with `-From` to supply the answer yourself.
+- `-Plan`/`-Apply` preflight: review what a conversion would do, then carry out exactly that — the plan is bound to the files' hashes and is refused whole if they change.
 - Optional `.bak` backup before overwriting, and a `-WhatIf` dry-run mode that reports what would happen without touching any file.
 - Covered by an xUnit test suite exercising the detection/conversion engine, CLI argument parsing, and CSV report formatting across multilingual content and edge cases.
 
@@ -40,6 +42,11 @@ EncodingChecker.exe
     -Validate "<charset1,...>"    # Validate mode: flag files not in this list
     -DetectOnly                   # Read-only detection mode
 
+    [-From "<encoding>"]          # Treat every file as this encoding instead of
+                                   # detecting it (Convert mode only)
+    [-Plan <path>]                # Write a conversion plan; change nothing
+    [-Apply <path>]               # Carry out a plan written by -Plan
+
     [-Report <path>]              # Also write a CSV report to this path
     [-MaxParallelism <N>]         # Default: min(logical processor count, 4)
     [-WhatIf]                     # Convert mode: report without writing
@@ -54,6 +61,79 @@ EncodingChecker.exe
 `-Include`/`-Exclude` are comma-separated wildcard patterns, and both options may be repeated — patterns from every occurrence accumulate, so `-Include "*.cs" -Include "*.txt"` is equivalent to `-Include "*.cs,*.txt"`. A pattern with no `/` or `\` matches just the filename (e.g. `*.cs` matches at any depth); a pattern containing a separator matches the path relative to `-BasePath` instead (e.g. `src/*.cs` matches only under `src`, `\` and `/` behave the same way). `.git`, `.svn`, `.hg`, `.vs`, `.idea`, `bin`, `obj`, `node_modules`, `packages`, `dist`, `build`, and `target` directories are always skipped. Convert, Validate, and Detect-only are mutually exclusive modes.
 
 `-Backup` only ever writes a `.bak` when a real conversion happens: a file that already matches the target is left alone, and under `-WhatIf` nothing is written at all, so no backup is created.
+
+### Ambiguous encodings, and `-From`
+
+Some files do not identify the encoding that wrote them. A file valid in
+windows-1252 is equally valid in iso-8859-1 and in koi8-r, and each reads it as
+different text; nothing in the bytes decides between them. Detection still
+produces an answer, and converting on that answer rewrites the file into one of
+several possible readings without saying so.
+
+EncodingChecker refuses those conversions and names the encodings actually in
+conflict:
+
+```
+Error: notes.txt: The encoding could not be determined uniquely from the file's
+contents. iso-8859-1 and cp866, ibm852, ibm855, iso-8859-13, and 17 more all match
+this file and would produce different text. No conversion was performed; specify
+the source encoding explicitly to convert it.
+```
+
+The refusal applies only where the rival readings *disagree about the text*. A
+file whose encoding is undetermined but whose candidates all decode it
+identically — plain ASCII being the common case — is converted normally, because
+there is nothing to protect the user from. Nor does it apply where the file's own
+structure picks the encoding out: valid UTF-8, Shift_JIS or Big5 byte sequences
+are not valid by accident, and codecs that accept any byte sequence are not
+offering a competing reading so much as failing to object.
+
+`-From` supplies the answer detection could not. It replaces detection and
+nothing else: the bytes must still decode strictly as the named encoding, the
+output is still verified to hold exactly the same text, and a failed backup still
+aborts the conversion. Naming an encoding says which one it is, not "convert it
+regardless".
+
+### Preflight: `-Plan` and `-Apply`
+
+`-Plan` writes down what a conversion would do and changes nothing. For every
+file the plan records the action, the source encoding, whether it was detected or
+specified, whether the bytes identify it uniquely, which encodings compete for
+it, and the reason behind any refusal — as JSON, alongside a summary on stdout:
+
+```
+Selected:                     3
+
+Will convert:                 2
+  encoding determined:        2
+  same text either way:       0
+Already in target encoding:   0
+Encoding not identified:      0
+Refused, ambiguous encoding:  1
+Refused, unreadable:          0
+
+Backups:                      enabled
+Target:                       utf-8 without BOM
+
+No files modified.
+```
+
+`-Apply` carries that plan out. It does not detect anything a second time: the
+encodings, the target, and the backup setting all come from the plan, so
+`-BasePath`, `-Target`, `-From`, and `-Backup` are rejected rather than silently
+ignored.
+
+The binding is the point of the feature, not the preview. Every scheduled file
+carries the SHA-256 it had when the plan was made, and `-Apply` verifies each one
+first. If any file has changed or been deleted in between, **nothing is
+converted** — not even the files that still match. A plan reviewed as a whole
+belongs to the directory it was reviewed against, and the files most likely to
+have changed are the ones something else is actively writing.
+
+```bash
+EncodingChecker.exe -BasePath . -Include "*" -Target "utf-8" -Plan plan.json
+EncodingChecker.exe -Apply plan.json
+```
 
 Exit codes: `0` clean, `1` usage/argument error (nothing was scanned), `2` `-FailOnChanges` triggered, `3` the run did not complete cleanly — one or more files failed to process, the scan itself failed, or the `-Report` file could not be written, `4` cancelled (Ctrl+C).
 
@@ -113,6 +193,14 @@ These are the guarantees the implementation actually provides.
   always reversible — but only for someone who still knows which codec was used,
   and that is recorded solely in the conversion report. The CLI leaves `-Backup`
   opt-in, since a script can keep the report.
+- A conversion whose source encoding cannot be determined from the file's own
+  bytes is refused rather than guessed at, when the competing encodings would
+  produce different text. `-From` overrides the detection, not the conversion
+  safeguards. See [Ambiguous encodings](#ambiguous-encodings-and--from).
+- A plan written by `-Plan` is bound to the SHA-256 of every file it schedules.
+  `-Apply` verifies all of them before writing anything and refuses the plan
+  whole if any file has changed, so a decision made about one set of bytes is
+  never applied to a different one.
 - `-BasePath` itself is rejected if it is a symbolic link, junction, or
   other reparse point. Reparse-point subdirectories are skipped during
   traversal, and a file that is (or becomes) a reparse point is rejected at
