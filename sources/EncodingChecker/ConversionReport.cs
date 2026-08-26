@@ -64,6 +64,21 @@ internal sealed class ConversionReportEntry
     /// </summary>
     internal IReadOnlyList<string> CompetingEncodings { get; set; } = [];
 
+    /// <summary>
+    /// Why this file received its <see cref="Ambiguity"/> classification.
+    /// Internal state; not included in CSV output.
+    /// </summary>
+    internal AmbiguityReason AmbiguityReason { get; set; } =
+        AmbiguityReason.ExplicitlySpecified;
+
+    /// <summary>
+    /// Whether the source encoding was chosen by the caller rather than detected.
+    /// Recorded because the two are different claims: detection can be wrong in ways an
+    /// explicit choice cannot, and a later journal should be able to say which was used.
+    /// Internal state; not included in CSV output.
+    /// </summary>
+    internal bool SourceEncodingWasSpecified { get; set; }
+
     /// <summary>Additional error detail; not included in CSV output.</summary>
     internal string? Diagnostic { get; set; }
 }

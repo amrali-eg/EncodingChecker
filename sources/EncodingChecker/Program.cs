@@ -99,6 +99,7 @@ internal static class Program
         internal List<string> Include = [];
         internal List<string> Exclude = [];
         internal string? Target;
+        internal string? From;
         internal string? ValidateCharsets;
         internal bool DetectOnly;
         internal string? ReportPath;
@@ -133,6 +134,18 @@ internal static class Program
                    The name of the encoding to convert files to, e.g.
                    "utf-8" or "utf-8-bom". Required unless -Validate or
                    -DetectOnly is given.
+
+              [-From "<encoding>"]
+                   Treat every file as this encoding instead of
+                   detecting it. Use when detection reports that a
+                   file's encoding cannot be determined from its
+                   contents, or when you already know it.
+
+                   This replaces detection and nothing else: the bytes
+                   must still decode strictly as this encoding, the
+                   output is still verified to hold exactly the same
+                   text, and a failed backup still aborts. Convert mode
+                   only.
 
               Modes:
                    Conversion is the default mode.
@@ -203,6 +216,8 @@ internal static class Program
 
           EncodingChecker.exe -BasePath . -Include "*" -Validate "utf-8,utf-8-bom" -Report report.csv
 
+          EncodingChecker.exe -BasePath . -Include "*.txt" -From "windows-1252" -Target "utf-8"
+
           EncodingChecker.exe -BasePath D:\NetworkShare -Include "*.txt" -Target "utf-8" -MaxParallelism 2 -FailOnChanges
         """;
 
@@ -263,6 +278,7 @@ internal static class Program
 
         var scanOptions = new ScanDirectoryOptions
         {
+            SourceCharset = options.From,
             BaseDirectory = options.BasePath!,
             IncludeSubdirectories = true,
             IncludePatterns = options.Include,
@@ -469,6 +485,17 @@ internal static class Program
                     }
                     break;
 
+                case "from":
+                    if (!TryTakeValue(
+                            args,
+                            ref i,
+                            out options.From))
+                    {
+                        error = "-From requires a value.";
+                        return false;
+                    }
+                    break;
+
                 case "validate":
                     if (!TryTakeValue(
                             args,
@@ -546,7 +573,7 @@ internal static class Program
     private static readonly HashSet<string> KnownFlagNames =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            "basepath", "include", "exclude", "target", "validate",
+            "basepath", "include", "exclude", "target", "from", "validate",
             "detectonly", "report", "maxparallelism", "failonchanges",
             "whatif", "backup", "quiet", "verbose",
         };
@@ -589,6 +616,26 @@ internal static class Program
         CliOptions options,
         [NotNullWhen(false)] out string? error)
     {
+        if (!string.IsNullOrWhiteSpace(options.From))
+        {
+            if (options.DetectOnly || !string.IsNullOrWhiteSpace(options.ValidateCharsets))
+            {
+                error = "-From applies to conversion only; it cannot be combined with "
+                        + "-DetectOnly or -Validate, which report what the detector finds.";
+                return false;
+            }
+
+            try
+            {
+                Encoding.GetEncoding(options.From!);
+            }
+            catch (ArgumentException)
+            {
+                error = $"'{options.From}' is not a recognized encoding.";
+                return false;
+            }
+        }
+
         if (string.IsNullOrWhiteSpace(options.BasePath))
         {
             error = "-BasePath is required.";

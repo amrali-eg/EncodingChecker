@@ -25,9 +25,30 @@ internal enum AmbiguityClass
     TextChanging,
 }
 
+/// <summary>Why a file was placed in its <see cref="AmbiguityClass"/>.</summary>
+internal enum AmbiguityReason
+{
+    /// <summary>Only one supported codec reads these bytes.</summary>
+    SingleCandidate,
+
+    /// <summary>The detected codec constrains these bytes; rivals do not compete.</summary>
+    StructurallyDetermined,
+
+    /// <summary>Several codecs read them and produce the same text.</summary>
+    MultipleCodecsSameText,
+
+    /// <summary>Several codecs read them and produce different text.</summary>
+    MultipleCodecsDifferentText,
+
+    /// <summary>The source encoding was chosen rather than detected.</summary>
+    ExplicitlySpecified,
+}
+
 internal sealed record AmbiguityAnalysis
 {
     internal required AmbiguityClass Class { get; init; }
+
+    internal required AmbiguityReason Reason { get; init; }
 
     /// <summary>Supported codecs that strictly decode the sample, by name.</summary>
     internal required IReadOnlyList<string> Candidates { get; init; }
@@ -234,6 +255,7 @@ internal static class EncodingAmbiguity
             return new AmbiguityAnalysis
             {
                 Class = AmbiguityClass.Unambiguous,
+                Reason = AmbiguityReason.SingleCandidate,
                 Candidates = [],
                 DistinctReadings = byHash.Count,
                 CompetingCandidates = [],
@@ -265,9 +287,16 @@ internal static class EncodingAmbiguity
             : candidates.Count > 1 ? AmbiguityClass.TextEquivalent
             : AmbiguityClass.Unambiguous;
 
+        AmbiguityReason reason =
+            competing.Count > 0 ? AmbiguityReason.MultipleCodecsDifferentText
+            : detectedIsDetermined ? AmbiguityReason.StructurallyDetermined
+            : candidates.Count > 1 ? AmbiguityReason.MultipleCodecsSameText
+            : AmbiguityReason.SingleCandidate;
+
         return new AmbiguityAnalysis
         {
             Class = classification,
+            Reason = reason,
             Candidates = candidates,
             DistinctReadings = byHash.Count,
             CompetingCandidates = competing,

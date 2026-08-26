@@ -60,6 +60,23 @@ internal sealed class ScanDirectoryOptions
     /// <summary>Target charset for conversion, without "-bom".</summary>
     internal string? TargetCharset { get; init; }
 
+    /// <summary>
+    /// Source charset chosen by the caller, used instead of detection.
+    /// </summary>
+    /// <remarks>
+    /// This replaces detection, and nothing else. Every verification still applies: the
+    /// bytes must strictly decode as this encoding, the output must re-decode to exactly
+    /// the same text, the backup must verify, and the record must be written before
+    /// anything is installed. It answers "which encoding is this?", not "convert it
+    /// regardless".
+    /// <para>
+    /// It is also the escape from an ambiguity refusal. Where the bytes cannot identify
+    /// the encoding, someone who knows has to say - and saying so must be possible, or
+    /// the refusal is advice the user cannot take.
+    /// </para>
+    /// </remarks>
+    internal string? SourceCharset { get; init; }
+
     internal bool TargetWriteBom { get; init; }
 
     /// <summary>Simulate conversion without writing.</summary>
@@ -296,7 +313,25 @@ internal static class ScanEngine
         Encoding? targetEncoding,
         CancellationToken cancellationToken)
     {
-        Encoding? detected = TextEncoding.DetectFromFile(path);
+        bool sourceWasSpecified = !string.IsNullOrWhiteSpace(options.SourceCharset);
+
+        Encoding? detected;
+
+        if (sourceWasSpecified)
+        {
+            try
+            {
+                detected = Encoding.GetEncoding(options.SourceCharset!);
+            }
+            catch (ArgumentException)
+            {
+                detected = null;
+            }
+        }
+        else
+        {
+            detected = TextEncoding.DetectFromFile(path);
+        }
 
         bool hasBom =
             detected != null &&
@@ -320,13 +355,17 @@ internal static class ScanEngine
         // caller who supplies the source encoding instead of detecting it gets the
         // default - correctly, since there is nothing ambiguous about an answer somebody
         // gave.
-        if (detected is not null && options.Action == ScanAction.Convert)
+        entry.SourceEncodingWasSpecified = sourceWasSpecified;
+
+        if (detected is not null && options.Action == ScanAction.Convert
+            && !sourceWasSpecified)
         {
             AmbiguityAnalysis? ambiguity = AnalyzeAmbiguity(path, detected);
 
             if (ambiguity is not null)
             {
                 entry.Ambiguity = ambiguity.Class;
+                entry.AmbiguityReason = ambiguity.Reason;
                 entry.CompetingEncodings = ambiguity.CompetingCandidates;
             }
         }
