@@ -227,6 +227,49 @@ internal static class TextEncoding
     #region Helpers
 
     /// <summary>
+    /// Returns an encoding whose decoder and encoder actually enforce strict fallback.
+    /// </summary>
+    /// <remarks>
+    /// Assigning <see cref="Decoder.Fallback"/> or <see cref="Encoder.Fallback"/> after
+    /// <see cref="Encoding.GetDecoder"/>/<see cref="Encoding.GetEncoder"/> has no effect for
+    /// the encodings supplied by <see cref="System.Text.CodePagesEncodingProvider"/>: those
+    /// codecs take their fallbacks from the parent <see cref="Encoding"/> when they are
+    /// created, so a later assignment is silently ignored and unmappable input is replaced
+    /// instead of throwing. The fallbacks must be supplied up front, to
+    /// <see cref="Encoding.GetEncoding(int, EncoderFallback, DecoderFallback)"/>.
+    /// <para>
+    /// Only the codecs come from the returned encoding; callers that emit a preamble must
+    /// keep using their original instance, which is what carries the requested BOM policy.
+    /// </para>
+    /// </remarks>
+    internal static Encoding Strict(
+        Encoding encoding)
+    {
+        ArgumentNullException.ThrowIfNull(encoding);
+
+        if (encoding.DecoderFallback is DecoderExceptionFallback &&
+            encoding.EncoderFallback is EncoderExceptionFallback)
+        {
+            return encoding;
+        }
+
+        try
+        {
+            return Encoding.GetEncoding(
+                encoding.CodePage,
+                EncoderFallback.ExceptionFallback,
+                DecoderFallback.ExceptionFallback);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+        {
+            // An encoding that cannot be rebuilt from its code page keeps the original
+            // instance rather than failing the caller outright.
+            return encoding;
+        }
+    }
+
+
+    /// <summary>
     /// Computes Shannon entropy (bits per byte) over the detector sample.
     /// </summary>
     private static double BinaryEntropy(

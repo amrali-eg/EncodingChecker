@@ -514,24 +514,25 @@ internal static class EncodingConverter
     #region Strict Encoding Configuration
 
     /// <summary>Creates a decoder with strict fallback.</summary>
+    /// <remarks>
+    /// <see cref="TextEncoding.Strict"/> is what makes the fallback stick: assigning
+    /// <see cref="Decoder.Fallback"/> on its own is silently ignored by the
+    /// <see cref="CodePagesEncodingProvider"/> encodings, which would let invalid bytes be
+    /// substituted instead of raising. The BOM still comes from the caller's original
+    /// encoding instance, so preamble handling is unaffected.
+    /// </remarks>
     private static Decoder MakeStrictDecoder(Encoding encoding)
     {
-        Decoder decoder = encoding.GetDecoder();
+        Decoder decoder = TextEncoding.Strict(encoding).GetDecoder();
         decoder.Fallback = DecoderFallback.ExceptionFallback;
         return decoder;
     }
 
-    /// <summary>
-    /// Creates an encoder with strict fallback.
-    /// </summary>
-    /// <remarks>
-    /// Some code-page encodings may still replace unmappable characters with '?' despite
-    /// <see cref="Encoder.Fallback"/>. Post-write Unicode verification detects such loss
-    /// before installation. Unicode encodings and ASCII do not have this limitation.
-    /// </remarks>
+    /// <summary>Creates an encoder with strict fallback.</summary>
+    /// <remarks>See <see cref="MakeStrictDecoder"/>; the same applies to the encoder.</remarks>
     private static Encoder MakeStrictEncoder(Encoding encoding)
     {
-        Encoder encoder = encoding.GetEncoder();
+        Encoder encoder = TextEncoding.Strict(encoding).GetEncoder();
         encoder.Fallback = EncoderFallback.ExceptionFallback;
         return encoder;
     }
