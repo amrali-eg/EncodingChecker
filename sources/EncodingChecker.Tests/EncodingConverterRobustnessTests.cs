@@ -4,8 +4,9 @@ namespace EncodingChecker.Tests;
 
 /// <summary>
 /// Exercises <see cref="EncodingConverter.Convert"/> directly: valid round-trips through the
-/// SHA-256 verification path, and unrepresentable content - both when the BCL encoder
-/// throws, and the documented case where it silently substitutes '?' instead.
+/// SHA-256 verification path, and unrepresentable content - both when the encoder throws,
+/// and the residual case where an encoding cannot be rebuilt strictly and substitutes
+/// instead, which the digest comparison has to catch.
 /// </summary>
 public sealed class EncodingConverterRobustnessTests : IDisposable
 {
@@ -88,11 +89,14 @@ public sealed class EncodingConverterRobustnessTests : IDisposable
     [InlineData("世界")]        // CJK
     [InlineData("مرحبا")]       // Arabic
     [InlineData("Привет")]      // Cyrillic
-    public void Convert_TargetEncoderSilentlySubstitutes_HashVerificationCatchesCorruptionAndLeavesFileUnchanged(
+    public void Convert_TargetCannotRepresentContent_FailsAtEncodeAndLeavesFileUnchanged(
         string unmappableContent)
     {
-        // windows-1252 silently writes '?' here instead of throwing (verified empirically;
-        // see MakeStrictEncoder's remarks). SHA-256 verification is the real safety net.
+        // This case used to reach the SHA-256 backstop as UnicodeMismatch: windows-1252's
+        // encoder substituted '?' because assigning Encoder.Fallback after GetEncoder()
+        // has no effect for CodePagesEncodingProvider encodings. MakeStrictEncoding now
+        // supplies the fallback up front, so the loss is refused where it happens and is
+        // reported as what it is - see StrictFallbackEnforcementTests.
         string path = WriteFile("unmappable.txt", unmappableContent, new UTF8Encoding(false));
         byte[] originalBytes = File.ReadAllBytes(path);
 
@@ -100,11 +104,71 @@ public sealed class EncodingConverterRobustnessTests : IDisposable
             path, path, Encoding.UTF8, Encoding.GetEncoding("windows-1252"), new ConversionOptions());
 
         Assert.False(result.Success);
-        Assert.Equal(ConversionErrorCode.UnicodeMismatch, result.ErrorCode);
-        Assert.False(result.VerificationPassed);
+        Assert.Equal(ConversionErrorCode.TargetEncodeError, result.ErrorCode);
 
         // A rejected conversion must never install corrupted content over the original.
         Assert.Equal(originalBytes, File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void Convert_EncodingThatCannotBeRebuiltStrictly_IsCaughtByHashVerification()
+    {
+        // MakeStrictEncoding rebuilds an encoding from its code page to make the fallbacks
+        // stick, and documents that an encoding it cannot rebuild keeps its original
+        // codecs - leaving the SHA-256 comparison as the backstop. That path is otherwise
+        // unreachable through the BCL encodings, so it is pinned with an encoding whose
+        // code page does not exist and whose encoder substitutes rather than throws.
+        string path = WriteFile("substituting.txt", "Привет", new UTF8Encoding(false));
+        byte[] originalBytes = File.ReadAllBytes(path);
+
+        ConversionResult result = EncodingConverter.Convert(
+            path, path, Encoding.UTF8, new SubstitutingEncoding(), new ConversionOptions());
+
+        Assert.False(result.Success);
+        Assert.Equal(ConversionErrorCode.UnicodeMismatch, result.ErrorCode);
+        Assert.False(result.VerificationPassed);
+        Assert.Equal(originalBytes, File.ReadAllBytes(path));
+    }
+
+    /// <summary>
+    /// A single-byte encoding that replaces anything non-ASCII with '?' and reports a code
+    /// page that is not registered, so it cannot be reconstructed with strict fallbacks.
+    /// </summary>
+    private sealed class SubstitutingEncoding : Encoding
+    {
+        // Not a real code page; Encoding.GetEncoding must fail for it.
+        public override int CodePage => 65_000_001;
+
+        public override int GetByteCount(char[] chars, int index, int count) => count;
+
+        public override int GetBytes(
+            char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex)
+        {
+            for (int i = 0; i < charCount; i++)
+            {
+                char c = chars[charIndex + i];
+                bytes[byteIndex + i] = c < 0x80 ? (byte)c : (byte)'?';
+            }
+
+            return charCount;
+        }
+
+        public override int GetCharCount(byte[] bytes, int index, int count) => count;
+
+        public override int GetChars(
+            byte[] bytes, int byteIndex, int byteCount, char[] chars, int charIndex)
+        {
+            for (int i = 0; i < byteCount; i++)
+            {
+                chars[charIndex + i] = (char)bytes[byteIndex + i];
+            }
+
+            return byteCount;
+        }
+
+        public override int GetMaxByteCount(int charCount) => charCount;
+
+        public override int GetMaxCharCount(int byteCount) => byteCount;
     }
 
     [Fact]

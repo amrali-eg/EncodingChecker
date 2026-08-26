@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Buffers;
 using System.Globalization;
 using System.Text;
@@ -91,7 +91,13 @@ internal static class TextValidation
         //
         // Force strict decoding regardless of the supplied Encoding instance.
         //
-        Decoder decoder = encoding.GetDecoder();
+        // TextEncoding.Strict rebuilds the encoding with the fallbacks supplied up
+        // front. Assigning Decoder.Fallback afterwards is not enough on its own: for
+        // the CodePagesEncodingProvider encodings this method is asked to validate,
+        // the assignment is silently ignored and invalid bytes are substituted, so
+        // the decode below would succeed for input the encoding cannot represent.
+        //
+        Decoder decoder = TextEncoding.Strict(encoding).GetDecoder();
         decoder.Fallback = DecoderFallback.ExceptionFallback;
 
         try
