@@ -154,8 +154,8 @@ byte-identical cannot have lost anything:
 
 | Source | Rewritten | Text preserved |
 |---|---:|---:|
-| Unicode + ASCII | 1,832 | 1,825 (**99.62%**) |
-| Legacy code page (.NET has a codec) | 2,022 | 1,602 (79.23%) |
+| Unicode + ASCII | 1,832 | 1,832 (**100.00%**) |
+| Legacy code page (.NET has a codec) | 2,021 | 1,602 (79.27%) |
 | No .NET codec exists | 112 | 21 (18.75%) |
 
 Four metrics are reported separately rather than blended into one accuracy
@@ -164,19 +164,20 @@ merely happened to be ASCII:
 
 | Metric | Result |
 |---|---|
-| Detection accuracy (exact codec identity) | 3756/4964 (75.7%) |
+| Detection accuracy (exact codec identity) | 3756/4961 (75.7%) |
 | Strict-decoding correctness | **5023/5023 (100%)** |
-| Codec conformance | 90 divergences |
-| End-to-end text preservation | 4094/4742 (86.3%) |
+| Codec conformance | 89 divergences |
+| End-to-end text preservation | 4101/4741 (86.5%) |
 
-**Unicode and ASCII input is effectively safe.** All three failures are BOM-less
-UTF-16BE detected as UTF-16LE. **Legacy input carries the residual risk**, and it
-is a detection problem rather than a conversion one: single-byte code pages are
-mutually decodable, so `windows-1252` text is perfectly valid `iso-8859-1` text
-and nothing in the bytes distinguishes them. Given the correct codec, 569 of
-those files convert exactly.
+**Unicode and ASCII input is safe on this evidence** — not one of the 1,832 files
+converted from a Unicode or ASCII source came out with different text.
 
-The 90 codec divergences are known Microsoft-vs-Unicode mapping differences in
+**Legacy input carries the residual risk**, and it is a detection problem rather
+than a conversion one: single-byte code pages are mutually decodable, so
+`windows-1252` text is perfectly valid `iso-8859-1` text and nothing in the bytes
+distinguishes them. Forced to the correct codec, those files convert exactly.
+
+The 89 codec divergences are known Microsoft-vs-Unicode mapping differences in
 the Japanese and Chinese code pages (U+301C wave dash versus U+FF5E fullwidth
 tilde, and similar) — properties of .NET's code-page tables, not of this tool.
 
