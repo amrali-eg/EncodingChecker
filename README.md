@@ -180,10 +180,15 @@ merely happened to be ASCII:
 **Unicode and ASCII input is safe on this evidence** — not one of the 1,832 files
 converted from a Unicode or ASCII source came out with different text.
 
-**Legacy input carries the residual risk**, and it is a detection problem rather
-than a conversion one: single-byte code pages are mutually decodable, so
+**Legacy input carries the residual risk.** The dominant part of it is
+source-encoding identification: single-byte code pages are mutually decodable, so
 `windows-1252` text is perfectly valid `iso-8859-1` text and nothing in the bytes
 distinguishes them. Forced to the correct codec, those files convert exactly.
+
+Codec implementation differences and decoder strictness are separate conversion
+risks rather than the same one, and the two interact — the detector can name the
+right encoding and the conversion still alter text, because the implementation
+behind that name differs from the reference.
 
 The 89 codec divergences are known Microsoft-vs-Unicode mapping differences in
 the Japanese and Chinese code pages (U+301C wave dash versus U+FF5E fullwidth

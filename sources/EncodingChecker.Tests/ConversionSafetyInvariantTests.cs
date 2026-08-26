@@ -1,0 +1,259 @@
+using System.Text;
+
+namespace EncodingChecker.Tests;
+
+/// <summary>
+/// The invariant the whole tool rests on: if preservation cannot be proved, the
+/// source is not replaced.
+///
+/// Every case here drives a different failure mode and asserts the same two
+/// things — the conversion is refused, and the original file is byte-for-byte
+/// what it was. That pairing is the point. A refusal that still damaged the file
+/// would be worse than no refusal at all, and the counting of "safe refusals"
+/// means nothing unless each one is verified to have left the source alone.
+///
+/// This exists because the invariant was previously enforced but never
+/// demonstrated. An audit across four corpora found a defect where conversion
+/// reported success on files whose text had silently changed; the lesson taken
+/// from it is that a safety property nothing tests is a safety property nobody
+/// knows they still have.
+/// </summary>
+public sealed class ConversionSafetyInvariantTests : IDisposable
+{
+    private readonly string _root =
+        Directory.CreateTempSubdirectory("ec_safety_").FullName;
+
+    public void Dispose()
+    {
+        try
+        {
+            Directory.Delete(_root, recursive: true);
+        }
+        catch (IOException)
+        {
+            // Best-effort cleanup.
+        }
+    }
+
+    // EUC-JP bytes carrying a JIS X 0212 sequence introduced by SS3 (0x8F).
+    // Code page 51932 has no mapping for it.
+    private static readonly byte[] Unrepresentable =
+        [0x8F, 0xB0, 0xDF, 0xB9, 0xA5, 0xA1, 0xA4, 0xC0, 0xA4, 0xB3, 0xA6, 0xA1, 0xAA];
+
+    [Fact]
+    public void InvalidByteSequence_RefusesAndLeavesTheSourceUnchanged()
+    {
+        AssertRefusedAndUnchanged(
+            "invalid.txt",
+            Unrepresentable,
+            source: "euc-jp",
+            target: "utf-8");
+    }
+
+    [Fact]
+    public void TruncatedMultiByteSequence_RefusesAndLeavesTheSourceUnchanged()
+    {
+        // A file that ends mid-character. Strict decoding must reject it rather
+        // than dropping or substituting the incomplete tail.
+        byte[] truncated = Encoding.GetEncoding("shift_jis").GetBytes("日本語");
+        AssertRefusedAndUnchanged(
+            "truncated.txt",
+            truncated[..^1],
+            source: "shift_jis",
+            target: "utf-8");
+    }
+
+    [Fact]
+    public void ContentTheTargetCannotRepresent_RefusesAndLeavesTheSourceUnchanged()
+    {
+        // The encoder side: CJK has no representation in Windows-1252.
+        AssertRefusedAndUnchanged(
+            "unencodable.txt",
+            Encoding.UTF8.GetBytes("世界 مرحبا Привет"),
+            source: "utf-8",
+            target: "windows-1252");
+    }
+
+    [Fact]
+    public void PostWriteVerificationFailure_RefusesAndLeavesTheSourceUnchanged()
+    {
+        // An encoding whose code page cannot be rebuilt keeps its own codecs, so
+        // a substituting encoder reaches the SHA-256 backstop. Whatever the
+        // route, the file must survive.
+        string path = Path.Combine(_root, "verify.txt");
+        byte[] original = Encoding.UTF8.GetBytes("Привет мир");
+        File.WriteAllBytes(path, original);
+
+        ConversionResult result = EncodingConverter.Convert(
+            path, path, Encoding.UTF8, new SubstitutingEncoding(), new ConversionOptions());
+
+        Assert.False(result.Success);
+        Assert.Equal(ConversionErrorCode.UnicodeMismatch, result.ErrorCode);
+        Assert.False(result.VerificationPassed);
+        Assert.Equal(original, File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void ImpossibleBomRequest_RefusesBeforeTouchingTheFile()
+    {
+        // A target with no preamble cannot satisfy WriteBom. This is rejected
+        // before any I/O, and the file must be untouched either way.
+        string path = Path.Combine(_root, "nobom.txt");
+        byte[] original = Encoding.UTF8.GetBytes("plain ascii text");
+        File.WriteAllBytes(path, original);
+
+        ConversionResult result = EncodingConverter.Convert(
+            path, path, Encoding.UTF8, Encoding.GetEncoding("windows-1252"),
+            new ConversionOptions { WriteBom = true });
+
+        Assert.False(result.Success);
+        Assert.Equal(ConversionErrorCode.BomMismatch, result.ErrorCode);
+        Assert.Equal(original, File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void BackupFailure_AbortsBeforeConvertingAnything()
+    {
+        // If the backup cannot be written, the conversion must not proceed:
+        // a converted file with no recoverable original is the outcome backups
+        // exist to prevent. A directory occupying the ".bak" path makes the
+        // copy fail without needing permissions to be manipulated.
+        string path = Path.Combine(_root, "backupfail.txt");
+        byte[] original = Encoding.GetEncoding("windows-1252").GetBytes("café");
+        File.WriteAllBytes(path, original);
+        Directory.CreateDirectory(path + ".bak");
+
+        var entry = new ConversionReportEntry
+        {
+            FilePath = path,
+            SourceEncoding = "windows-1252",
+            SourceHasBom = false,
+            TargetEncoding = "windows-1252",
+            TargetHasBom = false,
+        };
+
+        var completed = new List<ConversionReportEntry>();
+        ScanEngine.ConvertFiles(
+            [entry], "utf-8", targetWriteBom: false,
+            ScanEngine.DefaultMaxParallelism,
+            whatIf: false, backup: true, completed.Add, CancellationToken.None);
+
+        ConversionReportEntry result = Assert.Single(completed);
+
+        Assert.Equal(ConversionRowResult.Error, result.Result);
+        Assert.Equal(original, File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void WhatIf_NeverModifiesAnything()
+    {
+        // The dry run must be exactly that, including for a file that would
+        // convert successfully.
+        string path = Path.Combine(_root, "whatif.txt");
+        byte[] original = Encoding.GetEncoding("windows-1252").GetBytes("café");
+        File.WriteAllBytes(path, original);
+
+        var entry = new ConversionReportEntry
+        {
+            FilePath = path,
+            SourceEncoding = "windows-1252",
+            SourceHasBom = false,
+            TargetEncoding = "windows-1252",
+            TargetHasBom = false,
+        };
+
+        var completed = new List<ConversionReportEntry>();
+        ScanEngine.ConvertFiles(
+            [entry], "utf-8", targetWriteBom: false,
+            ScanEngine.DefaultMaxParallelism,
+            whatIf: true, backup: false, completed.Add, CancellationToken.None);
+
+        Assert.Equal(original, File.ReadAllBytes(path));
+        Assert.False(File.Exists(path + ".bak"));
+    }
+
+    [Fact]
+    public void ASuccessfulConversionStillProvesPreservation()
+    {
+        // The invariant must not be satisfied by refusing everything. A file
+        // that can be proved preserved has to convert, and the result has to be
+        // the same text.
+        const string text = "café — naïve — 日本語\r\n";
+        string path = Path.Combine(_root, "good.txt");
+        File.WriteAllBytes(path, Encoding.UTF8.GetBytes(text));
+
+        ConversionResult result = EncodingConverter.Convert(
+            path, path, Encoding.UTF8, new UTF8Encoding(false), new ConversionOptions());
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.True(result.VerificationPassed);
+        Assert.Equal(text, Encoding.UTF8.GetString(File.ReadAllBytes(path)));
+    }
+
+    private void AssertRefusedAndUnchanged(
+        string name, byte[] content, string source, string target)
+    {
+        string path = Path.Combine(_root, name);
+        File.WriteAllBytes(path, content);
+
+        var entry = new ConversionReportEntry
+        {
+            FilePath = path,
+            SourceEncoding = source,
+            SourceHasBom = false,
+            TargetEncoding = source,
+            TargetHasBom = false,
+        };
+
+        var completed = new List<ConversionReportEntry>();
+        ScanEngine.ConvertFiles(
+            [entry], target, targetWriteBom: false,
+            ScanEngine.DefaultMaxParallelism,
+            whatIf: false, backup: false, completed.Add, CancellationToken.None);
+
+        ConversionReportEntry result = Assert.Single(completed);
+
+        Assert.Equal(ConversionRowResult.Error, result.Result);
+        Assert.Equal(content, File.ReadAllBytes(path));
+    }
+
+    /// <summary>
+    /// Substitutes rather than throwing, and reports a code page that cannot be
+    /// rebuilt, so strict reconstruction cannot rescue it.
+    /// </summary>
+    private sealed class SubstitutingEncoding : Encoding
+    {
+        public override int CodePage => 65_000_003;
+
+        public override int GetByteCount(char[] chars, int index, int count) => count;
+
+        public override int GetBytes(
+            char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex)
+        {
+            for (int i = 0; i < charCount; i++)
+            {
+                char c = chars[charIndex + i];
+                bytes[byteIndex + i] = c < 0x80 ? (byte)c : (byte)'?';
+            }
+
+            return charCount;
+        }
+
+        public override int GetCharCount(byte[] bytes, int index, int count) => count;
+
+        public override int GetChars(
+            byte[] bytes, int byteIndex, int byteCount, char[] chars, int charIndex)
+        {
+            for (int i = 0; i < byteCount; i++)
+            {
+                chars[charIndex + i] = (char)bytes[byteIndex + i];
+            }
+
+            return byteCount;
+        }
+
+        public override int GetMaxByteCount(int charCount) => charCount;
+
+        public override int GetMaxCharCount(int byteCount) => byteCount;
+    }
+}
