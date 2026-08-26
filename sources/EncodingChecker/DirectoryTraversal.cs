@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -47,6 +47,7 @@ internal static class DirectoryTraversal
     /// </summary>
     private static bool IsAlwaysExcludedFile(string fileName) =>
         fileName.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) ||
+        fileName.EndsWith(ConversionMetadataStore.Suffix, StringComparison.OrdinalIgnoreCase) ||
         fileName.EndsWith("." + EncodingConverter.TEMP_FILE_SUFFIX, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>

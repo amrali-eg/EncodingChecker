@@ -1,5 +1,6 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -426,6 +427,13 @@ internal static class ScanEngine
         var conversionOptions = new ConversionOptions
         {
             WriteBom = targetWriteBom,
+
+            // Only when a backup exists is there anything to describe. Without one
+            // there is nothing to restore from, so a record would document a
+            // conversion that cannot be undone.
+            RecordConversion = backup
+                ? record => WriteConversionMetadata(path, record)
+                : null,
         };
 
         // Without the token, Parallel.ForEach could only observe cancellation between
@@ -481,6 +489,63 @@ internal static class ScanEngine
     /// Writes "<paramref name="path"/>.bak" via temp-file-then-atomic-replace, so a
     /// crash mid-write can't leave a truncated backup (unlike a plain File.Copy).
     /// </summary>
+    /// <summary>
+    /// Writes the sidecar describing how to undo this conversion, next to the backup.
+    /// </summary>
+    /// <remarks>
+    /// Called from inside <see cref="EncodingConverter.Convert"/> after verification and
+    /// before installation, so a failure here aborts with the original intact rather than
+    /// leaving a converted file whose provenance is unrecorded.
+    /// </remarks>
+    private static string? WriteConversionMetadata(string path, ConversionRecord record)
+    {
+        string backupPath = path + ".bak";
+
+        string backupHash;
+
+        try
+        {
+            backupHash = ConversionMetadataStore.ComputeSha256(backupPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return $"the backup at '{backupPath}' could not be read: {ex.Message}";
+        }
+
+        // The backup must be the file being converted, not merely present. A stale
+        // ".bak" left by an earlier run would otherwise be recorded as this
+        // conversion's original and silently restore the wrong content.
+        if (!string.IsNullOrEmpty(record.SourceSha256) &&
+            !backupHash.Equals(record.SourceSha256, StringComparison.OrdinalIgnoreCase))
+        {
+            return $"the backup at '{backupPath}' does not match the file being "
+                   + "converted, so it is not a valid restore point.";
+        }
+
+        return ConversionMetadataStore.Write(path, new ConversionMetadata
+        {
+            ConversionId = Guid.NewGuid().ToString("D"),
+            ConversionTimestampUtc =
+                DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+            ECVersion = typeof(ScanEngine).Assembly.GetName().Version?.ToString()
+                        ?? "unknown",
+            OriginalPath = path,
+            OriginalSize = record.SourceBytes,
+            OriginalSha256 = record.SourceSha256,
+            BackupPath = backupPath,
+            BackupSha256 = backupHash,
+            DetectedEncoding = record.SourceEncoding,
+            DetectedCodePage = record.SourceCodePage,
+            DetectedBom = record.SourceHasBom,
+            TargetEncoding = record.TargetEncoding,
+            TargetCodePage = record.TargetCodePage,
+            TargetBom = record.TargetHasBom,
+            SourceTextSha256 = record.SourceTextSha256,
+            OutputTextSha256 = record.OutputTextSha256,
+            UnicodeScalars = record.UnicodeScalars,
+        });
+    }
+
     private static void CreateBackup(string path)
     {
         string? directory = Path.GetDirectoryName(path);
