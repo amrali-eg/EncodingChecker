@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -47,6 +47,22 @@ internal sealed class ConversionReportEntry
     /// Internal state; not included in CSV output.
     /// </summary>
     internal string? CurrentCharsetLabel { get; set; }
+
+    /// <summary>
+    /// How far this file's bytes identify the encoding that wrote them, decided during
+    /// detection. Defaults to <see cref="AmbiguityClass.Unambiguous"/>, which is correct
+    /// for a caller that supplies the source encoding rather than having it detected:
+    /// there is nothing ambiguous about an answer somebody gave.
+    /// Internal state; not included in CSV output.
+    /// </summary>
+    internal AmbiguityClass Ambiguity { get; set; } = AmbiguityClass.Unambiguous;
+
+    /// <summary>
+    /// Encodings that read this file differently from the one detected. Empty unless
+    /// <see cref="Ambiguity"/> is <see cref="AmbiguityClass.TextChanging"/>.
+    /// Internal state; not included in CSV output.
+    /// </summary>
+    internal IReadOnlyList<string> CompetingEncodings { get; set; } = [];
 
     /// <summary>Additional error detail; not included in CSV output.</summary>
     internal string? Diagnostic { get; set; }

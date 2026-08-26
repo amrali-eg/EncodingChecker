@@ -315,6 +315,22 @@ internal static class ScanEngine
             Result = ConversionRowResult.Unchanged,
         };
 
+        // Classified here, beside the detection it qualifies, and carried on the entry.
+        // The conversion path then reads a decision rather than re-deriving one, and a
+        // caller who supplies the source encoding instead of detecting it gets the
+        // default - correctly, since there is nothing ambiguous about an answer somebody
+        // gave.
+        if (detected is not null && options.Action == ScanAction.Convert)
+        {
+            AmbiguityAnalysis? ambiguity = AnalyzeAmbiguity(path, detected);
+
+            if (ambiguity is not null)
+            {
+                entry.Ambiguity = ambiguity.Class;
+                entry.CompetingEncodings = ambiguity.CompetingCandidates;
+            }
+        }
+
         switch (options.Action)
         {
             case ScanAction.Detect:
@@ -400,6 +416,21 @@ internal static class ScanEngine
         if (alreadyMatches)
         {
             entry.Result = ConversionRowResult.Unchanged;
+            return;
+        }
+
+        // Refuse before touching anything when the file's bytes do not identify the
+        // encoding that wrote them and the rival readings disagree about the text.
+        //
+        // Detection still produces an answer for these; on short or ASCII-heavy input
+        // that answer is close to a guess, and acting on it rewrites the user's file
+        // into one of several possible readings without saying so. Skipped when the user
+        // named the source encoding, since then it is their answer, not a guess.
+        if (entry.Ambiguity == AmbiguityClass.TextChanging)
+        {
+            entry.Result = ConversionRowResult.Error;
+            entry.Diagnostic = AmbiguityAnalysis.DescribeRefusal(
+                sourceCharset, entry.CompetingEncodings);
             return;
         }
 
@@ -544,6 +575,38 @@ internal static class ScanEngine
             OutputTextSha256 = record.OutputTextSha256,
             UnicodeScalars = record.UnicodeScalars,
         });
+    }
+
+    /// <summary>
+    /// Reads the detector's sample again and asks whether it identifies one encoding.
+    /// Returns <see langword="null"/> when the file cannot be read, leaving the decision
+    /// to the conversion itself rather than refusing on an I/O error.
+    /// </summary>
+    private static AmbiguityAnalysis? AnalyzeAmbiguity(string path, Encoding sourceEncoding)
+    {
+        try
+        {
+            using FileStream stream = new(
+                path, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete,
+                4096, FileOptions.SequentialScan);
+
+            int length = (int)Math.Min(stream.Length, EncodingAmbiguity.SampleBytes);
+
+            if (length == 0)
+                return null;
+
+            byte[] buffer = new byte[length];
+            int read = stream.ReadAtLeast(buffer, length, throwOnEndOfStream: false);
+
+            return read == 0
+                ? null
+                : EncodingAmbiguity.Analyze(buffer.AsSpan(0, read), sourceEncoding);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     private static void CreateBackup(string path)
