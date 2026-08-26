@@ -1132,32 +1132,9 @@ public partial class MainForm : Form
     // Matches encodings reported by UtfUnknown.Core.CodepageName.
     // UTF-7 is intentionally excluded because .NET disables it by default (SYSLIB0001)
     // and Encoding.GetEncoding throws NotSupportedException.
-    private static readonly string[] SupportedCharsets =
-    [
-        "ascii", "utf-8", "utf-16le", "utf-16be",
-        "utf-32le", "utf-32be",
-        "euc-jp", "euc-kr", "euc-tw",
-        "iso-2022-cn", "iso-2022-kr", "iso-2022-jp",
-        "x-cp50227",
-        "big5", "gb18030", "hz-gb-2312", "shift-jis",
-        "ks_c_5601-1987", "cp949",
-        "ibm852", "ibm855", "ibm866",
-        "iso-8859-1", "iso-8859-2", "iso-8859-3",
-        "iso-8859-4", "iso-8859-5", "iso-8859-6",
-        "iso-8859-7", "iso-8859-8", "iso-8859-9",
-        "iso-8859-10", "iso-8859-11", "iso-8859-13",
-        "iso-8859-15", "iso-8859-16",
-        "windows-1250", "windows-1251", "windows-1252",
-        "windows-1253", "windows-1255", "windows-1256",
-        "windows-1257", "windows-1258",
-        "x-mac-ce", "x-mac-cyrillic",
-        "koi8-r", "tis-620", "viscii",
-        "X-ISO-10646-UCS-4-3412",
-        "X-ISO-10646-UCS-4-2143"
-    ];
 
     private static string[] GetSupportedCharsets() =>
-        SupportedCharsets;
+        TextEncoding.SupportedCharsets;
 
     private void ShowWarning(
         string message,
