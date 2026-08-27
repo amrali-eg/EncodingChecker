@@ -239,17 +239,17 @@ internal static class ScanEngine
                 // with the old encoding can silently produce mojibake that neither strict
                 // decoding nor hash verification catches, since both would use the same
                 // wrong encoding.
-                string effectiveLabel =
-                    entry.CurrentCharsetLabel
-                    ?? FormatCharsetLabel(entry.SourceEncoding, entry.SourceHasBom);
-
                 ParseCharsetLabel(
-                    effectiveLabel,
+                    entry.EffectiveSourceLabel,
                     out string sourceCharset,
                     out bool sourceHasBom);
 
+                // Stands in for ConversionPolicy's answer for an unidentified source,
+                // which has to be given before Encoding.GetEncoding is reached rather
+                // than inside ApplyConversion. Pinned as agreeing in ConversionPolicyTests.
                 if (sourceCharset == UNKNOWN_CHARSET)
                 {
+                    entry.Action = PlannedAction.Skip;
                     entry.Result = ConversionRowResult.Skipped;
                     return entry;
                 }
@@ -357,19 +357,6 @@ internal static class ScanEngine
         // gave.
         entry.SourceEncodingWasSpecified = sourceWasSpecified;
 
-        if (detected is not null && options.Action == ScanAction.Convert
-            && !sourceWasSpecified)
-        {
-            AmbiguityAnalysis? ambiguity = AnalyzeAmbiguity(path, detected);
-
-            if (ambiguity is not null)
-            {
-                entry.Ambiguity = ambiguity.Class;
-                entry.AmbiguityReason = ambiguity.Reason;
-                entry.CompetingEncodings = ambiguity.CompetingCandidates;
-            }
-        }
-
         switch (options.Action)
         {
             case ScanAction.Detect:
@@ -443,33 +430,44 @@ internal static class ScanEngine
         entry.TargetEncoding = targetCharset;
         entry.TargetHasBom = targetWriteBom;
 
-        // Compared against the file's current state, not entry.SourceEncoding, which
-        // stays at its original-scan value for reporting even after a conversion.
-        bool alreadyMatches =
-            string.Equals(
-                sourceCharset,
-                targetCharset,
-                StringComparison.OrdinalIgnoreCase) &&
-            sourceHasBom == targetWriteBom;
-
-        if (alreadyMatches)
+        // Classified here, at the point where the decision is actually made, so that
+        // every caller reaching a conversion has it - the CLI's Convert scan, a plan
+        // being written, and the GUI alike. Doing it during the scan instead meant the
+        // GUI, which scans in Detect mode, never had it.
+        //
+        // Skipped when the user named the source encoding: there is nothing ambiguous
+        // about an answer somebody gave. Skipped too when the entry already carries a
+        // decision, which means a plan made it earlier - classifying again there would
+        // be the second detection pass a plan exists to avoid, and its answer, not this
+        // one, is what the user approved. The policy below still re-asserts the gate
+        // from what the plan recorded.
+        if (entry.Action is null && !entry.SourceEncodingWasSpecified)
         {
-            entry.Result = ConversionRowResult.Unchanged;
-            return;
+            AmbiguityAnalysis? analysis = AnalyzeAmbiguity(path, sourceEncoding);
+
+            if (analysis is not null)
+            {
+                entry.Ambiguity = analysis.Class;
+                entry.AmbiguityReason = analysis.Reason;
+                entry.CompetingEncodings = analysis.CompetingCandidates;
+            }
         }
 
-        // Refuse before touching anything when the file's bytes do not identify the
-        // encoding that wrote them and the rival readings disagree about the text.
-        //
-        // Detection still produces an answer for these; on short or ASCII-heavy input
-        // that answer is close to a guess, and acting on it rewrites the user's file
-        // into one of several possible readings without saying so. Skipped when the user
-        // named the source encoding, since then it is their answer, not a guess.
-        if (entry.Ambiguity == AmbiguityClass.TextChanging)
+        PlannedAction action = ConversionPolicy.Decide(
+            sourceCharset,
+            sourceHasBom,
+            targetCharset,
+            targetWriteBom,
+            entry.Ambiguity,
+            entry.CompetingEncodings,
+            out string? policyReason);
+
+        entry.Action = action;
+
+        if (action != PlannedAction.Convert)
         {
-            entry.Result = ConversionRowResult.Error;
-            entry.Diagnostic = AmbiguityAnalysis.DescribeRefusal(
-                sourceCharset, entry.CompetingEncodings);
+            entry.Result = ConversionPolicy.ToRowResult(action);
+            entry.Diagnostic = policyReason;
             return;
         }
 

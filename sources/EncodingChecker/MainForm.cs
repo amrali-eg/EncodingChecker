@@ -63,6 +63,15 @@ public partial class MainForm : Form
     // actual conversion from preview ("would be converted").
     private bool _convertWasPreview;
 
+    // A real conversion runs twice: once with WhatIf to decide what would happen, and
+    // again to carry out what the user confirmed. The second pass reuses the same entry
+    // objects, which already carry their decisions, so it does not classify anything a
+    // second time - the conversion that happens is the one that was shown.
+    private bool _convertWasPlanningPass;
+
+    // Held between the two passes so the confirmed plan is what executes.
+    private List<ConversionReportEntry>? _plannedEntries;
+
     // Indices into imgsResults (see SetKeyName calls in MainForm.Designer.cs).
     // Reuses the existing Failed and Warning icons; the Warning icon carries the
     // preview/would-change state.
@@ -513,12 +522,36 @@ public partial class MainForm : Form
             entries.Add(entry);
         }
 
+        // A preview writes nothing, so it is its own answer and needs no confirmation.
+        // A real conversion is decided first and carried out second.
+        StartConvertPass(
+            entries,
+            itemsByPath,
+            targetLabel,
+            targetBaseCharset,
+            writeBom,
+            planningPass: !chkPreviewChanges.Checked);
+    }
+
+    /// <summary>
+    /// Runs one conversion pass: the WhatIf pass that decides, or the pass that acts.
+    /// </summary>
+    private void StartConvertPass(
+        List<ConversionReportEntry> entries,
+        Dictionary<string, ListViewItem> itemsByPath,
+        string targetLabel,
+        string targetBaseCharset,
+        bool targetWriteBom,
+        bool planningPass)
+    {
         var completed = new ConcurrentBag<ConversionReportEntry>();
 
         _convertItemsByPath = itemsByPath;
         _convertTargetLabel = targetLabel;
         _convertResults = completed;
         _convertWasPreview = chkPreviewChanges.Checked;
+        _convertWasPlanningPass = planningPass;
+        _plannedEntries = entries;
         _currentAction = CurrentAction.Convert;
 
         UpdateControlsOnActionStart();
@@ -530,14 +563,101 @@ public partial class MainForm : Form
         {
             Entries = entries,
             TargetBaseCharset = targetBaseCharset,
-            TargetWriteBom = writeBom,
-            WhatIf = chkPreviewChanges.Checked,
+            TargetWriteBom = targetWriteBom,
+
+            // The planning pass never writes, whatever the backup box says.
+            WhatIf = planningPass || chkPreviewChanges.Checked,
             Backup = chkCreateBackup.Checked,
             Completed = completed,
             CancellationToken = _actionCancellation.Token,
         };
 
         _actionWorker.RunWorkerAsync(args);
+    }
+
+    /// <summary>
+    /// Shows what the planning pass decided and, if the user agrees, carries it out.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> when a second pass was started and the caller should leave
+    /// the results alone until it finishes.
+    /// </returns>
+    private bool ConfirmAndCarryOutPlan(
+        Dictionary<string, ListViewItem> itemsByPath, string targetLabel)
+    {
+        List<ConversionReportEntry> entries = _plannedEntries ?? [];
+
+        if (entries.Count == 0)
+            return false;
+
+        ScanEngine.ParseCharsetLabel(
+            targetLabel, out string targetBaseCharset, out bool targetWriteBom);
+
+        ConversionPlan plan;
+
+        try
+        {
+            plan = ConversionPlan.FromEntries(
+                entries,
+                lstBaseDirectory.Text,
+                targetBaseCharset,
+                targetWriteBom,
+                chkCreateBackup.Checked,
+                explicitSource: entries.All(e => e.SourceEncodingWasSpecified)
+                    ? entries[0].EffectiveSourceLabel
+                    : null);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // An entry that reached here without a decision is a bug, not a user error.
+            ShowWarning("The conversion could not be planned: {0}", ex.Message);
+            return false;
+        }
+
+        using var confirmation = new ConversionConfirmationForm(plan);
+        DialogResult answer = confirmation.ShowDialog(this);
+
+        // The user answered the refusal by naming the encoding. That replaces detection
+        // for those files and nothing else, so they go back through the same decision.
+        if (answer == DialogResult.Retry &&
+            confirmation.ChosenSourceEncoding is { } chosen)
+        {
+            foreach (ConversionReportEntry entry in entries)
+            {
+                if (entry.Action != PlannedAction.Refuse || !entry.MayChangeText())
+                    continue;
+
+                // The engine's existing override point. SourceEncoding keeps the
+                // scan's answer for the report; this is what the conversion reads.
+                entry.CurrentCharsetLabel = chosen;
+                entry.SourceEncodingWasSpecified = true;
+                entry.Ambiguity = AmbiguityClass.Unambiguous;
+                entry.AmbiguityReason = AmbiguityReason.ExplicitlySpecified;
+                entry.CompetingEncodings = [];
+                entry.Diagnostic = null;
+
+                // Cleared so the policy decides again rather than reusing the refusal.
+                entry.Action = null;
+            }
+
+            StartConvertPass(
+                entries, itemsByPath, targetLabel,
+                targetBaseCharset, targetWriteBom, planningPass: true);
+
+            return true;
+        }
+
+        if (answer != DialogResult.OK)
+        {
+            UpdateControlsOnActionDone("Conversion cancelled. No files were modified.");
+            return true;
+        }
+
+        StartConvertPass(
+            entries, itemsByPath, targetLabel,
+            targetBaseCharset, targetWriteBom, planningPass: false);
+
+        return true;
     }
 
     private void OnCancelAction(object? sender, EventArgs e)
@@ -729,11 +849,22 @@ public partial class MainForm : Form
         Dictionary<string, ListViewItem> itemsByPath = _convertItemsByPath!;
         ConcurrentBag<ConversionReportEntry> completed = _convertResults ?? [];
         bool wasPreview = _convertWasPreview;
+        bool wasPlanningPass = _convertWasPlanningPass;
 
         _convertItemsByPath = null;
         _convertTargetLabel = null;
         _convertResults = null;
         _convertWasPreview = false;
+        _convertWasPlanningPass = false;
+
+        // Nothing was written yet. Show what was decided and ask before anything is.
+        if (e.Error is null && !e.Cancelled && wasPlanningPass &&
+            ConfirmAndCarryOutPlan(itemsByPath, targetLabel))
+        {
+            return;
+        }
+
+        _plannedEntries = null;
 
         if (e.Error != null)
         {

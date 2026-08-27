@@ -87,6 +87,37 @@ internal sealed class ConversionReportEntry
     /// </summary>
     internal string? ExpectedSourceSha256 { get; set; }
 
+    /// <summary>
+    /// What <see cref="ConversionPolicy"/> decided for this file, or
+    /// <see langword="null"/> while nothing has decided yet.
+    /// Internal state; not included in CSV output.
+    /// </summary>
+    /// <remarks>
+    /// Nullable so that "nobody has decided" cannot be mistaken for "convert it". An
+    /// entry that reaches a plan undecided is a bug, and one that used to exist: the GUI
+    /// built conversions from entries whose ambiguity had never been classified.
+    /// </remarks>
+    internal PlannedAction? Action { get; set; }
+
+    /// <summary>
+    /// Whether converting this file could change its Unicode content rather than only
+    /// its encoding label.
+    /// </summary>
+    internal bool MayChangeText() => Ambiguity == AmbiguityClass.TextChanging;
+
+    /// <summary>
+    /// The charset label the next conversion will read this file as.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="CurrentCharsetLabel"/> when something has overridden or superseded the
+    /// original detection - a completed conversion, or a user naming the source encoding
+    /// - and the scan's own answer otherwise. Both the conversion engine and a written
+    /// plan use this, so what a plan says a file will be read as is what it is read as.
+    /// </remarks>
+    internal string EffectiveSourceLabel =>
+        CurrentCharsetLabel
+        ?? ScanEngine.FormatCharsetLabel(SourceEncoding, SourceHasBom);
+
     /// <summary>Additional error detail; not included in CSV output.</summary>
     internal string? Diagnostic { get; set; }
 }
