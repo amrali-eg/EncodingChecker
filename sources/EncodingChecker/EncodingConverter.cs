@@ -73,6 +73,25 @@ internal sealed record ConversionOptions
     /// A failure here therefore aborts the conversion with the original intact.
     /// </remarks>
     internal Func<ConversionRecord, string?>? RecordConversion { get; init; }
+
+    /// <summary>
+    /// The SHA-256 the source is required to still have at the moment of installation,
+    /// or <see langword="null"/> to skip the check.
+    /// </summary>
+    /// <remarks>
+    /// Set when the decision to convert this file was made earlier, against bytes that
+    /// were read then - which is what a conversion plan is. The length-and-timestamp
+    /// recheck above catches a source rewritten during conversion, but it compares
+    /// against what this run itself observed on opening the file, so it cannot speak to
+    /// anything that happened before that. A plan can.
+    /// <para>
+    /// This narrows the window rather than closing it: a source rewritten between this
+    /// check and <c>File.Replace</c> is still not detected. Eliminating that entirely
+    /// needs the source held open against writers for the whole conversion, which would
+    /// fail conversions of files legitimately open elsewhere.
+    /// </para>
+    /// </remarks>
+    internal string? ExpectedSourceSha256 { get; init; }
 }
 
 /// <summary>
@@ -405,11 +424,13 @@ internal static class EncodingConverter
             // purpose: the backup already exists, the conversion is verified, and the
             // original is still in place, so a failure to record leaves nothing to
             // recover from and nothing needing recovery.
-            if (options.RecordConversion is not null)
+            // Hashed only when something asks for it, so the extra read is not paid for
+            // by conversions that need neither the check nor the record.
+            string sourceFileSha = string.Empty;
+
+            if (options.ExpectedSourceSha256 is not null ||
+                options.RecordConversion is not null)
             {
-                // Hashed only when a record is being written, so the extra pass is not
-                // paid for by conversions that do not need it.
-                string sourceFileSha;
                 try
                 {
                     sourceFileSha = ComputeFileSha256(sourcePath);
@@ -419,7 +440,33 @@ internal static class EncodingConverter
                 {
                     sourceFileSha = string.Empty;
                 }
+            }
 
+            // The last point at which nothing has been installed. A caller that decided
+            // to convert these bytes earlier gets to insist they are still those bytes.
+            if (options.ExpectedSourceSha256 is not null &&
+                !string.Equals(
+                    sourceFileSha,
+                    options.ExpectedSourceSha256,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return Failure(
+                    ConversionErrorCode.SourceChangedDuringConversion,
+                    sourceFileSha.Length == 0
+                        ? "The source file could not be re-read to confirm it still " +
+                          "matches the one this conversion was approved for."
+                        : "The source file no longer matches the one this conversion " +
+                          "was approved for; it changed before installation.",
+                    sourceEncoding,
+                    targetEncoding) with
+                {
+                    SourceBytes = sourceBytesProcessed,
+                    TargetBytes = targetBytesWritten,
+                };
+            }
+
+            if (options.RecordConversion is not null)
+            {
                 string? recordError = options.RecordConversion(new ConversionRecord
                 {
                     SourcePath = sourcePath,

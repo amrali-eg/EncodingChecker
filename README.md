@@ -112,23 +112,47 @@ Encoding not identified:      0
 Refused, ambiguous encoding:  1
 Refused, unreadable:          0
 
-Backups:                      enabled
+Directory:                    C:\Source
 Target:                       utf-8 without BOM
+Source encoding:              detected per file
+Backups:                      enabled
+Guarantees:                   strict codecs, verified output, atomic install, ambiguity refusal
 
 No files modified.
 ```
 
+The two indented lines break down `Will convert`; the rest sum exactly to
+`Selected`, so the totals can be checked rather than trusted.
+
 `-Apply` carries that plan out. It does not detect anything a second time: the
 encodings, the target, and the backup setting all come from the plan, so
 `-BasePath`, `-Target`, `-From`, and `-Backup` are rejected rather than silently
-ignored.
+ignored. `plan.json` is the whole approval.
 
-The binding is the point of the feature, not the preview. Every scheduled file
-carries the SHA-256 it had when the plan was made, and `-Apply` verifies each one
-first. If any file has changed or been deleted in between, **nothing is
-converted** — not even the files that still match. A plan reviewed as a whole
-belongs to the directory it was reviewed against, and the files most likely to
-have changed are the ones something else is actively writing.
+The binding is the point of the feature, not the preview:
+
+- **Bound to the files.** Every scheduled file carries the SHA-256 it had when
+  the plan was made, and `-Apply` verifies each one before writing anything. If
+  any file has changed or been deleted in between, **nothing is converted** — not
+  even the files that still match. A plan reviewed as a whole belongs to the
+  directory it was reviewed against, and the files most likely to have changed
+  are the ones something else is actively writing. Each file is checked once
+  more at the moment it is installed, which narrows the window between that
+  verification and the write.
+- **Bound to the directory.** Paths are stored relative to a recorded root, so a
+  plan is a document about a directory rather than about one machine. Applying a
+  copy of a plan converts the tree it was approved for, not whichever tree it
+  happens to sit in, and an entry that resolves outside that root is refused.
+- **Bound to the conversion.** The plan records the target encoding, BOM policy,
+  backup policy, whether the source encoding was detected or specified, and a
+  semantics version describing the conversion behaviour it was approved under. A
+  plan written under different behaviour is refused rather than carried out —
+  what was approved was a conversion, not a list of filenames.
+
+The semantics version is deliberately separate from EC's version number: it moves
+only when conversion or classification behaviour changes, so a release that
+changes nothing about conversion does not invalidate plans and teach people to
+work around the check.
 
 ```bash
 EncodingChecker.exe -BasePath . -Include "*" -Target "utf-8" -Plan plan.json
@@ -197,10 +221,15 @@ These are the guarantees the implementation actually provides.
   bytes is refused rather than guessed at, when the competing encodings would
   produce different text. `-From` overrides the detection, not the conversion
   safeguards. See [Ambiguous encodings](#ambiguous-encodings-and--from).
-- A plan written by `-Plan` is bound to the SHA-256 of every file it schedules.
-  `-Apply` verifies all of them before writing anything and refuses the plan
-  whole if any file has changed, so a decision made about one set of bytes is
-  never applied to a different one.
+- A plan written by `-Plan` is bound to the SHA-256 of every file it schedules,
+  to the directory those files are under, and to the conversion behaviour it was
+  approved under. `-Apply` verifies all of them before writing anything and
+  refuses the plan whole if any has changed, so a decision made about one set of
+  bytes is never applied to a different one. Under `-Apply`, each source is
+  re-hashed again immediately before installation. **This narrows the window
+  between verification and write; it does not close it** — a source rewritten
+  between that check and the replacement is still not detected, which would
+  require holding every source open against writers for the whole run.
 - `-BasePath` itself is rejected if it is a symbolic link, junction, or
   other reparse point. Reparse-point subdirectories are skipped during
   traversal, and a file that is (or becomes) a reparse point is rejected at

@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 
 namespace EncodingChecker.Tests;
 
@@ -187,6 +187,83 @@ public sealed class ConversionSafetyInvariantTests : IDisposable
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.True(result.VerificationPassed);
+        Assert.Equal(text, Encoding.UTF8.GetString(File.ReadAllBytes(path)));
+    }
+
+    [Fact]
+    public void SourceThatNoLongerMatchesWhatWasApproved_RefusesAtInstallation()
+    {
+        // The preflight in -Apply proves every file matched when the run started. A
+        // large tree can take a while after that, and the length-and-timestamp recheck
+        // inside the converter only compares against what this run itself saw on
+        // opening the file - it cannot speak to a decision made before that.
+        string path = Path.Combine(_root, "approved.txt");
+        byte[] original = Encoding.GetEncoding("shift_jis").GetBytes("こんにちは世界");
+        File.WriteAllBytes(path, original);
+
+        ConversionResult result = EncodingConverter.Convert(
+            path,
+            path,
+            Encoding.GetEncoding("shift_jis"),
+            Encoding.UTF8,
+            new ConversionOptions
+            {
+                // The hash of something else entirely: what an earlier plan would have
+                // recorded for a file that has since been rewritten.
+                ExpectedSourceSha256 = new string('0', 64),
+            },
+            progress: null,
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(ConversionErrorCode.SourceChangedDuringConversion, result.ErrorCode);
+        Assert.False(result.ReplacementCommitted);
+        Assert.Equal(original, File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void SourceThatStillMatchesWhatWasApproved_Converts()
+    {
+        // The other direction, which matters just as much: a check that refuses
+        // everything is not a safety feature, it is a broken one.
+        const string text = "こんにちは世界";
+        string path = Path.Combine(_root, "unchanged.txt");
+        File.WriteAllBytes(path, Encoding.GetEncoding("shift_jis").GetBytes(text));
+
+        ConversionResult result = EncodingConverter.Convert(
+            path,
+            path,
+            Encoding.GetEncoding("shift_jis"),
+            Encoding.UTF8,
+            new ConversionOptions
+            {
+                ExpectedSourceSha256 = ConversionMetadataStore.ComputeSha256(path),
+            },
+            progress: null,
+            CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Equal(text, Encoding.UTF8.GetString(File.ReadAllBytes(path)));
+    }
+
+    [Fact]
+    public void AnOrdinaryConversionDoesNotPayForTheApprovalCheck()
+    {
+        // The stronger check costs a second full read of every file. Conversions that
+        // nothing committed to in advance have nothing to compare against, so they keep
+        // the length-and-timestamp recheck and skip the extra pass.
+        const string text = "こんにちは世界";
+        string path = Path.Combine(_root, "ordinary.txt");
+        File.WriteAllBytes(path, Encoding.GetEncoding("shift_jis").GetBytes(text));
+
+        Assert.Null(ConversionOptions.Default.ExpectedSourceSha256);
+
+        ConversionResult result = EncodingConverter.Convert(
+            path, path,
+            Encoding.GetEncoding("shift_jis"), Encoding.UTF8,
+            ConversionOptions.Default, progress: null, CancellationToken.None);
+
+        Assert.True(result.Success);
         Assert.Equal(text, Encoding.UTF8.GetString(File.ReadAllBytes(path)));
     }
 
