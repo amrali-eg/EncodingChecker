@@ -64,8 +64,8 @@ that silently tests nothing is the failure mode a manual matrix is most prone to
 | 1 | **View** the directory | 4 files listed with their encodings |
 | 2 | Tick all, **Convert** to utf-8 | confirmation appears; two files listed as needing an explicit source encoding, with competing encodings named |
 | 3 | **Cancel** | nothing converted; **all four hashes unchanged**; no `.bak` files |
-| 4 | Convert again; untick `russian.txt`; choose `windows-1252` | button reads "Use this encoding for 1 file(s)" |
-| 5 | Confirm the re-planned conversion | `french.txt` converts and reads correctly as French |
+| 4 | Convert again; untick `russian.txt`; choose `iso-8859-1` | button reads "Use this encoding for 1 file(s)" |
+| 5 | Confirm the re-planned conversion | `french.txt` converts to the **chosen** reading: it contains U+0080, not the euro sign detection would have produced |
 | 6 | Check `russian.txt` | **hash unchanged**; still refused |
 | 7 | Convert again; while the dialog is open, edit one selected file in another editor and save | — |
 | 8 | Confirm | run stops; message names the changed file; **every hash unchanged** |
@@ -116,12 +116,14 @@ Result: PASS
 
 Notes from that run, kept because they qualify what the phases actually establish:
 
-- **Phase B proves less on its own than it appears to.** Its French sample decodes
-  identically under windows-1252 and iso-8859-1, so "the text is preserved" cannot show
-  which codec was used. What settles it is the recovery record: `french.txt.ecmeta.json`
-  gives `DetectedCodePage: 1252`, the encoding chosen in the dialog rather than the
-  `iso-8859-1` that detection proposed. A future revision should use content where the two
-  encodings genuinely disagree, so the assertion stands without the sidecar.
+- **Phase B proved less on its own than it appeared to, and has since been
+  strengthened.** Its French sample decoded identically under windows-1252 and
+  iso-8859-1, so "the text is preserved" could not show which codec had been used; what
+  settled it was the recovery record's `DetectedCodePage: 1252`. The sample now carries
+  `0x80` — the euro sign in windows-1252, a C1 control in iso-8859-1 — and the phase asks
+  for the codec detection did *not* choose, so the output itself distinguishes them.
+  Verified in both directions: choosing the wrong codec now fails on the text, on the
+  sidecar, and on the journal independently, where the old phase could not fail at all.
 - **Text-equivalent ambiguity is nearly unreachable.** Eight ASCII shapes — short strings,
   digits, JSON, code, newlines — all classify as `StructurallyDetermined`, because ASCII
   constrains every byte below 0x80. Only a **one-byte file** reaches `TextEquivalent`,
