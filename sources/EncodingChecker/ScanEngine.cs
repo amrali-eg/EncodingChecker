@@ -77,6 +77,17 @@ internal sealed class ScanDirectoryOptions
     /// </remarks>
     internal string? SourceCharset { get; init; }
 
+    /// <summary>
+    /// Record each file's bytes before converting it, so a journal can report what the
+    /// file was as well as what it became.
+    /// </summary>
+    /// <remarks>
+    /// Off by default: a conversion overwrites the original, so the hash has to be taken
+    /// in advance, and taking it for every run would charge an extra full read to the
+    /// runs that never asked for a journal.
+    /// </remarks>
+    internal bool CaptureSourceHashes { get; init; }
+
     internal bool TargetWriteBom { get; init; }
 
     /// <summary>Simulate conversion without writing.</summary>
@@ -356,6 +367,7 @@ internal static class ScanEngine
         // default - correctly, since there is nothing ambiguous about an answer somebody
         // gave.
         entry.SourceEncodingWasSpecified = sourceWasSpecified;
+        entry.CaptureSourceHash = options.CaptureSourceHashes;
 
         switch (options.Action)
         {
@@ -429,6 +441,23 @@ internal static class ScanEngine
     {
         entry.TargetEncoding = targetCharset;
         entry.TargetHasBom = targetWriteBom;
+        entry.ResolvedSourceLabel = FormatCharsetLabel(sourceCharset, sourceHasBom);
+
+        // Before anything can overwrite it. A converted file's original bytes are not
+        // recoverable from the file afterwards, so a journal that wants them has to say
+        // so in advance.
+        if (entry.CaptureSourceHash && entry.JournalSourceSha256 is null)
+        {
+            try
+            {
+                entry.JournalSourceSha256 =
+                    ConversionMetadataStore.ComputeSha256(path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Left null; the journal records an empty hash rather than a wrong one.
+            }
+        }
 
         // Classified here, at the point where the decision is actually made, so that
         // every caller reaching a conversion has it - the CLI's Convert scan, a plan

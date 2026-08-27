@@ -16,6 +16,7 @@ Each [release](https://github.com/amrali-eg/EncodingChecker/releases) publishes 
 - Lossless, safe conversion: every write is verified afterward by comparing a SHA-256 hash of the decoded content, so a silent encoder substitution (e.g. an unrepresentable character) is caught and reported as an error instead of corrupting the file.
 - Refuses to convert files whose encoding the bytes do not determine, naming the encodings actually in conflict, with `-From` (or the GUI's source-encoding selection) to supply the answer yourself. One policy engine decides for every surface.
 - The GUI confirms before writing, showing exactly what will happen to each file and carrying out that same plan rather than re-deciding.
+- `-Journal` records what a run actually did — including the files it refused and why — with each file's SHA-256 before and after.
 - `-Plan`/`-Apply` preflight: review what a conversion would do, then carry out exactly that — the plan is bound to the files' hashes and is refused whole if they change.
 - Optional `.bak` backup before overwriting, and a `-WhatIf` dry-run mode that reports what would happen without touching any file.
 - Covered by an xUnit test suite exercising the detection/conversion engine, CLI argument parsing, and CSV report formatting across multilingual content and edge cases.
@@ -70,6 +71,47 @@ easily hold refused files in different encodings — Cyrillic in koi8-r beside F
 windows-1252 — and one answer settles only the files it was given about. Imposing it on
 the rest would repeat, one level up, the mistake the refusal exists to prevent.
 
+### The conversion journal
+
+`-Journal <path>` writes a JSON record of the run. For every file: what its encoding was
+detected or declared to be, whether the bytes identified it, which encodings competed,
+what EC decided, what it actually did, and the file's SHA-256 before and after.
+
+```json
+{
+  "RelativePath": "notes.txt",
+  "Sha256Before": "f19e0e0c…",
+  "Sha256After": null,
+  "DetectionMode": "Detected",
+  "DetectedEncoding": "iso-8859-1",
+  "SourceEncoding": "iso-8859-1",
+  "Ambiguity": "TextChanging",
+  "AmbiguityReason": "MultipleCodecsDifferentText",
+  "DetectionCandidates": ["cp866", "ibm852", "ibm855", "…"],
+  "PlannedAction": "Refuse",
+  "Status": "Refused",
+  "Reason": "The encoding could not be determined uniquely…"
+}
+```
+
+Three things it does deliberately:
+
+- **Refused and skipped files are in it.** *Why was this file not converted?* gets asked
+  far more often than *how do I put this one back?*, and until now only the second had an
+  answer — in a sidecar written solely where a backup existed.
+- **It records the encoding the conversion read, not the detector's raw output.** Those
+  differ whenever somebody named the source encoding, and `DetectedEncoding` keeps the
+  detector's answer beside it so the difference is visible.
+- **It does not claim more than happened.** `Sha256After` is present only where a file was
+  actually rewritten, so the record can be checked against the disk. A `-WhatIf` run is
+  marked as a preview and its files are recorded as decided, not converted.
+
+In the GUI it is written through **Export report**, choosing *Conversion journal (\*.json)*.
+
+Together with the per-file `.ecmeta.json` sidecar — which exists so one conversion can be
+undone — this completes the chain: what EC believed, what it decided, what was approved,
+and what it wrote.
+
 ### One policy engine
 
 The GUI and the CLI ask the same question of the same code:
@@ -106,6 +148,7 @@ EncodingChecker.exe
                                    # detecting it (Convert mode only)
     [-Plan <path>]                # Write a conversion plan; change nothing
     [-Apply <path>]               # Carry out a plan written by -Plan
+    [-Journal <path>]             # Record what the conversion actually did
 
     [-Report <path>]              # Also write a CSV report to this path
     [-MaxParallelism <N>]         # Default: min(logical processor count, 4)
