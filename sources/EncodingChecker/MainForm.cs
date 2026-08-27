@@ -28,11 +28,14 @@ public partial class MainForm : Form
     private sealed class ConvertWorkerArgs
     {
         internal required List<ConversionReportEntry> Entries;
+        internal required string BaseDirectory;
         internal required string TargetBaseCharset;
         internal required bool TargetWriteBom;
-        internal required bool WhatIf;
+        internal required bool Preview;
         internal required bool Backup;
         internal required ConcurrentBag<ConversionReportEntry> Completed;
+        internal required Func<ConversionPlan, ConfirmationResponse> Confirm;
+        internal OrchestrationResult? Outcome;
         internal CancellationToken CancellationToken;
     }
 
@@ -62,6 +65,11 @@ public partial class MainForm : Form
     // Set by OnConvert and read by ConvertWorkerCompleted to distinguish
     // actual conversion from preview ("would be converted").
     private bool _convertWasPreview;
+
+    // Held so the completion handler can read how the run ended, as reported by
+    // ConversionOrchestrator: converted, previewed, cancelled, or stopped because the
+    // files moved underneath the plan. The worker method is static and writes into it.
+    private ConvertWorkerArgs? _convertArgs;
 
     // Indices into imgsResults (see SetKeyName calls in MainForm.Designer.cs).
     // Reuses the existing Failed and Warning icons; the Warning icon carries the
@@ -529,15 +537,38 @@ public partial class MainForm : Form
         var args = new ConvertWorkerArgs
         {
             Entries = entries,
+            BaseDirectory = lstBaseDirectory.Text,
             TargetBaseCharset = targetBaseCharset,
             TargetWriteBom = writeBom,
-            WhatIf = chkPreviewChanges.Checked,
+            Preview = chkPreviewChanges.Checked,
             Backup = chkCreateBackup.Checked,
             Completed = completed,
+
+            // Runs on the worker thread, so the dialog is marshalled back here. The
+            // orchestrator does not know or care which thread it is on.
+            Confirm = plan => (ConfirmationResponse)Invoke(() => Confirm(plan)),
             CancellationToken = _actionCancellation.Token,
         };
 
+        _convertArgs = args;
         _actionWorker.RunWorkerAsync(args);
+    }
+
+    /// <summary>Shows a decided plan and reports what the user said.</summary>
+    private ConfirmationResponse Confirm(ConversionPlan plan)
+    {
+        using var dialog = new ConversionConfirmationForm(plan);
+
+        return dialog.ShowDialog(this) switch
+        {
+            DialogResult.OK => ConfirmationResponse.Proceed,
+            DialogResult.Retry when dialog.ChosenSourceEncoding is { } chosen =>
+                new ConfirmationResponse(
+                    ConfirmationChoice.ChooseSourceEncoding,
+                    chosen,
+                    dialog.ChosenFiles),
+            _ => ConfirmationResponse.Cancel,
+        };
     }
 
     private void OnCancelAction(object? sender, EventArgs e)
@@ -614,13 +645,14 @@ public partial class MainForm : Form
     {
         try
         {
-            ScanEngine.ConvertFiles(
+            args.Outcome = new ConversionOrchestrator(args.Confirm).Run(
                 args.Entries,
+                args.BaseDirectory,
                 args.TargetBaseCharset,
                 args.TargetWriteBom,
-                ScanEngine.DefaultMaxParallelism,
-                whatIf: args.WhatIf,
                 backup: args.Backup,
+                preview: args.Preview,
+                ScanEngine.DefaultMaxParallelism,
                 onEntry: args.Completed.Add,
                 args.CancellationToken);
         }
@@ -729,11 +761,30 @@ public partial class MainForm : Form
         Dictionary<string, ListViewItem> itemsByPath = _convertItemsByPath!;
         ConcurrentBag<ConversionReportEntry> completed = _convertResults ?? [];
         bool wasPreview = _convertWasPreview;
+        OrchestrationResult? outcome = _convertArgs?.Outcome;
 
         _convertItemsByPath = null;
         _convertTargetLabel = null;
         _convertResults = null;
         _convertWasPreview = false;
+        _convertArgs = null;
+
+        // Every one of these leaves the files untouched. Reported before the rows are
+        // updated, because there is nothing to update.
+        if (e.Error is null && !e.Cancelled && outcome is not null &&
+            outcome.Outcome is not (OrchestrationOutcome.Converted
+                                    or OrchestrationOutcome.Previewed))
+        {
+            if (outcome.Message is not null)
+                ShowWarning("{0}", outcome.Message);
+
+            UpdateControlsOnActionDone(
+                outcome.Outcome == OrchestrationOutcome.Cancelled
+                    ? "Conversion cancelled. No files were modified."
+                    : "Conversion did not run. No files were modified.");
+
+            return;
+        }
 
         if (e.Error != null)
         {

@@ -14,7 +14,8 @@ Each [release](https://github.com/amrali-eg/EncodingChecker/releases) publishes 
 
 - Layered detection: byte-order-mark and heuristic checks for Unicode encodings, [UtfUnknown](https://github.com/CharsetDetector/UTF-unknown) for legacy code pages, each candidate independently verified by strict decoding before being trusted.
 - Lossless, safe conversion: every write is verified afterward by comparing a SHA-256 hash of the decoded content, so a silent encoder substitution (e.g. an unrepresentable character) is caught and reported as an error instead of corrupting the file.
-- Refuses to convert files whose encoding the bytes do not determine, naming the encodings actually in conflict, with `-From` to supply the answer yourself.
+- Refuses to convert files whose encoding the bytes do not determine, naming the encodings actually in conflict, with `-From` (or the GUI's source-encoding selection) to supply the answer yourself. One policy engine decides for every surface.
+- The GUI confirms before writing, showing exactly what will happen to each file and carrying out that same plan rather than re-deciding.
 - `-Plan`/`-Apply` preflight: review what a conversion would do, then carry out exactly that — the plan is bound to the files' hashes and is refused whole if they change.
 - Optional `.bak` backup before overwriting, and a `-WhatIf` dry-run mode that reports what would happen without touching any file.
 - Covered by an xUnit test suite exercising the detection/conversion engine, CLI argument parsing, and CSV report formatting across multilingual content and edge cases.
@@ -27,6 +28,65 @@ Two options apply to **Convert**:
 
 - **Back up original files before converting (.bak)** — keeps each original as `<file>.bak` before it is replaced. The equivalent of the CLI's `-Backup`.
 - **Preview changes without modifying files** — reports which files *would* be converted without writing anything and without creating any `.bak`. Previewed rows keep their current encoding and stay selected, so you can review the result and then convert for real. The equivalent of the CLI's `-WhatIf`.
+
+### Confirming a conversion
+
+**Convert** does not write anything immediately. It first works out what would happen to
+every selected file, then shows that for approval:
+
+```
+Convert 417 of 480 selected file(s) to utf-8 without BOM
+
+  386  Encoding determined by the file's own bytes            Will convert.
+   31  Encoding undetermined, every reading agrees on the text Will convert; the label
+                                                               is a choice, the content
+                                                               is not.
+   22  Encoding undetermined, readings disagree on the text    WILL NOT be converted.
+   39  Already in the target encoding                          Nothing to do.
+    2  Encoding could not be identified                        Left alone.
+
+Directory        C:\Source
+Source encoding  detected per file
+Backups          enabled — each original kept as <file>.bak
+Guarantees       strict codecs, verified output, atomic install, ambiguity refusal
+```
+
+The conversion that runs is the one shown. Nothing is detected a second time between the
+confirmation and the writing, so the dialog cannot describe one set of conclusions while
+a different set is carried out — the same property `-Apply` has.
+
+If the files change between the confirmation and the writing, **nothing is converted** —
+the same all-or-nothing check `-Apply` makes, for the same reason: a person reading a
+dialog takes time, and what they approved was the files as they were.
+
+When files are refused, the dialog lists them with the encodings actually in conflict and
+offers the one thing that resolves it: saying which encoding they are. That selection is
+the GUI's `-From`. It replaces detection for those files and nothing else — the bytes must
+still decode strictly as the chosen encoding, the output is still verified to hold exactly
+the same text, and a failed backup still stops the conversion.
+
+The choice applies only to the files you tick, and the button says how many. A batch can
+easily hold refused files in different encodings — Cyrillic in koi8-r beside French in
+windows-1252 — and one answer settles only the files it was given about. Imposing it on
+the rest would repeat, one level up, the mistake the refusal exists to prevent.
+
+### One policy engine
+
+The GUI and the CLI ask the same question of the same code:
+
+```
+detection / explicit source → classification → PlannedAction → CLI, GUI, plan
+```
+
+[`ConversionPolicy`](sources/EncodingChecker/ConversionPolicy.cs) decides; every surface
+acts on that decision rather than reaching its own. A missing classification is an
+internal error, never a safe state: an entry that reaches a conversion or a plan without
+one is refused or raises, rather than being treated as unambiguous.
+
+EC also counts how often it works out an encoding, and asserts in its test suite that a
+file is never examined twice — once when scanned, and never again between a decision being
+approved and carried out. Applying a plan, and confirming a GUI conversion, do no
+detection at all.
 
 ## Command-line usage
 
@@ -219,8 +279,13 @@ These are the guarantees the implementation actually provides.
   opt-in, since a script can keep the report.
 - A conversion whose source encoding cannot be determined from the file's own
   bytes is refused rather than guessed at, when the competing encodings would
-  produce different text. `-From` overrides the detection, not the conversion
-  safeguards. See [Ambiguous encodings](#ambiguous-encodings-and--from).
+  produce different text. `-From`, and the GUI's source-encoding selection,
+  override the detection, not the conversion safeguards.
+  See [Ambiguous encodings](#ambiguous-encodings-and--from).
+  <br>That decision is made in one place for every surface, so the GUI and the
+  CLI cannot diverge on what is safe. They previously could, and did: the
+  classification ran only during a Convert-mode scan, the GUI scans in Detect
+  mode, and so the GUI converted the files the CLI refused.
 - A plan written by `-Plan` is bound to the SHA-256 of every file it schedules,
   to the directory those files are under, and to the conversion behaviour it was
   approved under. `-Apply` verifies all of them before writing anything and

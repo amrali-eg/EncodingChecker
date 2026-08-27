@@ -313,7 +313,9 @@ internal static class Program
                     TargetEncoding = plan.TargetEncoding,
                     TargetHasBom = plan.TargetHasBom,
                     // The plan already settled this. Re-deriving it would be the second
-                    // detection pass the plan exists to avoid.
+                    // detection pass the plan exists to avoid; carrying the decision
+                    // across is what tells the engine not to classify again.
+                    Action = f.Action,
                     Ambiguity = f.Ambiguity,
                     AmbiguityReason = f.AmbiguityReason,
                     CompetingEncodings = f.CompetingEncodings,

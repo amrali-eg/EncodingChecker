@@ -207,13 +207,15 @@ internal sealed record ConversionPlan
 
         foreach (ConversionReportEntry entry in entries)
         {
-            PlannedAction action = entry.Result switch
-            {
-                ConversionRowResult.Unchanged => PlannedAction.Unchanged,
-                ConversionRowResult.Skipped => PlannedAction.Skip,
-                ConversionRowResult.Error => PlannedAction.Refuse,
-                _ => PlannedAction.Convert,
-            };
+            // Taken from the decision itself rather than re-derived from the row result,
+            // which cannot tell a refusal apart from a conversion that failed. An
+            // undecided entry is a caller that skipped the policy, and planning a
+            // conversion nobody decided on is the failure this whole mechanism exists to
+            // prevent - so it is raised, not defaulted.
+            PlannedAction action = entry.Action
+                ?? throw new InvalidOperationException(
+                    $"'{entry.FilePath}' reached a conversion plan without a decision. "
+                    + "Entries must go through a conversion pass before being planned.");
 
             string hash;
             long size;
@@ -232,11 +234,18 @@ internal sealed record ConversionPlan
                 action = PlannedAction.Refuse;
             }
 
+            // What the conversion will actually read the file as, which is not always
+            // the scan's original answer: a user may have named the encoding since.
+            ScanEngine.ParseCharsetLabel(
+                entry.EffectiveSourceLabel,
+                out string sourceCharset,
+                out bool sourceHasBom);
+
             int codePage = 0;
 
             try
             {
-                codePage = Encoding.GetEncoding(entry.SourceEncoding).CodePage;
+                codePage = Encoding.GetEncoding(sourceCharset).CodePage;
             }
             catch (ArgumentException)
             {
@@ -249,11 +258,14 @@ internal sealed record ConversionPlan
                 Size = size,
                 Sha256 = hash,
                 Action = action,
-                SourceEncoding = entry.SourceEncoding,
+                SourceEncoding = sourceCharset,
                 SourceCodePage = codePage,
-                SourceHasBom = entry.SourceHasBom,
+                SourceHasBom = sourceHasBom,
                 SourceWasSpecified = entry.SourceEncodingWasSpecified,
-                Ambiguity = entry.Ambiguity,
+                Ambiguity = entry.Ambiguity
+                    ?? throw new InvalidOperationException(
+                        $"'{entry.FilePath}' reached a conversion plan without being "
+                        + "classified."),
                 AmbiguityReason = entry.AmbiguityReason,
                 CompetingEncodings = entry.CompetingEncodings,
                 Reason = string.IsNullOrEmpty(entry.Diagnostic) ? null : entry.Diagnostic,

@@ -171,6 +171,10 @@ internal static class TextEncoding
 
         buffer = buffer[..bytesToExamine];
 
+        // Every detection route funnels through here, so this is the one place that has
+        // to record it. See DetectionCounters for why the count exists.
+        DetectionCounters.RecordDetection();
+
         // Reject high-entropy data as likely binary.
         if (buffer.Length >= MinimumEntropyProbeBytes &&
             BinaryEntropy(buffer) > BinaryEntropyThreshold)

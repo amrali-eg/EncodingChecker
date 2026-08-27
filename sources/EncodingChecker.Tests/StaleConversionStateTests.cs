@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 
 namespace EncodingChecker.Tests;
 
@@ -38,6 +38,11 @@ public sealed class StaleConversionStateTests : IDisposable
             SourceHasBom = sourceHasBom,
             TargetEncoding = sourceEncoding,
             TargetHasBom = sourceHasBom,
+
+            // These name the source encoding rather than having it detected, which is
+            // what -From means. Without saying so, the ambiguity gate correctly refuses
+            // single-byte content whose encoding its bytes do not identify.
+            SourceEncodingWasSpecified = true,
         };
 
     private static ConversionReportEntry Convert(

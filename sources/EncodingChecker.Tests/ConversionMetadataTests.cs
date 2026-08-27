@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 
 namespace EncodingChecker.Tests;
@@ -41,6 +41,11 @@ public sealed class ConversionMetadataTests : IDisposable
             SourceHasBom = false,
             TargetEncoding = sourceCharset,
             TargetHasBom = false,
+
+            // These name the source encoding rather than having it detected, which is
+            // what -From means. Without saying so, the ambiguity gate correctly refuses
+            // single-byte content whose encoding its bytes do not identify.
+            SourceEncodingWasSpecified = true,
         };
 
         ScanEngine.ConvertFiles(
