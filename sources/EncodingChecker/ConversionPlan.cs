@@ -262,7 +262,10 @@ internal sealed record ConversionPlan
                 SourceCodePage = codePage,
                 SourceHasBom = sourceHasBom,
                 SourceWasSpecified = entry.SourceEncodingWasSpecified,
-                Ambiguity = entry.Ambiguity,
+                Ambiguity = entry.Ambiguity
+                    ?? throw new InvalidOperationException(
+                        $"'{entry.FilePath}' reached a conversion plan without being "
+                        + "classified."),
                 AmbiguityReason = entry.AmbiguityReason,
                 CompetingEncodings = entry.CompetingEncodings,
                 Reason = string.IsNullOrEmpty(entry.Diagnostic) ? null : entry.Diagnostic,

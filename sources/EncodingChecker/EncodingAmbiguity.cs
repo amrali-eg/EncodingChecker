@@ -224,6 +224,8 @@ internal static class EncodingAmbiguity
 
     internal static AmbiguityAnalysis Analyze(ReadOnlySpan<byte> sample, Encoding detected)
     {
+        DetectionCounters.RecordClassification();
+
         ArgumentNullException.ThrowIfNull(detected);
 
         if (sample.Length > SampleBytes)

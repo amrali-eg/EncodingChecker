@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
@@ -27,6 +27,7 @@ internal sealed class ConversionConfirmationForm : Form
     private readonly ConversionPlan _plan;
     private readonly ComboBox _sourceChoice = new();
     private readonly Button _resolve = new();
+    private ListView? _refusedList;
 
     /// <summary>
     /// The encoding the user chose for the refused files, or <see langword="null"/> if
@@ -38,6 +39,17 @@ internal sealed class ConversionConfirmationForm : Form
     /// safeguard still applies to the files it is used for.
     /// </remarks>
     internal string? ChosenSourceEncoding { get; private set; }
+
+    /// <summary>
+    /// The files <see cref="ChosenSourceEncoding"/> applies to, as full paths.
+    /// </summary>
+    /// <remarks>
+    /// A subset, not all of them, because a batch can hold refused files written in
+    /// different encodings - Cyrillic in koi8-r beside French in windows-1252 - and one
+    /// answer settles only the files it was given about. Imposing it on the rest would
+    /// repeat the mistake the refusal exists to prevent, one level up.
+    /// </remarks>
+    internal IReadOnlyList<string> ChosenFiles { get; private set; } = [];
 
     internal ConversionConfirmationForm(ConversionPlan plan)
     {
@@ -141,16 +153,20 @@ internal sealed class ConversionConfirmationForm : Form
             MaximumSize = new Size(620, 0),
             ForeColor = Color.FromArgb(150, 40, 0),
             Text =
-                $"The source encoding of {refused.Count} file(s) could not be determined "
-                + "uniquely. More than one encoding fits the bytes, and they produce "
-                + "different text, so converting would pick one reading without saying "
-                + "so. No changes will be made to these files.",
+                $"{refused.Count} file(s) need an explicit source encoding. More than "
+                + "one encoding fits their bytes, and those encodings produce different "
+                + "text, so converting would pick one reading without saying so. No "
+                + "changes will be made to them."
+                + Environment.NewLine + Environment.NewLine
+                + "Untick any that are not in the encoding you choose - the files here "
+                + "may well be in different ones.",
         };
 
         var list = new ListView
         {
             View = View.Details,
             FullRowSelect = true,
+            CheckBoxes = true,
             Height = 120,
             Dock = DockStyle.Top,
         };
@@ -169,8 +185,15 @@ internal sealed class ConversionConfirmationForm : Form
                 + (file.CompetingEncodings.Count > 6
                     ? $", and {file.CompetingEncodings.Count - 6} more"
                     : string.Empty),
-            ]));
+            ])
+            {
+                Checked = true,
+                Tag = _plan.ResolvePath(file),
+            });
         }
+
+        _refusedList = list;
+        list.ItemChecked += (_, _) => UpdateScopeLabel();
 
         var chooser = new FlowLayoutPanel
         {
@@ -183,7 +206,7 @@ internal sealed class ConversionConfirmationForm : Form
         {
             AutoSize = true,
             Padding = new Padding(0, 6, 0, 0),
-            Text = "If you know which encoding these files are, choose it:",
+            Text = "Source encoding for the ticked files:",
         });
 
         _sourceChoice.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -196,18 +219,18 @@ internal sealed class ConversionConfirmationForm : Form
             _sourceChoice.Items.Add(charset);
 
         _sourceChoice.SelectedIndex = 0;
-        _sourceChoice.SelectedIndexChanged += (_, _) =>
-            _resolve.Enabled = _sourceChoice.SelectedIndex > 0;
+        _sourceChoice.SelectedIndexChanged += (_, _) => UpdateScopeLabel();
 
-        _resolve.Text = "Use this encoding";
         _resolve.AutoSize = true;
-        _resolve.Enabled = false;
         _resolve.Click += (_, _) =>
         {
             ChosenSourceEncoding = (string)_sourceChoice.SelectedItem!;
+            ChosenFiles = TickedFiles();
             DialogResult = DialogResult.Retry;
             Close();
         };
+
+        UpdateScopeLabel();
 
         chooser.Controls.Add(_sourceChoice);
         chooser.Controls.Add(_resolve);
@@ -233,6 +256,28 @@ internal sealed class ConversionConfirmationForm : Form
         explanation.Dock = DockStyle.Top;
 
         return panel;
+    }
+
+    /// <summary>The refused files currently ticked, as full paths.</summary>
+    private List<string> TickedFiles() =>
+    [
+        .. (_refusedList?.CheckedItems.Cast<ListViewItem>()
+            ?? Enumerable.Empty<ListViewItem>())
+            .Select(i => i.Tag as string)
+            .Where(p => p is not null)
+            .Select(p => p!)
+    ];
+
+    /// <summary>
+    /// Keeps the button saying exactly how many files the choice would apply to, so the
+    /// scope of the answer is never something the user has to infer.
+    /// </summary>
+    private void UpdateScopeLabel()
+    {
+        int ticked = _refusedList?.CheckedItems.Count ?? 0;
+
+        _resolve.Text = $"Use this encoding for {ticked} file(s)";
+        _resolve.Enabled = ticked > 0 && _sourceChoice.SelectedIndex > 0;
     }
 
     private Control BuildButtons()

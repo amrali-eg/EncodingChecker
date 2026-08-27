@@ -441,16 +441,23 @@ internal static class ScanEngine
         // be the second detection pass a plan exists to avoid, and its answer, not this
         // one, is what the user approved. The policy below still re-asserts the gate
         // from what the plan recorded.
-        if (entry.Action is null && !entry.SourceEncodingWasSpecified)
+        if (entry.SourceEncodingWasSpecified)
+        {
+            // Recorded rather than left unset: there is nothing ambiguous about an answer
+            // somebody gave, and that is a classification, not the absence of one.
+            entry.Ambiguity = AmbiguityClass.Unambiguous;
+            entry.AmbiguityReason = AmbiguityReason.ExplicitlySpecified;
+            entry.CompetingEncodings = [];
+        }
+        else if (entry.Action is null)
         {
             AmbiguityAnalysis? analysis = AnalyzeAmbiguity(path, sourceEncoding);
 
-            if (analysis is not null)
-            {
-                entry.Ambiguity = analysis.Class;
-                entry.AmbiguityReason = analysis.Reason;
-                entry.CompetingEncodings = analysis.CompetingCandidates;
-            }
+            // A file with no bytes to examine has nothing that could be misread, so this
+            // is an answer and not a failure to reach one.
+            entry.Ambiguity = analysis?.Class ?? AmbiguityClass.Unambiguous;
+            entry.AmbiguityReason = analysis?.Reason ?? AmbiguityReason.SingleCandidate;
+            entry.CompetingEncodings = analysis?.CompetingCandidates ?? [];
         }
 
         PlannedAction action = ConversionPolicy.Decide(

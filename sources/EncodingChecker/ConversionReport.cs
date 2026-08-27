@@ -49,13 +49,17 @@ internal sealed class ConversionReportEntry
     internal string? CurrentCharsetLabel { get; set; }
 
     /// <summary>
-    /// How far this file's bytes identify the encoding that wrote them, decided during
-    /// detection. Defaults to <see cref="AmbiguityClass.Unambiguous"/>, which is correct
-    /// for a caller that supplies the source encoding rather than having it detected:
-    /// there is nothing ambiguous about an answer somebody gave.
+    /// How far this file's bytes identify the encoding that wrote them, or
+    /// <see langword="null"/> while nothing has looked.
     /// Internal state; not included in CSV output.
     /// </summary>
-    internal AmbiguityClass Ambiguity { get; set; } = AmbiguityClass.Unambiguous;
+    /// <remarks>
+    /// Nullable because "not classified" and "classified as unambiguous" are different
+    /// facts, and defaulting the first to the second is how the GUI came to convert files
+    /// the CLI refuses: its entries were never classified, and the gate read the default
+    /// as an answer. A missing classification is an internal error, never a safe state.
+    /// </remarks>
+    internal AmbiguityClass? Ambiguity { get; set; }
 
     /// <summary>
     /// Encodings that read this file differently from the one detected. Empty unless

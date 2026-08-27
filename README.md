@@ -55,16 +55,38 @@ The conversion that runs is the one shown. Nothing is detected a second time bet
 confirmation and the writing, so the dialog cannot describe one set of conclusions while
 a different set is carried out — the same property `-Apply` has.
 
-When files are refused, the dialog names the encodings actually in conflict and offers the
-one thing that resolves it: saying which encoding they are. That selection is the GUI's
-`-From`. It replaces detection for those files and nothing else — the bytes must still
-decode strictly as the chosen encoding, the output is still verified to hold exactly the
-same text, and a failed backup still stops the conversion.
+If the files change between the confirmation and the writing, **nothing is converted** —
+the same all-or-nothing check `-Apply` makes, for the same reason: a person reading a
+dialog takes time, and what they approved was the files as they were.
 
-The GUI and the CLI ask the same question of the same code. There is one policy engine
-([`ConversionPolicy`](sources/EncodingChecker/ConversionPolicy.cs)); detection or an
-explicit source produces a classification, the classification produces an action, and
-every surface acts on that action rather than reaching its own conclusion.
+When files are refused, the dialog lists them with the encodings actually in conflict and
+offers the one thing that resolves it: saying which encoding they are. That selection is
+the GUI's `-From`. It replaces detection for those files and nothing else — the bytes must
+still decode strictly as the chosen encoding, the output is still verified to hold exactly
+the same text, and a failed backup still stops the conversion.
+
+The choice applies only to the files you tick, and the button says how many. A batch can
+easily hold refused files in different encodings — Cyrillic in koi8-r beside French in
+windows-1252 — and one answer settles only the files it was given about. Imposing it on
+the rest would repeat, one level up, the mistake the refusal exists to prevent.
+
+### One policy engine
+
+The GUI and the CLI ask the same question of the same code:
+
+```
+detection / explicit source → classification → PlannedAction → CLI, GUI, plan
+```
+
+[`ConversionPolicy`](sources/EncodingChecker/ConversionPolicy.cs) decides; every surface
+acts on that decision rather than reaching its own. A missing classification is an
+internal error, never a safe state: an entry that reaches a conversion or a plan without
+one is refused or raises, rather than being treated as unambiguous.
+
+EC also counts how often it works out an encoding, and asserts in its test suite that a
+file is never examined twice — once when scanned, and never again between a decision being
+approved and carried out. Applying a plan, and confirming a GUI conversion, do no
+detection at all.
 
 ## Command-line usage
 

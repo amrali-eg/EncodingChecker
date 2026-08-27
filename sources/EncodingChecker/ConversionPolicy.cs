@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace EncodingChecker;
@@ -32,7 +32,7 @@ internal static class ConversionPolicy
         bool sourceHasBom,
         string targetCharset,
         bool targetHasBom,
-        AmbiguityClass ambiguity,
+        AmbiguityClass? ambiguity,
         IReadOnlyList<string> competingEncodings,
         out string? reason)
     {
@@ -62,6 +62,19 @@ internal static class ConversionPolicy
             return PlannedAction.Refuse;
         }
 
+        // Nobody looked. That is a bug in the caller, not a property of the file, and it
+        // must not read as permission - which is exactly how the GUI's conversions were
+        // being allowed. Refused rather than thrown because this runs inside a parallel
+        // conversion loop, where refusing leaves every file intact and throwing would
+        // take down a run mid-flight.
+        if (ambiguity is null)
+        {
+            reason = "This file was never classified, so whether converting it would "
+                     + "change its text is unknown. No conversion was performed. This is "
+                     + "an internal error; please report it.";
+            return PlannedAction.Refuse;
+        }
+
         return PlannedAction.Convert;
     }
 
@@ -85,6 +98,6 @@ internal static class ConversionPolicy
     /// but whose candidate readings all agree on the text - plain ASCII being the common
     /// case - is not something to warn about; a file whose candidates disagree is.
     /// </remarks>
-    internal static bool NeedsDisclosure(AmbiguityClass ambiguity) =>
+    internal static bool NeedsDisclosure(AmbiguityClass? ambiguity) =>
         ambiguity == AmbiguityClass.TextEquivalent;
 }

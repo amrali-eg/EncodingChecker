@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Windows.Forms;
 
 namespace EncodingChecker.Tests;
@@ -129,7 +129,7 @@ public sealed class ConversionConfirmationFormTests : IDisposable
         {
             using var form = new ConversionConfirmationForm(plan);
 
-            Assert.DoesNotContain("could not be determined", AllText(form));
+            Assert.DoesNotContain("need an explicit source encoding", AllText(form));
         });
     }
 
@@ -151,7 +151,7 @@ public sealed class ConversionConfirmationFormTests : IDisposable
 
             string text = AllText(form);
 
-            Assert.Contains("could not be determined", text);
+            Assert.Contains("need an explicit source encoding", text);
             Assert.Contains("Nothing to convert", text);
             Assert.DoesNotContain("Convert 1 file", text);
         });
@@ -190,6 +190,51 @@ public sealed class ConversionConfirmationFormTests : IDisposable
 
             Assert.True(chooser.Items.Count > 1);
             Assert.Contains("windows-1252", chooser.Items.Cast<string>());
+        });
+    }
+
+    [Fact]
+    public void ItMakesTheScopeOfAnEncodingChoiceUnmistakable()
+    {
+        // The button says how many files the choice would apply to, and the count moves
+        // with the ticks. A user must never have to infer how far their answer reaches.
+        Write("french.txt", "Le café était déjà prêt", "windows-1252");
+        Write("russian.txt", "Привет мир, это русский текст", "koi8-r");
+
+        ConversionPlan plan = Plan();
+
+        Assert.Equal(2, plan.Files.Count(f => f.Action == PlannedAction.Refuse));
+
+        OnUiThread(() =>
+        {
+            using var form = new ConversionConfirmationForm(plan);
+
+            // ListView caches check state until it has a window handle, and only raises
+            // ItemChecked once it does. Nothing here pumps messages; the handle is enough.
+            form.CreateControl();
+            _ = form.Handle;
+
+            ListView list = Assert.Single(Descendants(form).OfType<ListView>());
+
+            list.CreateControl();
+            _ = list.Handle;
+
+            // Everything the dialog asked about starts ticked, and the button says so.
+            Assert.Equal(2, list.CheckedItems.Count);
+            Assert.Contains("for 2 file(s)", AllText(form));
+
+            list.Items[0].Checked = false;
+
+            Assert.Contains("for 1 file(s)", AllText(form));
+
+            // And with none ticked there is nothing to apply, so it cannot be pressed.
+            list.Items[1].Checked = false;
+
+            Button apply = Assert.Single(
+                Descendants(form).OfType<Button>(),
+                b => b.Text.StartsWith("Use this encoding"));
+
+            Assert.False(apply.Enabled);
         });
     }
 
