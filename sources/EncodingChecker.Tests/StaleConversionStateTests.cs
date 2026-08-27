@@ -52,7 +52,7 @@ public sealed class StaleConversionStateTests : IDisposable
         bool whatIf = false,
         bool backup = false)
     {
-        var completed = new List<ConversionReportEntry>();
+        var completed = new EntrySink();
 
         ScanEngine.ConvertFiles(
             [entry],

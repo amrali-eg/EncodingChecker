@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 
 namespace EncodingChecker.Tests;
 
@@ -53,7 +53,7 @@ public sealed class MultibyteRoundTripTests : IDisposable
         string targetCharset,
         bool targetWriteBom)
     {
-        var completed = new List<ConversionReportEntry>();
+        var completed = new EntrySink();
 
         ScanEngine.ConvertFiles(
             [entry],

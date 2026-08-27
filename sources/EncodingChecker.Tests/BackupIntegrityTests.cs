@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.RegularExpressions;
 
 namespace EncodingChecker.Tests;
@@ -41,7 +41,7 @@ public sealed class BackupIntegrityTests : IDisposable
             Backup = true,
         };
 
-        var entries = new List<ConversionReportEntry>();
+        var entries = new EntrySink();
         ScanEngine.ScanDirectory(options, entries.Add, CancellationToken.None);
 
         ConversionReportEntry entry = Assert.Single(entries);
@@ -76,7 +76,7 @@ public sealed class BackupIntegrityTests : IDisposable
             Backup = true,
         };
 
-        var entries = new List<ConversionReportEntry>();
+        var entries = new EntrySink();
         ScanEngine.ScanDirectory(options, entries.Add, CancellationToken.None);
 
         Assert.Equal(ConversionRowResult.Converted, Assert.Single(entries).Result);
@@ -105,7 +105,7 @@ public sealed class BackupIntegrityTests : IDisposable
             Backup = true,
         };
 
-        var entries = new List<ConversionReportEntry>();
+        var entries = new EntrySink();
         ScanEngine.ScanDirectory(options, entries.Add, CancellationToken.None);
 
         Assert.Equal(ConversionRowResult.Converted, Assert.Single(entries).Result);
@@ -135,7 +135,7 @@ public sealed class BackupIntegrityTests : IDisposable
             Backup = true,
         };
 
-        var firstRun = new List<ConversionReportEntry>();
+        var firstRun = new EntrySink();
         ScanEngine.ScanDirectory(options, firstRun.Add, CancellationToken.None);
         Assert.Equal(ConversionRowResult.Converted, Assert.Single(firstRun).Result);
 
@@ -145,7 +145,7 @@ public sealed class BackupIntegrityTests : IDisposable
 
         // Re-running over the same directory (now containing convert-me.txt.bak) must
         // still see only the one real source file, not the backup it just wrote.
-        var secondRun = new List<ConversionReportEntry>();
+        var secondRun = new EntrySink();
         ScanEngine.ScanDirectory(options, secondRun.Add, CancellationToken.None);
 
         ConversionReportEntry onlyEntry = Assert.Single(secondRun);
@@ -197,7 +197,7 @@ public sealed class BackupIntegrityTests : IDisposable
             Backup = true,
         };
 
-        var entries = new List<ConversionReportEntry>();
+        var entries = new EntrySink();
         ScanEngine.ScanDirectory(options, entries.Add, CancellationToken.None);
 
         ConversionReportEntry entry = Assert.Single(entries);
@@ -226,7 +226,7 @@ public sealed class BackupIntegrityTests : IDisposable
             Backup = true,
         };
 
-        var entries = new List<ConversionReportEntry>();
+        var entries = new EntrySink();
         ScanEngine.ScanDirectory(options, entries.Add, CancellationToken.None);
 
         Assert.Equal(ConversionRowResult.Unchanged, Assert.Single(entries).Result);

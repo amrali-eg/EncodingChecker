@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 
 namespace EncodingChecker.Tests;
 
@@ -76,7 +76,7 @@ public sealed class EncodingConversionMatrixTests : IDisposable
             TargetWriteBom = targetHasBom,
         };
 
-        var entries = new List<ConversionReportEntry>();
+        var entries = new EntrySink();
         ScanEngine.ScanDirectory(options, entries.Add, CancellationToken.None);
 
         ConversionReportEntry entry = Assert.Single(entries);
@@ -118,7 +118,7 @@ public sealed class EncodingConversionMatrixTests : IDisposable
             TargetWriteBom = false,
         };
 
-        var entries = new List<ConversionReportEntry>();
+        var entries = new EntrySink();
         ScanEngine.ScanDirectory(options, entries.Add, CancellationToken.None);
 
         ConversionReportEntry entry = Assert.Single(entries);

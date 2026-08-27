@@ -39,7 +39,7 @@ public sealed class ExplicitSourceEncodingTests : IDisposable
 
     private List<ConversionReportEntry> Scan(string? from, bool backup = false)
     {
-        var results = new List<ConversionReportEntry>();
+        var results = new EntrySink();
 
         ScanEngine.ScanDirectory(
             new ScanDirectoryOptions
@@ -56,7 +56,7 @@ public sealed class ExplicitSourceEncodingTests : IDisposable
             results.Add,
             CancellationToken.None);
 
-        return results;
+        return results.ToList();
     }
 
     [Fact]
@@ -139,7 +139,7 @@ public sealed class ExplicitSourceEncodingTests : IDisposable
         byte[] original = Encoding.UTF8.GetBytes("世界 مرحبا");
         File.WriteAllBytes(path, original);
 
-        var results = new List<ConversionReportEntry>();
+        var results = new EntrySink();
 
         ScanEngine.ScanDirectory(
             new ScanDirectoryOptions

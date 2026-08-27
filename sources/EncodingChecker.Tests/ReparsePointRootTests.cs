@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 
 namespace EncodingChecker.Tests;
 
@@ -48,7 +48,7 @@ public sealed class ReparsePointRootTests
                     Action = ScanAction.Detect,
                 };
 
-                var entries = new List<ConversionReportEntry>();
+                var entries = new EntrySink();
 
                 Assert.Throws<ArgumentException>(() =>
                     ScanEngine.ScanDirectory(options, entries.Add, CancellationToken.None));

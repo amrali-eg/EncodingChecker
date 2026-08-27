@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Text;
 
 namespace EncodingChecker.Tests;
@@ -97,7 +97,7 @@ public sealed class ScanEngineValidationTests : IDisposable
             WhatIf = true,
         };
 
-        var entries = new List<ConversionReportEntry>();
+        var entries = new EntrySink();
 
         Assert.ThrowsAny<ArgumentException>(
             () => ScanEngine.ScanDirectory(options, entries.Add, CancellationToken.None));
@@ -145,7 +145,7 @@ public sealed class ScanEngineValidationTests : IDisposable
             Action = ScanAction.Detect,
         };
 
-        var entries = new List<ConversionReportEntry>();
+        var entries = new EntrySink();
         ScanEngine.ScanDirectory(options, entries.Add, CancellationToken.None);
 
         ConversionReportEntry entry = Assert.Single(entries);
@@ -169,7 +169,7 @@ public sealed class ScanEngineValidationTests : IDisposable
             Action = ScanAction.Detect,
         };
 
-        var entries = new List<ConversionReportEntry>();
+        var entries = new EntrySink();
         ScanEngine.ScanDirectory(options, entries.Add, CancellationToken.None);
 
         ConversionReportEntry entry = Assert.Single(entries);
@@ -196,7 +196,7 @@ public sealed class ScanEngineValidationTests : IDisposable
             TargetCharset = "utf-8",
         };
 
-        var scanned = new List<ConversionReportEntry>();
+        var scanned = new EntrySink();
         ScanEngine.ScanDirectory(scanOptions, scanned.Add, CancellationToken.None);
 
         ConversionReportEntry scanEntry = Assert.Single(scanned);
@@ -236,7 +236,7 @@ public sealed class ScanEngineValidationTests : IDisposable
             Action = ScanAction.Detect,
         };
 
-        var entries = new List<ConversionReportEntry>();
+        var entries = new EntrySink();
         ScanEngine.ScanDirectory(options, entries.Add, CancellationToken.None);
 
         ConversionReportEntry entry = Assert.Single(entries);
@@ -319,7 +319,7 @@ public sealed class ScanEngineValidationTests : IDisposable
             },
         };
 
-        var completed = new List<ConversionReportEntry>();
+        var completed = new EntrySink();
         ScanEngine.ConvertFiles(
             entries,
             "utf-8",

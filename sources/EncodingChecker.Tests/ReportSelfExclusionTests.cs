@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Text;
 
 namespace EncodingChecker.Tests;
@@ -45,7 +45,7 @@ public sealed class ReportSelfExclusionTests : IDisposable
         };
 
         // Run 1: the report doesn't exist yet, but the path is already excluded.
-        var firstRun = new List<ConversionReportEntry>();
+        var firstRun = new EntrySink();
         ScanEngine.ScanDirectory(options, firstRun.Add, CancellationToken.None);
         Assert.Equal(sourcePath, Assert.Single(firstRun).FilePath);
 
@@ -53,7 +53,7 @@ public sealed class ReportSelfExclusionTests : IDisposable
 
         // Run 2: the report file now exists in the scanned tree; a broad -Include "*"
         // must still not pick it up, since it's excluded by exact full path.
-        var secondRun = new List<ConversionReportEntry>();
+        var secondRun = new EntrySink();
         ScanEngine.ScanDirectory(options, secondRun.Add, CancellationToken.None);
         Assert.Equal(sourcePath, Assert.Single(secondRun).FilePath);
     }
@@ -84,13 +84,13 @@ public sealed class ReportSelfExclusionTests : IDisposable
                 Action = ScanAction.Detect,
             };
 
-            var firstRun = new List<ConversionReportEntry>();
+            var firstRun = new EntrySink();
             ScanEngine.ScanDirectory(options, firstRun.Add, CancellationToken.None);
             Assert.Single(firstRun);
 
             File.WriteAllText(reportPath, "File,Encoding,BOM,Target,TargetBOM,Result\r\n", new UTF8Encoding(false));
 
-            var secondRun = new List<ConversionReportEntry>();
+            var secondRun = new EntrySink();
             ScanEngine.ScanDirectory(options, secondRun.Add, CancellationToken.None);
 
             ConversionReportEntry onlyEntry = Assert.Single(secondRun);

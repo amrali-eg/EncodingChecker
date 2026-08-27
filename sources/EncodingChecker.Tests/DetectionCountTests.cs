@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 
 namespace EncodingChecker.Tests;
 
@@ -54,7 +54,7 @@ public sealed class DetectionCountTests : IDisposable
 
     private List<ConversionReportEntry> View()
     {
-        var scanned = new List<ConversionReportEntry>();
+        var scanned = new EntrySink();
 
         ScanEngine.ScanDirectory(
             new ScanDirectoryOptions
@@ -67,7 +67,7 @@ public sealed class DetectionCountTests : IDisposable
             scanned.Add,
             CancellationToken.None);
 
-        return scanned;
+        return scanned.ToList();
     }
 
     [Fact]

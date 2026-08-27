@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 
 namespace EncodingChecker.Tests;
 
@@ -218,7 +218,7 @@ public sealed class StrictFallbackEnforcementTests : IDisposable
             TargetHasBom = false,
         };
 
-        var completed = new List<ConversionReportEntry>();
+        var completed = new EntrySink();
 
         ScanEngine.ConvertFiles(
             [entry],

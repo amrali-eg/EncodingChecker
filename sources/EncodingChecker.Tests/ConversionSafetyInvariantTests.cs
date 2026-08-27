@@ -132,7 +132,7 @@ public sealed class ConversionSafetyInvariantTests : IDisposable
             TargetHasBom = false,
         };
 
-        var completed = new List<ConversionReportEntry>();
+        var completed = new EntrySink();
         ScanEngine.ConvertFiles(
             [entry], "utf-8", targetWriteBom: false,
             ScanEngine.DefaultMaxParallelism,
@@ -162,7 +162,7 @@ public sealed class ConversionSafetyInvariantTests : IDisposable
             TargetHasBom = false,
         };
 
-        var completed = new List<ConversionReportEntry>();
+        var completed = new EntrySink();
         ScanEngine.ConvertFiles(
             [entry], "utf-8", targetWriteBom: false,
             ScanEngine.DefaultMaxParallelism,
@@ -282,7 +282,7 @@ public sealed class ConversionSafetyInvariantTests : IDisposable
             TargetHasBom = false,
         };
 
-        var completed = new List<ConversionReportEntry>();
+        var completed = new EntrySink();
         ScanEngine.ConvertFiles(
             [entry], target, targetWriteBom: false,
             ScanEngine.DefaultMaxParallelism,

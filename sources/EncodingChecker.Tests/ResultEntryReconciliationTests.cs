@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Windows.Forms;
 
 namespace EncodingChecker.Tests;
@@ -220,7 +220,7 @@ public sealed class ResultEntryReconciliationTests : IDisposable
             TargetEncoding = "utf-8",
         };
 
-        var completed = new List<ConversionReportEntry>();
+        var completed = new EntrySink();
 
         ScanEngine.ConvertFiles(
             [convertsEntry, failsEntry],
