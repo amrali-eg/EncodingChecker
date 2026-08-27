@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 
 namespace EncodingChecker.Tests;
 
@@ -37,9 +37,9 @@ public sealed class ConversionIdempotencyTests : IDisposable
             TargetWriteBom = writeBom,
         };
 
-        var entries = new List<ConversionReportEntry>();
+        var entries = new EntrySink();
         ScanEngine.ScanDirectory(options, entries.Add, CancellationToken.None);
-        return entries;
+        return entries.ToList();
     }
 
     [Theory]

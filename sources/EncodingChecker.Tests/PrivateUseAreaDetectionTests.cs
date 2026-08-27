@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 
 namespace EncodingChecker.Tests;
 
@@ -155,7 +155,7 @@ public sealed class PrivateUseAreaDetectionTests
                 TargetWriteBom = true,
             };
 
-            var entries = new List<ConversionReportEntry>();
+            var entries = new EntrySink();
             ScanEngine.ScanDirectory(options, entries.Add, CancellationToken.None);
 
             ConversionReportEntry entry = Assert.Single(entries);

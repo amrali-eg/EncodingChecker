@@ -64,7 +64,7 @@ public sealed class ConversionConfirmationFormTests : IDisposable
     /// <summary>A plan over whatever is currently in the directory.</summary>
     private ConversionPlan Plan(bool backup = true, string target = "utf-8")
     {
-        var entries = new List<ConversionReportEntry>();
+        var entries = new EntrySink();
 
         ScanEngine.ScanDirectory(
             new ScanDirectoryOptions

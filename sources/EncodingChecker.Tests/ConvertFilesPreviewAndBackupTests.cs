@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Text;
 
 namespace EncodingChecker.Tests;
@@ -47,7 +47,7 @@ public sealed class ConvertFilesPreviewAndBackupTests : IDisposable
         string path = Path.Combine(_root, "f.txt");
         File.WriteAllText(path, TestContent.Ascii, Encoding.ASCII);
 
-        var completed = new List<ConversionReportEntry>();
+        var completed = new EntrySink();
         ScanEngine.ConvertFiles(
             [MakeAsciiEntry(path)],
             "utf-8",
@@ -69,7 +69,7 @@ public sealed class ConvertFilesPreviewAndBackupTests : IDisposable
         File.WriteAllText(path, TestContent.Ascii, Encoding.ASCII);
         byte[] originalBytes = File.ReadAllBytes(path);
 
-        var completed = new List<ConversionReportEntry>();
+        var completed = new EntrySink();
         ScanEngine.ConvertFiles(
             [MakeAsciiEntry(path)],
             "utf-8",
@@ -94,7 +94,7 @@ public sealed class ConvertFilesPreviewAndBackupTests : IDisposable
         byte[] originalBytes = File.ReadAllBytes(path);
         DateTime originalWriteTime = File.GetLastWriteTimeUtc(path);
 
-        var completed = new List<ConversionReportEntry>();
+        var completed = new EntrySink();
         ScanEngine.ConvertFiles(
             [MakeAsciiEntry(path)],
             "utf-8",
@@ -129,7 +129,7 @@ public sealed class ConvertFilesPreviewAndBackupTests : IDisposable
             TargetEncoding = "utf-8",
         };
 
-        var completed = new List<ConversionReportEntry>();
+        var completed = new EntrySink();
         ScanEngine.ConvertFiles(
             [entry],
             "utf-8",
@@ -205,7 +205,7 @@ public sealed class ConvertFilesPreviewAndBackupTests : IDisposable
         File.WriteAllText(path, TestContent.Ascii, Encoding.ASCII);
         byte[] originalBytes = File.ReadAllBytes(path);
 
-        var completed = new List<ConversionReportEntry>();
+        var completed = new EntrySink();
         ScanEngine.ConvertFiles(
             [MakeAsciiEntry(path)],
             "utf-8",

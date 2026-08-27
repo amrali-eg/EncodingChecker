@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Text;
 
 namespace EncodingChecker.Tests;
@@ -43,7 +43,7 @@ public sealed class WhatIfSafetyTests : IDisposable
             Backup = true, // WhatIf must take precedence and skip this entirely.
         };
 
-        var entries = new List<ConversionReportEntry>();
+        var entries = new EntrySink();
         ScanEngine.ScanDirectory(options, entries.Add, CancellationToken.None);
 
         ConversionReportEntry entry = Assert.Single(entries);
@@ -70,7 +70,7 @@ public sealed class WhatIfSafetyTests : IDisposable
             WhatIf = true,
         };
 
-        var entries = new List<ConversionReportEntry>();
+        var entries = new EntrySink();
         ScanEngine.ScanDirectory(options, entries.Add, CancellationToken.None);
 
         ConversionReportEntry entry = Assert.Single(entries);

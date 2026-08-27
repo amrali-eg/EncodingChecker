@@ -45,7 +45,7 @@ public sealed class ConversionOrchestrationTests : IDisposable
     /// <summary>The rows the GUI's View button produces, which Convert then acts on.</summary>
     private List<ConversionReportEntry> View()
     {
-        var scanned = new List<ConversionReportEntry>();
+        var scanned = new EntrySink();
 
         ScanEngine.ScanDirectory(
             new ScanDirectoryOptions
@@ -58,7 +58,7 @@ public sealed class ConversionOrchestrationTests : IDisposable
             scanned.Add,
             CancellationToken.None);
 
-        return scanned;
+        return scanned.ToList();
     }
 
     /// <summary>Everything the GUI's Convert button does, with a scripted user.</summary>
@@ -332,8 +332,15 @@ public sealed class ConversionOrchestrationTests : IDisposable
         OrchestrationResult result = Convert(
             View(),
             Proceed,
-            betweenPlanAndWrite: _ =>
-                File.WriteAllBytes(moving, Encoding.UTF8.GetBytes("changed underneath")));
+            betweenPlanAndWrite: plan =>
+            {
+                // Stated, because it is load-bearing and was once silently false: a file
+                // missing from the plan is a file FindStaleFiles never looks at, so a
+                // dropped entry turns this test's real subject into a pass.
+                Assert.Equal(2, plan.Files.Count);
+
+                File.WriteAllBytes(moving, Encoding.UTF8.GetBytes("changed underneath"));
+            });
 
         Assert.Equal(OrchestrationOutcome.PlanWentStale, result.Outcome);
         Assert.Contains("changed after the conversion was planned", result.Message);

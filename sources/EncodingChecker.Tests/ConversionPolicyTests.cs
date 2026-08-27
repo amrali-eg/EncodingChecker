@@ -44,7 +44,7 @@ public sealed class ConversionPolicyTests : IDisposable
     private List<ConversionReportEntry> ViewThenConvert(
         string target = "utf-8", bool whatIf = false)
     {
-        var scanned = new List<ConversionReportEntry>();
+        var scanned = new EntrySink();
 
         ScanEngine.ScanDirectory(
             new ScanDirectoryOptions
@@ -57,7 +57,7 @@ public sealed class ConversionPolicyTests : IDisposable
             scanned.Add,
             CancellationToken.None);
 
-        var completed = new List<ConversionReportEntry>();
+        var completed = new EntrySink();
 
         ScanEngine.ConvertFiles(
             scanned,
@@ -69,7 +69,7 @@ public sealed class ConversionPolicyTests : IDisposable
             completed.Add,
             CancellationToken.None);
 
-        return completed;
+        return completed.ToList();
     }
 
     [Fact]
@@ -115,7 +115,7 @@ public sealed class ConversionPolicyTests : IDisposable
         Dictionary<string, PlannedAction?> viaGui = ViewThenConvert(whatIf: true)
             .ToDictionary(e => Path.GetFileName(e.FilePath), e => e.Action);
 
-        var viaCli = new List<ConversionReportEntry>();
+        var viaCli = new EntrySink();
 
         ScanEngine.ScanDirectory(
             new ScanDirectoryOptions
@@ -197,7 +197,7 @@ public sealed class ConversionPolicyTests : IDisposable
             TargetHasBom = false,
         };
 
-        var completed = new List<ConversionReportEntry>();
+        var completed = new EntrySink();
 
         ScanEngine.ConvertFiles(
             [entry], "utf-8", targetWriteBom: false,
@@ -228,7 +228,7 @@ public sealed class ConversionPolicyTests : IDisposable
             SourceEncodingWasSpecified = true,
         };
 
-        var completed = new List<ConversionReportEntry>();
+        var completed = new EntrySink();
 
         ScanEngine.ConvertFiles(
             [entry], "utf-8", targetWriteBom: false,
@@ -274,7 +274,7 @@ public sealed class ConversionPolicyTests : IDisposable
 
         ChooseSourceEncoding(entry, "windows-1252");
 
-        var completed = new List<ConversionReportEntry>();
+        var completed = new EntrySink();
 
         ScanEngine.ConvertFiles(
             [entry], "utf-8", targetWriteBom: false,
@@ -300,7 +300,7 @@ public sealed class ConversionPolicyTests : IDisposable
         ConversionReportEntry entry = Assert.Single(ViewThenConvert());
         ChooseSourceEncoding(entry, "koi8-r");
 
-        var completed = new List<ConversionReportEntry>();
+        var completed = new EntrySink();
 
         ScanEngine.ConvertFiles(
             [entry], "utf-8", targetWriteBom: false,
@@ -361,7 +361,7 @@ public sealed class ConversionPolicyTests : IDisposable
 
         ChooseSourceEncoding(entry, "euc-jp");
 
-        var completed = new List<ConversionReportEntry>();
+        var completed = new EntrySink();
 
         ScanEngine.ConvertFiles(
             [entry], "utf-8", targetWriteBom: false,
@@ -385,7 +385,7 @@ public sealed class ConversionPolicyTests : IDisposable
         // A directory where the .bak has to go: the copy cannot succeed.
         Directory.CreateDirectory(path + ".bak");
 
-        var completed = new List<ConversionReportEntry>();
+        var completed = new EntrySink();
 
         ScanEngine.ConvertFiles(
             [entry], "utf-8", targetWriteBom: false,

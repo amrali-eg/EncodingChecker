@@ -238,7 +238,7 @@ public sealed class ConversionMetadataTests : IDisposable
                 TargetHasBom = false,
             };
 
-            var completed = new List<ConversionReportEntry>();
+            var completed = new EntrySink();
             ScanEngine.ConvertFiles(
                 [entry], "utf-8", targetWriteBom: false,
                 ScanEngine.DefaultMaxParallelism,
