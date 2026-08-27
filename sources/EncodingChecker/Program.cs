@@ -102,6 +102,7 @@ internal static class Program
         internal string? From;
         internal string? PlanPath;
         internal string? ApplyPath;
+        internal string? JournalPath;
         internal string? ValidateCharsets;
         internal bool DetectOnly;
         internal string? ReportPath;
@@ -195,6 +196,18 @@ internal static class Program
                    Nothing is modified. -Target, -WhatIf, -Backup,
                    -FailOnChanges, -Quiet, and -Verbose have no effect.
                    Cannot be combined with -Validate.
+
+              Record:
+              [-Journal <path>]
+                   Write a JSON record of the run: for every file, what
+                   its encoding was detected or declared to be, whether
+                   the bytes identified it, which encodings competed,
+                   what EC decided, what it actually did, and the file's
+                   SHA-256 before and after. Refused and skipped files
+                   are included - "why was this not converted?" is the
+                   question a record most often has to answer.
+
+                   Costs one extra read per file, so it is opt-in.
 
               Report:
               [-Report <path>]
@@ -301,6 +314,8 @@ internal static class Program
             return 3;
         }
 
+        DateTime startedUtc = DateTime.UtcNow;
+
         List<ConversionReportEntry> entries =
         [
             .. plan.Files
@@ -371,6 +386,29 @@ internal static class Program
         // Every planned file is accounted for. A file that the plan scheduled but that
         // the run left alone is the interesting case, so it must not disappear into a
         // difference between two totals.
+        if (!string.IsNullOrWhiteSpace(options.JournalPath))
+        {
+            string? journalError = ConversionJournal.FromRun(
+                    completed,
+                    plan.BaseDirectory,
+                    plan.TargetEncoding,
+                    plan.TargetHasBom,
+                    plan.BackupEnabled,
+                    plan.ExplicitSourceEncoding,
+                    surface: "CommandLine",
+                    startedUtc,
+                    appliedPlan: options.ApplyPath)
+                .Save(options.JournalPath!);
+
+            if (journalError != null)
+            {
+                Console.Error.WriteLine(
+                    $"The conversion ran, but the journal could not be written: "
+                    + journalError);
+                failed++;
+            }
+        }
+
         Console.Out.WriteLine(
             $"Applied plan: {Count(ConversionRowResult.Converted)} converted, "
             + $"{Count(ConversionRowResult.Unchanged)} already in the target encoding, "
@@ -462,11 +500,16 @@ internal static class Program
             TargetWriteBom = targetWriteBom,
             WhatIf = options.WhatIf,
             Backup = options.Backup,
+
+            // The original bytes have to be taken before anything overwrites them.
+            CaptureSourceHashes = !string.IsNullOrWhiteSpace(options.JournalPath),
         };
 
         // onEntry fires concurrently, so collect into a ConcurrentBag, then sort by
         // path once scanning finishes for deterministic downstream output.
         var collectedEntries = new ConcurrentBag<ConversionReportEntry>();
+
+        DateTime startedUtc = DateTime.UtcNow;
 
         using var cancellation = new CancellationTokenSource();
 
@@ -524,6 +567,32 @@ internal static class Program
 
         if (options.Verbose)
             PrintVerboseSummary(entries);
+
+        if (!string.IsNullOrWhiteSpace(options.JournalPath))
+        {
+            string? journalError = ConversionJournal.FromRun(
+                    entries,
+                    options.BasePath!,
+                    targetCharset ?? options.Target ?? string.Empty,
+                    targetWriteBom,
+                    options.Backup,
+                    options.From,
+                    surface: "CommandLine",
+                    startedUtc,
+                    appliedPlan: null,
+                    preview: options.WhatIf)
+                .Save(options.JournalPath!);
+
+            if (journalError != null)
+            {
+                // Exit 3, not 1: in Convert mode the files have already been rewritten,
+                // and a conversion nothing recorded is exactly what this option exists
+                // to prevent.
+                Console.Error.WriteLine(
+                    $"Failed to write the journal: {journalError}");
+                return 3;
+            }
+        }
 
         if (!string.IsNullOrEmpty(options.ReportPath))
         {
@@ -708,6 +777,14 @@ internal static class Program
                     }
                     break;
 
+                case "journal":
+                    if (!TryTakeValue(args, ref i, out options.JournalPath))
+                    {
+                        error = "-Journal requires a value.";
+                        return false;
+                    }
+                    break;
+
                 case "apply":
                     if (!TryTakeValue(args, ref i, out options.ApplyPath))
                     {
@@ -794,6 +871,7 @@ internal static class Program
         new(StringComparer.OrdinalIgnoreCase)
         {
             "basepath", "include", "exclude", "target", "from", "plan", "apply",
+            "journal",
             "validate",
             "detectonly", "report", "maxparallelism", "failonchanges",
             "whatif", "backup", "quiet", "verbose",
@@ -878,6 +956,14 @@ internal static class Program
                         + "originals are backed up. Re-run -Plan to change any of them.";
                 return false;
             }
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.JournalPath) &&
+            (options.DetectOnly || !string.IsNullOrWhiteSpace(options.ValidateCharsets)))
+        {
+            error = "-Journal records what a conversion did; it cannot be combined "
+                    + "with -DetectOnly or -Validate. Use -Report for those.";
+            return false;
         }
 
         if (!string.IsNullOrWhiteSpace(options.PlanPath) &&

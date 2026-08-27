@@ -66,6 +66,10 @@ public partial class MainForm : Form
     // actual conversion from preview ("would be converted").
     private bool _convertWasPreview;
 
+    // When the last conversion began, so a journal exported afterwards can say. Null
+    // until one has run: there is nothing to journal before that.
+    private DateTime? _lastConversionStartedUtc;
+
     // Held so the completion handler can read how the run ended, as reported by
     // ConversionOrchestrator: converted, previewed, cancelled, or stopped because the
     // files moved underneath the plan. The worker method is static and writes into it.
@@ -335,7 +339,11 @@ public partial class MainForm : Form
         var saveFileDialog = new SaveFileDialog
         {
             Title = @"Export Conversion Report",
-            Filter = @"CSV files (*.csv)|*.csv",
+
+            // Two records, not two formats of one. The CSV is the results table as
+            // shown; the journal is what EC believed, decided and wrote for every file,
+            // including the ones it refused.
+            Filter = @"CSV files (*.csv)|*.csv|Conversion journal (*.json)|*.json",
             FileName = "Conversion report.csv",
             RestoreDirectory = true,
         };
@@ -343,15 +351,21 @@ public partial class MainForm : Form
         if (saveFileDialog.ShowDialog(this) != DialogResult.OK)
             return;
 
+        var entries =
+            new List<ConversionReportEntry>(lstResults.Items.Count);
+
+        // Tag is always set to the entry when the row is added (ActionWorkerProgressChanged).
+        foreach (ListViewItem item in lstResults.Items)
+            entries.Add((ConversionReportEntry)item.Tag!);
+
+        if (saveFileDialog.FilterIndex == 2)
+        {
+            ExportJournal(entries, saveFileDialog.FileName);
+            return;
+        }
+
         try
         {
-            var entries =
-                new List<ConversionReportEntry>(lstResults.Items.Count);
-
-            // Tag is always set to the entry when the row is added (ActionWorkerProgressChanged).
-            foreach (ListViewItem item in lstResults.Items)
-                entries.Add((ConversionReportEntry)item.Tag!);
-
             using var writer =
                 new StreamWriter(saveFileDialog.FileName, false, Encoding.UTF8);
 
@@ -364,6 +378,41 @@ public partial class MainForm : Form
                 "Failed to export the csv report: {0}",
                 ex.Message);
         }
+    }
+
+    /// <summary>Writes the record of what the last conversion actually did.</summary>
+    private void ExportJournal(List<ConversionReportEntry> entries, string path)
+    {
+        if (_lastConversionStartedUtc is not { } startedUtc)
+        {
+            ShowWarning(
+                "There is no conversion to journal yet. Run Convert first; a journal "
+                + "records what a conversion did, which a detection scan has not.");
+
+            return;
+        }
+
+        ScanEngine.ParseCharsetLabel(
+            (string)lstConvert.SelectedItem!,
+            out string targetCharset,
+            out bool targetWriteBom);
+
+        string? error = ConversionJournal.FromRun(
+                entries,
+                lstBaseDirectory.Text,
+                targetCharset,
+                targetWriteBom,
+                chkCreateBackup.Checked,
+                explicitSource: entries.Count > 0
+                                && entries.TrueForAll(e => e.SourceEncodingWasSpecified)
+                    ? entries[0].ResolvedSourceLabel
+                    : null,
+                surface: "Gui",
+                startedUtc)
+            .Save(path);
+
+        if (error != null)
+            ShowWarning("Failed to export the journal: {0}", error);
     }
 
     private void OnBaseDirectoryDragEnter(object? sender, DragEventArgs e)
@@ -551,6 +600,7 @@ public partial class MainForm : Form
         };
 
         _convertArgs = args;
+        _lastConversionStartedUtc = DateTime.UtcNow;
         _actionWorker.RunWorkerAsync(args);
     }
 

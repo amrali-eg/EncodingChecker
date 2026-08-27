@@ -122,6 +122,33 @@ internal sealed class ConversionReportEntry
         CurrentCharsetLabel
         ?? ScanEngine.FormatCharsetLabel(SourceEncoding, SourceHasBom);
 
+    /// <summary>
+    /// The charset label this run actually read the file as, recorded when it was read.
+    /// </summary>
+    /// <remarks>
+    /// Not derivable afterwards. A completed conversion sets
+    /// <see cref="CurrentCharsetLabel"/> to the target so a second pass reads the new
+    /// bytes correctly, which means that by the time a journal is written the effective
+    /// label describes what the file now is, not what it was read as.
+    /// </remarks>
+    internal string? ResolvedSourceLabel { get; set; }
+
+    /// <summary>
+    /// Whether to record this file's bytes before converting it, for the journal.
+    /// </summary>
+    /// <remarks>
+    /// Off unless a journal was asked for. A conversion overwrites the file, so its
+    /// original hash cannot be recovered afterwards - but hashing every source on every
+    /// run would charge an extra full read to the runs that never wanted one.
+    /// </remarks>
+    internal bool CaptureSourceHash { get; set; }
+
+    /// <summary>
+    /// The file's bytes before this run touched it, when they were recorded.
+    /// Internal state; not included in CSV output.
+    /// </summary>
+    internal string? JournalSourceSha256 { get; set; }
+
     /// <summary>Additional error detail; not included in CSV output.</summary>
     internal string? Diagnostic { get; set; }
 }
