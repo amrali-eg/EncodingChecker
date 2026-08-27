@@ -157,17 +157,27 @@ internal static class Program
                    whether the bytes identify it uniquely, and which
                    files could come out with different text.
 
+                   It also records the conversion itself - directory,
+                   target encoding, BOM policy, backup policy, and the
+                   guarantees this build provides - so the file is the
+                   whole approval and needs no other options to mean
+                   something exact.
+
               [-Apply <path>]
                    Carry out a plan written by -Plan. Every file is
                    checked against the hash it had when the plan was
-                   made; if any has changed, nothing is converted. A
-                   plan approved for one set of files is not applied to
-                   a different one.
+                   made; if any has changed, nothing is converted at
+                   all. A plan approved for one set of files is not
+                   applied to a different one. Each file is checked
+                   once more at the moment it is installed.
 
                    Nothing is detected a second time: the encodings,
                    the target, and the backup setting all come from the
                    plan, so -BasePath, -Target, -From, and -Backup are
-                   rejected here rather than silently ignored.
+                   rejected here rather than silently ignored. A plan
+                   written under different conversion behaviour, or by
+                   an incompatible schema, is refused rather than
+                   guessed at.
 
               Modes:
                    Conversion is the default mode.
@@ -260,6 +270,15 @@ internal static class Program
             return 1;
         }
 
+        // Every path in the plan is relative to this, so if it is gone there is nothing
+        // to resolve them against and no way to tell which tree was meant.
+        if (!Directory.Exists(plan.BaseDirectory))
+        {
+            Console.Error.WriteLine(
+                $"The plan's directory no longer exists: {plan.BaseDirectory}");
+            return 3;
+        }
+
         // The whole reason a plan exists. Re-detecting here would make the preview a
         // demonstration rather than a promise: a second pass can reach different
         // conclusions, and it was the first that the user approved.
@@ -288,7 +307,7 @@ internal static class Program
                 .Where(f => f.Action == PlannedAction.Convert)
                 .Select(f => new ConversionReportEntry
                 {
-                    FilePath = f.Path,
+                    FilePath = plan.ResolvePath(f)!,
                     SourceEncoding = f.SourceEncoding,
                     SourceHasBom = f.SourceHasBom,
                     TargetEncoding = plan.TargetEncoding,
@@ -299,6 +318,11 @@ internal static class Program
                     AmbiguityReason = f.AmbiguityReason,
                     CompetingEncodings = f.CompetingEncodings,
                     SourceEncodingWasSpecified = f.SourceWasSpecified,
+
+                    // Checked again at the moment of installation. FindStaleFiles above
+                    // proved the file matched when this run started; a long conversion
+                    // leaves room for that to stop being true.
+                    ExpectedSourceSha256 = f.Sha256,
                 })
         ];
 

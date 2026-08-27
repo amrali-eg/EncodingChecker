@@ -504,6 +504,10 @@ internal static class ScanEngine
             RecordConversion = backup
                 ? record => WriteConversionMetadata(path, record)
                 : null,
+
+            // Non-null only under -Apply, where an earlier run committed to these exact
+            // bytes. An ordinary conversion has nothing to compare against.
+            ExpectedSourceSha256 = entry.ExpectedSourceSha256,
         };
 
         // Without the token, Parallel.ForEach could only observe cancellation between

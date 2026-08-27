@@ -82,7 +82,20 @@ public sealed class ConversionPlanTests : IDisposable
     private PlannedFile PlannedFor(string name) =>
         Assert.Single(
             LoadPlan().Files,
-            f => string.Equals(Path.GetFileName(f.Path), name, StringComparison.Ordinal));
+            f => string.Equals(f.RelativePath, name, StringComparison.Ordinal));
+
+    /// <summary>Edits the plan on disk, the way someone with a text editor would.</summary>
+    private void Rewrite(Action<Dictionary<string, JsonElement>> edit)
+    {
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(PlanPath));
+
+        Dictionary<string, JsonElement> fields = document.RootElement
+            .EnumerateObject()
+            .ToDictionary(p => p.Name, p => p.Value.Clone());
+
+        edit(fields);
+        File.WriteAllText(PlanPath, JsonSerializer.Serialize(fields));
+    }
 
     [Fact]
     public void PlanningWritesNothing()
@@ -241,15 +254,7 @@ public sealed class ConversionPlanTests : IDisposable
         Write("jp.txt", "こんにちは世界。テキスト", "shift_jis");
         Assert.Equal(0, Plan());
 
-        using (JsonDocument document = JsonDocument.Parse(File.ReadAllText(PlanPath)))
-        {
-            Dictionary<string, JsonElement> fields = document.RootElement
-                .EnumerateObject()
-                .ToDictionary(p => p.Name, p => p.Value.Clone());
-
-            fields["PlanVersion"] = JsonSerializer.SerializeToElement(99);
-            File.WriteAllText(PlanPath, JsonSerializer.Serialize(fields));
-        }
+        Rewrite(fields => fields["PlanVersion"] = JsonSerializer.SerializeToElement(99));
 
         Assert.Equal(1, Run("-Apply", PlanPath));
     }
@@ -293,6 +298,195 @@ public sealed class ConversionPlanTests : IDisposable
     {
         Assert.Equal(1, Run(
             ["-BasePath", _root, "-Target", "utf-8", "-Plan", PlanPath, .. mode]));
+    }
+
+    [Fact]
+    public void ThePlanDescribesTheConversionAndNotOnlyTheFiles()
+    {
+        // "-Apply plan.json" must need no ambient option state to mean something exact,
+        // so everything that shapes the conversion has to be in the file.
+        Write("jp.txt", "こんにちは世界。テキスト", "shift_jis");
+
+        Assert.Equal(0, Plan("-Backup"));
+
+        ConversionPlan plan = LoadPlan();
+
+        Assert.Equal(ConversionPlan.CurrentPlanVersion, plan.PlanVersion);
+        Assert.Equal(ConversionSemantics.Current, plan.SemanticsVersion);
+        Assert.Equal("utf-8", plan.TargetEncoding);
+        Assert.False(plan.TargetHasBom);
+        Assert.True(plan.BackupEnabled);
+        Assert.Equal("Detected", plan.DetectionMode);
+        Assert.Equal(Path.GetFullPath(_root), plan.BaseDirectory);
+        Assert.NotEmpty(plan.ECVersion);
+
+        Assert.True(plan.Semantics.StrictDecoding);
+        Assert.True(plan.Semantics.StrictEncoding);
+        Assert.True(plan.Semantics.OutputVerification);
+        Assert.True(plan.Semantics.AtomicInstall);
+        Assert.True(plan.Semantics.AmbiguityRefusal);
+    }
+
+    [Fact]
+    public void ExplicitSourceSelectionIsRecordedAsSuch()
+    {
+        Write("jp.txt", "こんにちは世界。テキスト", "shift_jis");
+
+        Assert.Equal(0, Plan("-From", "shift_jis"));
+
+        ConversionPlan plan = LoadPlan();
+
+        Assert.Equal("Explicit", plan.DetectionMode);
+        Assert.Equal("shift_jis", plan.ExplicitSourceEncoding);
+        Assert.True(Assert.Single(plan.Files).SourceWasSpecified);
+        Assert.Contains("detection bypassed", plan.Summarize());
+    }
+
+    [Fact]
+    public void APlanMadeUnderDifferentConversionBehaviourIsRefused()
+    {
+        // The schema can be identical while the conversion it describes is not. What the
+        // user approved was a conversion, not a file listing.
+        string path = Write("jp.txt", "こんにちは世界。テキスト", "shift_jis");
+        byte[] original = File.ReadAllBytes(path);
+
+        Assert.Equal(0, Plan());
+        Rewrite(fields =>
+            fields["SemanticsVersion"] =
+                JsonSerializer.SerializeToElement(ConversionSemantics.Current + 1));
+
+        Assert.Equal(1, Run("-Apply", PlanPath));
+        Assert.Equal(original, File.ReadAllBytes(path));
+
+        Assert.Null(ConversionPlan.Load(PlanPath, out string? error));
+        Assert.Contains("different conversion behaviour", error);
+    }
+
+    [Fact]
+    public void APlanAppliedFromACopyStillConvertsTheTreeItWasApprovedFor()
+    {
+        // A plan carrying absolute paths that is copied alongside its tree still names
+        // the original tree, and every hash matches, because those are the files it was
+        // made from. Resolving against the recorded root makes the intent explicit
+        // instead of incidental: the plan is about one directory, and says which.
+        const string text = "こんにちは世界。テキスト";
+        string original = Write("jp.txt", text, "shift_jis");
+
+        Assert.Equal(0, Plan());
+
+        string copy = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(copy);
+
+        try
+        {
+            string copiedPlan = Path.Combine(copy, "plan.json");
+            File.Copy(original, Path.Combine(copy, "jp.txt"));
+            File.Copy(PlanPath, copiedPlan);
+
+            Assert.Equal(0, Run("-Apply", copiedPlan));
+
+            // The tree the plan named was converted; the copy was not touched.
+            Assert.Equal(text, Encoding.UTF8.GetString(File.ReadAllBytes(original)));
+            Assert.Equal(
+                Encoding.GetEncoding("shift_jis").GetBytes(text),
+                File.ReadAllBytes(Path.Combine(copy, "jp.txt")));
+        }
+        finally
+        {
+            Directory.Delete(copy, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void APlanWhoseDirectoryIsGoneIsRefusedRatherThanResolvedElsewhere()
+    {
+        Write("jp.txt", "こんにちは世界。テキスト", "shift_jis");
+        Assert.Equal(0, Plan());
+
+        Rewrite(fields => fields["BaseDirectory"] = JsonSerializer.SerializeToElement(
+            Path.Combine(_root, "no-such-directory")));
+
+        Assert.Equal(3, Run("-Apply", PlanPath));
+    }
+
+    [Fact]
+    public void AnEntryReachingOutsideThePlansDirectoryIsRefused()
+    {
+        // A plan is an ordinary file that anyone can edit or receive from someone else.
+        // Its paths must stay inside the directory it claims to be about.
+        string outside = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        byte[] content = Encoding.GetEncoding("shift_jis").GetBytes("こんにちは世界。テキスト");
+        File.WriteAllBytes(outside, content);
+
+        try
+        {
+            Write("jp.txt", "こんにちは世界。テキスト", "shift_jis");
+            Assert.Equal(0, Plan());
+
+            Rewrite(fields =>
+            {
+                List<JsonElement> files = [.. fields["Files"].EnumerateArray()];
+
+                Dictionary<string, JsonElement> entry = files[0]
+                    .EnumerateObject()
+                    .ToDictionary(p => p.Name, p => p.Value.Clone());
+
+                entry["RelativePath"] = JsonSerializer.SerializeToElement(
+                    Path.GetRelativePath(_root, outside));
+                entry["Sha256"] = JsonSerializer.SerializeToElement(
+                    ConversionMetadataStore.ComputeSha256(outside));
+
+                fields["Files"] = JsonSerializer.SerializeToElement(new[] { entry });
+            });
+
+            Assert.Equal(3, Run("-Apply", PlanPath));
+
+            // Untouched, and still Shift_JIS rather than the UTF-8 it would have become.
+            Assert.Equal(content, File.ReadAllBytes(outside));
+        }
+        finally
+        {
+            File.Delete(outside);
+        }
+    }
+
+    [Fact]
+    public void TheDisplayedCategoriesSumToTheSelectedPopulation()
+    {
+        // A category total that does not add up is how a mechanism that is actually safe
+        // loses the confidence it earned.
+        Write("jp.txt", "こんにちは世界。日本語のテキストです。", "shift_jis");
+        Write("ambiguous.txt", "Le café était déjà prêt", "windows-1252");
+        Write("plain.txt", "just ascii here", "ascii");
+
+        Assert.Equal(0, Plan());
+
+        ConversionPlan plan = LoadPlan();
+        string summary = plan.Summarize();
+
+        int Line(string label)
+        {
+            string line = Assert.Single(
+                summary.Split(Environment.NewLine),
+                l => l.StartsWith(label, StringComparison.Ordinal));
+
+            return int.Parse(line[label.Length..].Trim());
+        }
+
+        // The indented pair breaks down "Will convert" and is not part of the sum.
+        Assert.Equal(
+            Line("Selected:"),
+            Line("Will convert:")
+            + Line("Already in target encoding:")
+            + Line("Encoding not identified:")
+            + Line("Refused, ambiguous encoding:")
+            + Line("Refused, unreadable:"));
+
+        Assert.Equal(
+            Line("Will convert:"),
+            Line("  encoding determined:") + Line("  same text either way:"));
+
+        Assert.Equal(plan.Files.Count, Line("Selected:"));
     }
 
     [Fact]

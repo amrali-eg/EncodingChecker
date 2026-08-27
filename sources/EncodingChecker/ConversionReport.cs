@@ -79,6 +79,14 @@ internal sealed class ConversionReportEntry
     /// </summary>
     internal bool SourceEncodingWasSpecified { get; set; }
 
+    /// <summary>
+    /// The SHA-256 this file is required to still have when it is installed, or
+    /// <see langword="null"/> when nothing earlier committed to its contents. Set when
+    /// the conversion was approved in advance by a plan.
+    /// Internal state; not included in CSV output.
+    /// </summary>
+    internal string? ExpectedSourceSha256 { get; set; }
+
     /// <summary>Additional error detail; not included in CSV output.</summary>
     internal string? Diagnostic { get; set; }
 }
