@@ -7,11 +7,11 @@ using System.Text.RegularExpressions;
 namespace EncodingChecker;
 
 /// <summary>
-/// Directory-tree walking and file-pattern matching shared by the scan engine.
+/// Directory walking and file-pattern matching shared by the scan engine.
 /// </summary>
 internal static class DirectoryTraversal
 {
-    // Never descend into these directories.
+    // Exclude common source-control, build, and dependency directories.
     private static readonly HashSet<string> ExcludedDirectoryNames =
         new(StringComparer.OrdinalIgnoreCase)
         {
@@ -31,28 +31,24 @@ internal static class DirectoryTraversal
 
     private static readonly EnumerationOptions DirectoryWalkOptions = new()
     {
-        // Do not traverse symlinks or junctions.
+        // Never traverse symlinks, junctions, or other reparse points.
         AttributesToSkip = FileAttributes.ReparsePoint,
 
-        // Default (true) silently drops access-denied entries instead of throwing,
-        // which would defeat the onWarning reporting below for the most common
-        // real-world enumeration failure (an ACL-denied subdirectory).
+        // Keep access failures visible so callers can report skipped directories.
         IgnoreInaccessible = false,
     };
 
     /// <summary>
-    /// Always excluded, even with a broad -Include like "*" - otherwise -Backup would
-    /// rescan its own ".bak" output on a later run, cascading (.bak.bak, ...) and
-    /// racing concurrent backup writes.
+    /// Files always excluded from scans, regardless of include patterns.
     /// </summary>
     private static bool IsAlwaysExcludedFile(string fileName) =>
         fileName.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) ||
         fileName.EndsWith(ConversionMetadataStore.Suffix, StringComparison.OrdinalIgnoreCase) ||
-        fileName.EndsWith("." + EncodingConverter.TEMP_FILE_SUFFIX, StringComparison.OrdinalIgnoreCase);
+        fileName.EndsWith("." + EncodingConverter.TempFileSuffix, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Returns true for symlink, junction, or other reparse-point directories.
-    /// Attribute-read failures are treated conservatively (unsafe to walk).
+    /// Attribute-read failures are treated conservatively.
     /// </summary>
     internal static bool IsReparsePointDirectory(string dir)
     {
@@ -69,7 +65,6 @@ internal static class DirectoryTraversal
 
     /// <summary>
     /// Enumerates matching files while skipping excluded directories and reparse points.
-    /// Inaccessible directories are skipped.
     /// </summary>
     internal static IEnumerable<string> EnumerateFiles(
         string baseDirectory,
@@ -90,7 +85,7 @@ internal static class DirectoryTraversal
 
             try
             {
-                // Force enumeration here so access errors stay inside the try block.
+                // Enumerate inside the try so directory access failures can be reported.
                 files =
                 [
                     .. Directory.EnumerateFiles(
@@ -103,11 +98,7 @@ internal static class DirectoryTraversal
                 ex is IOException or UnauthorizedAccessException)
             {
                 onWarning?.Invoke(
-                    string.Format(
-                        "Skipping directory (cannot list): {0}{1}    {2}",
-                        dir,
-                        Environment.NewLine,
-                        ex.Message));
+                    $"Skipping directory (cannot list): {dir}{Environment.NewLine}    {ex.Message}");
 
                 continue;
             }
@@ -119,18 +110,17 @@ internal static class DirectoryTraversal
                 if (IsAlwaysExcludedFile(fileName))
                     continue;
 
-                // excludedFullPath is always absolute (Path.GetFullPath'd by the caller), but
-                // file is rooted at baseDirectory as given, which may itself be relative (e.g.
-                // -BasePath "."); compare full paths so the exclusion still matches instead of
-                // silently doing nothing.
+                // Compare full paths because the scan root may itself be relative.
                 if (excludedFullPath is not null &&
-                    string.Equals(Path.GetFullPath(file), excludedFullPath, StringComparison.OrdinalIgnoreCase))
+                    string.Equals(
+                        Path.GetFullPath(file),
+                        excludedFullPath,
+                        StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
 
-                // No separator -> match bare filename (backward-compatible); with a
-                // separator -> match path relative to baseDirectory (see CompilePatterns).
+                // Bare masks match filenames; masks containing a separator match relative paths.
                 string relativePath =
                     Path.GetRelativePath(baseDirectory, file).Replace('\\', '/');
 
@@ -160,11 +150,7 @@ internal static class DirectoryTraversal
                 ex is IOException or UnauthorizedAccessException)
             {
                 onWarning?.Invoke(
-                    string.Format(
-                        "Skipping directory (cannot list): {0}{1}    {2}",
-                        dir,
-                        Environment.NewLine,
-                        ex.Message));
+                    $"Skipping directory (cannot list): {dir}{Environment.NewLine}    {ex.Message}");
 
                 continue;
             }
@@ -194,9 +180,7 @@ internal static class DirectoryTraversal
     }
 
     /// <summary>
-    /// Converts wildcard masks to case-insensitive regexes. A mask with no "/" or "\"
-    /// matches the bare filename; one with a separator matches the path relative to the
-    /// scan root instead (see <see cref="EnumerateFiles"/>). "\" is normalized to "/".
+    /// Converts wildcard masks to case-insensitive regexes.
     /// </summary>
     internal static List<Regex> CompilePatterns(
         IReadOnlyList<string>? patterns,
@@ -219,8 +203,7 @@ internal static class DirectoryTraversal
         [
             .. effectivePatterns.Select(mask =>
             {
-                // A separator-free mask must match the filename at any depth, not just
-                // at the scan root, so it needs an optional directory prefix.
+                // Filename-only masks must work at any directory depth.
                 bool hasSeparator = mask.Contains('/') || mask.Contains('\\');
 
                 string body =

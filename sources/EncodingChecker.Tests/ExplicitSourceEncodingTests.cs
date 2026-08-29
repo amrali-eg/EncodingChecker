@@ -1,5 +1,7 @@
 ﻿using System.Text;
 
+using System.Text.Json;
+
 namespace EncodingChecker.Tests;
 
 /// <summary>
@@ -68,7 +70,7 @@ public sealed class ExplicitSourceEncodingTests : IDisposable
         ConversionReportEntry entry = Assert.Single(Scan(from: null));
 
         Assert.Equal(ConversionRowResult.Error, entry.Result);
-        Assert.Contains("could not be determined uniquely", entry.Diagnostic);
+        Assert.Contains("Automatic conversion of legacy text is disabled", entry.Diagnostic);
     }
 
     [Fact]
@@ -185,10 +187,12 @@ public sealed class ExplicitSourceEncodingTests : IDisposable
         Assert.Equal(ConversionRowResult.Converted,
             Assert.Single(Scan(from: "windows-1252", backup: true)).Result);
 
-        RestoreStatus status = ConversionMetadataStore.Inspect(path);
+        var metadata = JsonSerializer.Deserialize<ConversionMetadata>(
+            File.ReadAllText(ConversionMetadataStore.MetadataPathFor(path)))!;
 
-        Assert.Equal(RestoreAvailability.Available, status.Availability);
-        Assert.Equal(1252, status.Metadata!.DetectedCodePage);
+        Assert.Equal(1252, metadata.SourceEncodingId);
+        Assert.Equal(SourceEncodingMode.Explicit, metadata.SourceEncodingMode);
+        Assert.Null(metadata.DetectedEncodingId);
     }
 
     [Fact]

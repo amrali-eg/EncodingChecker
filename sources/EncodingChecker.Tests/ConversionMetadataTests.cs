@@ -67,12 +67,17 @@ public sealed class ConversionMetadataTests : IDisposable
         var metadata = JsonSerializer.Deserialize<ConversionMetadata>(
             File.ReadAllText(metadataPath))!;
 
-        Assert.Equal(1, metadata.MetadataVersion);
+        Assert.Equal(2, metadata.MetadataVersion);
 
-        // The code page is what identifies the codec unambiguously; a name may not.
-        Assert.Equal(1252, metadata.DetectedCodePage);
-        Assert.Equal(65001, metadata.TargetCodePage);
-        Assert.False(metadata.DetectedBom);
+        // The recovery key is the codec actually used. This conversion used an
+        // explicit source, so it deliberately has no detector provenance.
+        Assert.Equal(1252, metadata.SourceEncodingId);
+        Assert.Equal("windows-1252", metadata.SourceEncodingName);
+        Assert.Equal(SourceEncodingMode.Explicit, metadata.SourceEncodingMode);
+        Assert.False(metadata.SourceHasBom);
+        Assert.Null(metadata.DetectedEncodingId);
+        Assert.Null(metadata.DetectedEncodingName);
+        Assert.Equal(65001, metadata.TargetEncodingId);
 
         // The recorded hash must actually be the backup's.
         Assert.Equal(
@@ -84,7 +89,7 @@ public sealed class ConversionMetadataTests : IDisposable
 
         Assert.NotEmpty(metadata.ConversionId);
         Assert.NotEmpty(metadata.ConversionTimestampUtc);
-        Assert.NotEmpty(metadata.ECVersion);
+        Assert.NotEmpty(metadata.EcVersion);
     }
 
     [Fact]
@@ -100,95 +105,15 @@ public sealed class ConversionMetadataTests : IDisposable
 
         // Read the converted file as the recorded target, re-encode as the recorded
         // source. Nothing here consults a report or guesses an encoding.
-        string converted = Encoding.GetEncoding(metadata.TargetCodePage)
+        string converted = Encoding.GetEncoding(metadata.TargetEncodingId)
             .GetString(File.ReadAllBytes(path));
 
-        byte[] reconstructed = Encoding.GetEncoding(metadata.DetectedCodePage)
+        byte[] reconstructed = Encoding.GetEncoding(metadata.SourceEncodingId)
             .GetBytes(converted);
 
         Assert.Equal(File.ReadAllBytes(path + ".bak"), reconstructed);
-        Assert.Equal(text, Encoding.GetEncoding(metadata.DetectedCodePage)
+        Assert.Equal(text, Encoding.GetEncoding(metadata.SourceEncodingId)
             .GetString(reconstructed));
-    }
-
-    [Fact]
-    public void RestoreIsAvailableWhenBackupAndMetadataAgree()
-    {
-        string path = Convert("restorable.txt", "café", "windows-1252", "utf-8");
-
-        RestoreStatus status = ConversionMetadataStore.Inspect(path);
-
-        Assert.Equal(RestoreAvailability.Available, status.Availability);
-        Assert.True(status.CanRestore);
-        Assert.NotNull(status.Metadata);
-    }
-
-    [Fact]
-    public void AMissingBackupIsReportedAsSuchRatherThanAsCorruption()
-    {
-        string path = Convert("nobackup.txt", "café", "windows-1252", "utf-8");
-        File.Delete(path + ".bak");
-
-        RestoreStatus status = ConversionMetadataStore.Inspect(path);
-
-        Assert.Equal(RestoreAvailability.BackupMissing, status.Availability);
-        Assert.False(status.CanRestore);
-    }
-
-    [Fact]
-    public void ABackupWithNoMetadataIsNotTreatedAsRestorable()
-    {
-        // The case this whole mechanism exists for: a ".bak" whose encoding nobody
-        // recorded. Its existence is not evidence that anything can be recovered.
-        string path = Convert("orphan.txt", "café", "windows-1252", "utf-8");
-        File.Delete(ConversionMetadataStore.MetadataPathFor(path));
-
-        RestoreStatus status = ConversionMetadataStore.Inspect(path);
-
-        Assert.Equal(RestoreAvailability.MetadataMissing, status.Availability);
-        Assert.False(status.CanRestore);
-    }
-
-    [Fact]
-    public void ACorruptedBackupIsDetectedBeforeItCouldBeRestored()
-    {
-        string path = Convert("corrupt.txt", "café", "windows-1252", "utf-8");
-        File.WriteAllBytes(path + ".bak", [0x00, 0x01, 0x02]);
-
-        RestoreStatus status = ConversionMetadataStore.Inspect(path);
-
-        Assert.Equal(RestoreAvailability.BackupCorrupted, status.Availability);
-        Assert.False(status.CanRestore);
-        Assert.Contains("hashes to", status.Detail);
-    }
-
-    [Fact]
-    public void UnreadableMetadataIsDistinguishedFromMissingMetadata()
-    {
-        string path = Convert("garbled.txt", "café", "windows-1252", "utf-8");
-        File.WriteAllText(ConversionMetadataStore.MetadataPathFor(path), "{ not json");
-
-        RestoreStatus status = ConversionMetadataStore.Inspect(path);
-
-        Assert.Equal(RestoreAvailability.MetadataUnreadable, status.Availability);
-        Assert.False(status.CanRestore);
-    }
-
-    [Fact]
-    public void AnUnsupportedMetadataVersionIsRefusedRatherThanGuessedAt()
-    {
-        string path = Convert("future.txt", "café", "windows-1252", "utf-8");
-        string metadataPath = ConversionMetadataStore.MetadataPathFor(path);
-
-        File.WriteAllText(
-            metadataPath,
-            File.ReadAllText(metadataPath).Replace(
-                "\"MetadataVersion\": 1", "\"MetadataVersion\": 99"));
-
-        RestoreStatus status = ConversionMetadataStore.Inspect(path);
-
-        Assert.Equal(RestoreAvailability.MetadataUnreadable, status.Availability);
-        Assert.Contains("99", status.Detail);
     }
 
     [Fact]
@@ -217,13 +142,14 @@ public sealed class ConversionMetadataTests : IDisposable
     }
 
     [Fact]
-    public void AStaleBackupFromAnEarlierRunIsNotRecordedAsThisOriginal()
+    public void AStaleBackupFromAnEarlierRunStopsTheConversion()
     {
         // A ".bak" left by a previous conversion holds different content. Recording it
         // would produce metadata that restores the wrong file, so the conversion must
         // refuse instead.
         string path = Path.Combine(_root, "stale.txt");
-        File.WriteAllBytes(path, Encoding.GetEncoding("windows-1252").GetBytes("current"));
+        byte[] original = Encoding.GetEncoding("windows-1252").GetBytes("café");
+        File.WriteAllBytes(path, original);
         File.WriteAllBytes(path + ".bak", Encoding.UTF8.GetBytes("something else entirely"));
         File.SetAttributes(path + ".bak", FileAttributes.ReadOnly);
 
@@ -244,17 +170,11 @@ public sealed class ConversionMetadataTests : IDisposable
                 ScanEngine.DefaultMaxParallelism,
                 whatIf: false, backup: true, completed.Add, CancellationToken.None);
 
-            // Either the backup was replaced correctly and the metadata matches it, or
-            // the conversion refused. What must not happen is a converted file whose
-            // metadata points at content that was never its original.
-            RestoreStatus status = ConversionMetadataStore.Inspect(path);
+            ConversionReportEntry result = Assert.Single(completed);
 
-            if (status.CanRestore)
-            {
-                Assert.Equal(
-                    ConversionMetadataStore.ComputeSha256(path + ".bak"),
-                    status.Metadata!.OriginalSha256);
-            }
+            Assert.Equal(ConversionRowResult.Error, result.Result);
+            Assert.Equal(original, File.ReadAllBytes(path));
+            Assert.False(File.Exists(ConversionMetadataStore.MetadataPathFor(path)));
         }
         finally
         {

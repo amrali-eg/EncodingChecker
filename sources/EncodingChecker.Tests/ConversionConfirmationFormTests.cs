@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Windows.Forms;
 
 namespace EncodingChecker.Tests;
@@ -29,32 +29,6 @@ public sealed class ConversionConfirmationFormTests : IDisposable
         {
             // Best-effort cleanup.
         }
-    }
-
-    /// <summary>Runs <paramref name="body"/> on an STA thread, as WinForms requires.</summary>
-    private static void OnUiThread(Action body)
-    {
-        Exception? failure = null;
-
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                body();
-            }
-            catch (Exception ex)
-            {
-                failure = ex;
-            }
-        });
-
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-
-        Assert.True(thread.Join(TimeSpan.FromSeconds(30)), "the dialog did not finish");
-
-        if (failure is not null)
-            throw new Xunit.Sdk.XunitException($"the dialog threw: {failure}");
     }
 
     private void Write(string name, string text, string charset) =>
@@ -109,7 +83,7 @@ public sealed class ConversionConfirmationFormTests : IDisposable
 
         ConversionPlan plan = Plan();
 
-        OnUiThread(() =>
+        UiTest.OnStaThread(() =>
         {
             using var form = new ConversionConfirmationForm(plan);
 
@@ -125,7 +99,7 @@ public sealed class ConversionConfirmationFormTests : IDisposable
 
         ConversionPlan plan = Plan();
 
-        OnUiThread(() =>
+        UiTest.OnStaThread(() =>
         {
             using var form = new ConversionConfirmationForm(plan);
 
@@ -145,20 +119,20 @@ public sealed class ConversionConfirmationFormTests : IDisposable
 
         Assert.All(plan.Files, f => Assert.Equal(PlannedAction.Refuse, f.Action));
 
-        OnUiThread(() =>
+        UiTest.OnStaThread(() =>
         {
             using var form = new ConversionConfirmationForm(plan);
 
             string text = AllText(form);
 
-            Assert.Contains("need an explicit source encoding", text);
-            Assert.Contains("Nothing to convert", text);
+            Assert.Contains("require their source encoding to be identified or confirmed", text);
+            Assert.Contains("Nothing ready to convert", text);
             Assert.DoesNotContain("Convert 1 file", text);
         });
     }
 
     [Fact]
-    public void ItNamesTheCompetingEncodingsRatherThanJustReportingLowConfidence()
+    public void ItNamesTheDetectedLegacyEncodingAndOffersAnExplicitChoice()
     {
         // "Could not be determined" on its own gives a user nothing to act on. The
         // alternatives and the way out are what make the refusal actionable.
@@ -167,9 +141,7 @@ public sealed class ConversionConfirmationFormTests : IDisposable
         ConversionPlan plan = Plan();
         PlannedFile refused = Assert.Single(plan.Files);
 
-        Assert.NotEmpty(refused.CompetingEncodings);
-
-        OnUiThread(() =>
+        UiTest.OnStaThread(() =>
         {
             using var form = new ConversionConfirmationForm(plan);
 
@@ -183,13 +155,45 @@ public sealed class ConversionConfirmationFormTests : IDisposable
             ];
 
             Assert.Contains("ambiguous.txt", cells);
-            Assert.Contains(cells, c => c.Contains(refused.CompetingEncodings[0]));
+            Assert.Contains(refused.SourceEncoding, cells);
 
             // And the way out is offered, populated from the charsets EC supports.
             ComboBox chooser = Assert.Single(Descendants(form).OfType<ComboBox>());
 
             Assert.True(chooser.Items.Count > 1);
             Assert.Contains("windows-1252", chooser.Items.Cast<string>());
+            Assert.True(chooser.Width >= 235, "the full source-encoding prompt must be visible");
+        });
+    }
+
+    [Fact]
+    public void ItExposesTheReviewControlsToKeyboardAndAssistiveTechnology()
+    {
+        Write("legacy.txt", "Le caf\u00e9 \u20ac", "windows-1252");
+
+        ConversionPlan plan = Plan();
+
+        UiTest.OnStaThread(() =>
+        {
+            using var form = new ConversionConfirmationForm(plan);
+
+            ListView list = Assert.Single(Descendants(form).OfType<ListView>());
+            ComboBox source = Assert.Single(Descendants(form).OfType<ComboBox>());
+            Button confirmSource = Assert.Single(
+                Descendants(form).OfType<Button>(),
+                button => button.Text.StartsWith("Confirm for"));
+
+            Assert.Equal("Files requiring source encoding", list.AccessibleName);
+            Assert.False(string.IsNullOrWhiteSpace(list.AccessibleDescription));
+            Assert.Equal("Source encoding for selected legacy files", source.AccessibleName);
+            Assert.False(string.IsNullOrWhiteSpace(source.AccessibleDescription));
+            Assert.Equal("Confirm selected source encoding", confirmSource.AccessibleName);
+            Assert.False(string.IsNullOrWhiteSpace(confirmSource.AccessibleDescription));
+
+            // Enter and Escape retain their conventional, safe meanings.
+            Assert.IsType<Button>(form.AcceptButton);
+            Assert.IsType<Button>(form.CancelButton);
+            Assert.Equal(DialogResult.Cancel, ((Button)form.CancelButton!).DialogResult);
         });
     }
 
@@ -205,7 +209,7 @@ public sealed class ConversionConfirmationFormTests : IDisposable
 
         Assert.Equal(2, plan.Files.Count(f => f.Action == PlannedAction.Refuse));
 
-        OnUiThread(() =>
+        UiTest.OnStaThread(() =>
         {
             using var form = new ConversionConfirmationForm(plan);
 
@@ -221,20 +225,71 @@ public sealed class ConversionConfirmationFormTests : IDisposable
 
             // Everything the dialog asked about starts ticked, and the button says so.
             Assert.Equal(2, list.CheckedItems.Count);
-            Assert.Contains("for 2 file(s)", AllText(form));
+            Assert.Contains("Confirm for 2 file(s)", AllText(form));
 
             list.Items[0].Checked = false;
 
-            Assert.Contains("for 1 file(s)", AllText(form));
+            Assert.Contains("Confirm for 1 file(s)", AllText(form));
 
             // And with none ticked there is nothing to apply, so it cannot be pressed.
             list.Items[1].Checked = false;
 
             Button apply = Assert.Single(
                 Descendants(form).OfType<Button>(),
-                b => b.Text.StartsWith("Use this encoding"));
+                b => b.Text.StartsWith("Confirm for"));
 
             Assert.False(apply.Enabled);
+            Assert.True(apply.Width >= 230, "the source-confirmation button must stay easy to read and click");
+        });
+    }
+
+    [Fact]
+    public void ItOffersEveryLegacyFileNamedInTheReview()
+    {
+        // A large batch used to show the true total in the explanation but silently
+        // truncated the selectable list at 200 files.
+        PlannedFile[] files = Enumerable.Range(1, 310)
+            .Select(i => new PlannedFile
+            {
+                RelativePath = $"legacy-{i:D3}.txt",
+                Size = 1,
+                Sha256 = new string('0', 64),
+                Action = PlannedAction.Refuse,
+                SourceEncoding = "windows-1252",
+                SourceCodePage = 1252,
+                SourceHasBom = false,
+                SourceWasSpecified = false,
+                SourceInterpretation = SourceInterpretation.LegacyNeedsSourceChoice,
+            })
+            .ToArray();
+
+        var plan = new ConversionPlan
+        {
+            CreatedUtc = DateTime.UtcNow.ToString("O"),
+            EcVersion = "test",
+            BaseDirectory = _root,
+            TargetEncoding = "utf-8",
+            TargetHasBom = false,
+            BackupEnabled = true,
+            Files = files,
+        };
+
+        UiTest.OnStaThread(() =>
+        {
+            using var form = new ConversionConfirmationForm(plan);
+            form.CreateControl();
+            _ = form.Handle;
+
+            ListView list = Assert.Single(Descendants(form).OfType<ListView>());
+            list.CreateControl();
+            _ = list.Handle;
+
+            Assert.Equal(310, list.Items.Count);
+            Assert.Equal(310, list.CheckedItems.Count);
+            Assert.Contains(
+                "310 file(s) require their source encoding to be identified or confirmed",
+                AllText(form));
+            Assert.Contains("Confirm for 310 file(s)", AllText(form));
         });
     }
 
@@ -247,13 +302,13 @@ public sealed class ConversionConfirmationFormTests : IDisposable
         ConversionPlan withBackups = Plan(backup: true);
         ConversionPlan without = Plan(backup: false);
 
-        OnUiThread(() =>
+        UiTest.OnStaThread(() =>
         {
             using var kept = new ConversionConfirmationForm(withBackups);
             using var lost = new ConversionConfirmationForm(without);
 
             Assert.Contains(".bak", AllText(kept));
-            Assert.Contains("DISABLED", AllText(lost));
+            Assert.Contains("OFF", AllText(lost));
         });
     }
 
@@ -273,13 +328,13 @@ public sealed class ConversionConfirmationFormTests : IDisposable
         File.Delete(Path.Combine(_root, "jp.txt"));
         Write("late-arrival.txt", "added after the plan", "ascii");
 
-        OnUiThread(() =>
+        UiTest.OnStaThread(() =>
         {
             using var form = new ConversionConfirmationForm(plan);
 
             string text = AllText(form);
 
-            Assert.Contains($"Convert {convert} of {plan.Files.Count} selected", text);
+            Assert.Contains($"{plan.Files.Count} selected file(s). Target:", text);
             Assert.DoesNotContain("late-arrival", text);
         });
     }

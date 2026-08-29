@@ -93,7 +93,7 @@ public sealed class ConversionOrchestrationTests : IDisposable
     // ----------------------------------------------------------- the three states
 
     [Fact]
-    public void TextChangingAmbiguity_IsRefusedBeforeAnythingIsModified()
+    public void DetectedLegacyText_IsRefusedBeforeAnythingIsModified()
     {
         string path = Write("ambiguous.txt", "Le café était déjà prêt", "windows-1252");
         byte[] before = File.ReadAllBytes(path);
@@ -109,17 +109,16 @@ public sealed class ConversionOrchestrationTests : IDisposable
         PlannedFile refused = Assert.Single(Assert.Single(shown).Files);
 
         Assert.Equal(PlannedAction.Refuse, refused.Action);
-        Assert.True(refused.MayChangeText);
-        Assert.NotEmpty(refused.CompetingEncodings);
+        Assert.True(refused.NeedsSourceChoice);
 
         Assert.Equal(OrchestrationOutcome.Converted, result.Outcome);
         Assert.Equal(before, File.ReadAllBytes(path));
     }
 
     [Fact]
-    public void TextEquivalentAmbiguity_IsConverted()
+    public void Ascii_IsConvertedAutomatically()
     {
-        // The label is undetermined; the content is not. Refusing here protects nothing.
+        // ASCII has one safe Unicode interpretation and does not require a source choice.
         string path = Write("plain.txt", "plain ascii, no high bytes at all", "ascii");
 
         OrchestrationResult result = Convert(View(), Proceed);
@@ -135,15 +134,15 @@ public sealed class ConversionOrchestrationTests : IDisposable
     [Fact]
     public void UnambiguousEncoding_IsConverted()
     {
-        const string text = "こんにちは世界。日本語のテキストです。";
-        string path = Write("jp.txt", text, "shift_jis");
+        const string text = "plain ASCII text";
+        string path = Write("ascii.txt", text, "ascii");
 
         OrchestrationResult result = Convert(View(), Proceed);
 
         PlannedFile planned = Assert.Single(result.Plan!.Files);
 
         Assert.Equal(PlannedAction.Convert, planned.Action);
-        Assert.Equal(AmbiguityClass.Unambiguous, planned.Ambiguity);
+        Assert.Equal(SourceInterpretation.AutomaticUnicodeOrAscii, planned.SourceInterpretation);
         Assert.Equal(text, Encoding.UTF8.GetString(File.ReadAllBytes(path)));
     }
 
@@ -232,11 +231,11 @@ public sealed class ConversionOrchestrationTests : IDisposable
 
             answered = true;
             return new ConfirmationResponse(
-                ConfirmationChoice.ChooseSourceEncoding, "windows-1252");
+                ConfirmationChoice.ChooseSourceEncoding, "windows-1252", [ambiguous]);
         });
 
-        // The Shift_JIS file was never in question and was not reinterpreted.
-        Assert.Equal(japanese, Encoding.UTF8.GetString(File.ReadAllBytes(jp)));
+        // The Shift_JIS file was never answered for and remains untouched.
+        Assert.Equal(Encoding.GetEncoding("shift_jis").GetBytes(japanese), File.ReadAllBytes(jp));
         Assert.Equal(
             "Le café était prêt", Encoding.UTF8.GetString(File.ReadAllBytes(ambiguous)));
     }
@@ -324,8 +323,8 @@ public sealed class ConversionOrchestrationTests : IDisposable
     {
         // The user reads a dialog; that takes time. What they approved was the files as
         // they were. All-or-nothing, as with -Apply: a plan is reviewed as a whole.
-        string stable = Write("stable.txt", "こんにちは世界。テキスト", "shift_jis");
-        string moving = Write("moving.txt", "さようなら世界。テキスト", "shift_jis");
+        string stable = Write("stable.txt", "plain ascii text", "ascii");
+        string moving = Write("moving.txt", "other ascii text", "ascii");
 
         byte[] stableBefore = File.ReadAllBytes(stable);
 
@@ -411,7 +410,7 @@ public sealed class ConversionOrchestrationTests : IDisposable
         ConversionReportEntry entry = Assert.Single(View());
 
         Assert.Null(entry.Action);
-        Assert.Null(entry.Ambiguity);
+        Assert.Null(entry.SourceInterpretation);
 
         // A conversion pass is what decides. Planning without one cannot proceed.
         Assert.Throws<InvalidOperationException>(() => ConversionPlan.FromEntries(

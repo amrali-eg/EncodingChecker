@@ -88,26 +88,15 @@ internal static class TextValidation
         if (buffer.IsEmpty)
             return false;
 
-        //
-        // Force strict decoding regardless of the supplied Encoding instance.
-        //
-        // TextEncoding.Strict rebuilds the encoding with the fallbacks supplied up
-        // front. Assigning Decoder.Fallback afterwards is not enough on its own: for
-        // the CodePagesEncodingProvider encodings this method is asked to validate,
-        // the assignment is silently ignored and invalid bytes are substituted, so
-        // the decode below would succeed for input the encoding cannot represent.
-        //
-        Decoder decoder = TextEncoding.Strict(encoding).GetDecoder();
-        decoder.Fallback = DecoderFallback.ExceptionFallback;
-
         try
         {
-            //
-            // The buffer is a detection sample, not necessarily the complete file.
-            // Keep flush=false so an incomplete sequence at the sample boundary is
-            // not treated as invalid. Invalid sequences occurring within the sample
-            // still trigger DecoderFallbackException.
-            //
+            // Force strict decoding regardless of the supplied Encoding instance.
+            // A validator treats an unavailable strict codec as invalid; conversion will
+            // later report the same condition as a fatal safety failure.
+            Decoder decoder = TextEncoding.Strict(encoding).GetDecoder();
+            decoder.Fallback = DecoderFallback.ExceptionFallback;
+
+            // Do not flush: the sample may end in the middle of a valid sequence.
             charsWritten = decoder.GetChars(
                 buffer,
                 chars,
@@ -115,7 +104,7 @@ internal static class TextValidation
 
             return true;
         }
-        catch (DecoderFallbackException)
+        catch (Exception ex) when (ex is DecoderFallbackException or NotSupportedException)
         {
             return false;
         }
@@ -133,9 +122,7 @@ internal static class TextValidation
         if (text.IsEmpty)
             return false;
 
-        //
-        // Examine at most the first 500 Unicode scalar values.
-        //
+        // Limit the heuristic to the first 500 Unicode scalars.
         int runeCount = 0;
         int printable = 0;
 
@@ -146,9 +133,7 @@ internal static class TextValidation
 
             runeCount++;
 
-            //
             // Common whitespace characters count as printable text.
-            //
             if (rune.Value is '\r' or '\n' or '\t' or ' ')
             {
                 printable++;
@@ -157,26 +142,12 @@ internal static class TextValidation
 
             switch (Rune.GetUnicodeCategory(rune))
             {
-                //
-                // Control and private-use characters are excluded from the printable
-                // ratio rather than rejecting the sample outright.
-                //
-                // Rejecting on the first private-use scalar made a whole file
-                // undetectable over one character - icon-font glyphs in markup are the
-                // common case - and did so inconsistently, since only the first 500
-                // scalars are examined, so the same character later in the file was
-                // accepted. Excluding them still rejects a buffer that is largely
-                // private-use, which is the binary evidence the check exists to find.
-                //
+                // Ignore control and private-use characters in the ratio.
                 case UnicodeCategory.PrivateUse:
                 case UnicodeCategory.Control:
                     break;
 
-                //
-                // Treat all non-control, non-private-use scalars as text-like.
-                // This intentionally includes format, unassigned, separators,
-                // CJK, emoji, and combining marks.
-                //
+                // Treat all other scalars as text-like.
                 default:
                     printable++;
                     break;

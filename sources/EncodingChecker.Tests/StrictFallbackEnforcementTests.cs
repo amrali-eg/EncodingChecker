@@ -136,13 +136,12 @@ public sealed class StrictFallbackEnforcementTests : IDisposable
     }
 
     [Fact]
-    public void TextEncodingStrict_ReturnsTheOriginalWhenTheCodePageCannotBeRebuilt()
+    public void TextEncodingStrict_RefusesAnEncodingThatCannotBeRebuiltStrictly()
     {
-        // The documented fallback: an encoding with no registered code page keeps its own
-        // codecs rather than throwing in the caller's face.
+        // Returning the original encoding would reintroduce the code-page fallback bug.
         Encoding unrebuildable = new UnrebuildableEncoding();
 
-        Assert.Same(unrebuildable, TextEncoding.Strict(unrebuildable));
+        Assert.Throws<NotSupportedException>(() => TextEncoding.Strict(unrebuildable));
     }
 
     private sealed class UnrebuildableEncoding : Encoding
@@ -216,6 +215,7 @@ public sealed class StrictFallbackEnforcementTests : IDisposable
             SourceHasBom = false,
             TargetEncoding = sourceCharset,
             TargetHasBom = false,
+            SourceEncodingWasSpecified = true,
         };
 
         var completed = new EntrySink();

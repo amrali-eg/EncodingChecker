@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
@@ -7,19 +7,14 @@ using System.Windows.Forms;
 namespace EncodingChecker;
 
 /// <summary>
-/// Shows what a conversion is about to do, and asks.
+/// Shows one plain-language review of what EC can and cannot safely convert.
 /// </summary>
 /// <remarks>
-/// Displays a plan that has already been decided rather than working out the answer for
-/// itself. That is the whole point: a dialog that describes one set of conclusions and a
-/// conversion that reaches its own is a dialog that can be wrong, and the user approved
-/// what the dialog said. The same entries that were classified here are the ones that
-/// convert - no second detection pass, the same property <c>-Apply</c> has.
+/// Displays the conversion plan already decided by policy. The same entries are
+/// converted; no second detection pass can produce a different answer.
 /// <para>
-/// The three outcomes it has to keep apart are the ones the classification draws:
-/// an encoding the bytes determine, several codecs that agree on the text, and several
-/// codecs that disagree. Only the third is refused, and for it the dialog names the
-/// alternatives and offers the one thing that resolves it - saying which encoding it is.
+/// Unicode and ASCII detections can be converted automatically. Detected legacy text
+/// requires an explicit source choice, which never bypasses conversion safety checks.
 /// </para>
 /// </remarks>
 internal sealed class ConversionConfirmationForm : Form
@@ -30,24 +25,21 @@ internal sealed class ConversionConfirmationForm : Form
     private ListView? _refusedList;
 
     /// <summary>
-    /// The encoding the user chose for the refused files, or <see langword="null"/> if
-    /// they did not choose one.
+    /// The source encoding chosen for refused files, or <see langword="null"/> if none
+    /// was chosen.
     /// </summary>
     /// <remarks>
-    /// Exactly what <c>-From</c> supplies on the command line: an answer to "which
-    /// encoding is this?", replacing detection and nothing else. Every conversion
-    /// safeguard still applies to the files it is used for.
+    /// Equivalent to <c>-From</c>: it answers which encoding to use without changing
+    /// the other conversion safeguards.
     /// </remarks>
     internal string? ChosenSourceEncoding { get; private set; }
 
     /// <summary>
-    /// The files <see cref="ChosenSourceEncoding"/> applies to, as full paths.
+    /// The refused files <see cref="ChosenSourceEncoding"/> applies to, as full paths.
     /// </summary>
     /// <remarks>
-    /// A subset, not all of them, because a batch can hold refused files written in
-    /// different encodings - Cyrillic in koi8-r beside French in windows-1252 - and one
-    /// answer settles only the files it was given about. Imposing it on the rest would
-    /// repeat the mistake the refusal exists to prevent, one level up.
+    /// The choice is scoped to the selected files because a batch may contain files
+    /// written in different encodings.
     /// </remarks>
     internal IReadOnlyList<string> ChosenFiles { get; private set; } = [];
 
@@ -55,27 +47,26 @@ internal sealed class ConversionConfirmationForm : Form
     {
         _plan = plan;
 
-        Text = "Confirm conversion";
+        Text = @"Review conversion";
         FormBorderStyle = FormBorderStyle.Sizable;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
         MaximizeBox = false;
         ShowInTaskbar = false;
         AutoScaleMode = AutoScaleMode.Font;
-        ClientSize = new Size(680, 520);
-        MinimumSize = new Size(560, 420);
+        // This is a review, not a compact prompt. Leave enough room for the complete
+        // explanation and source choice without making the user scroll to understand it.
+        ClientSize = new Size(720, 565);
+        MinimumSize = new Size(620, 450);
 
         Controls.Add(BuildBody());
         Controls.Add(BuildButtons());
     }
 
-    private int Count(PlannedAction action) =>
-        _plan.Files.Count(f => f.Action == action);
-
     private List<PlannedFile> Refused =>
-        [.. _plan.Files.Where(f => f is { Action: PlannedAction.Refuse, MayChangeText: true })];
+        [.. _plan.Files.Where(f => f is { Action: PlannedAction.Refuse, NeedsSourceChoice: true })];
 
-    private Control BuildBody()
+    private TableLayoutPanel BuildBody()
     {
         var body = new TableLayoutPanel
         {
@@ -85,33 +76,36 @@ internal sealed class ConversionConfirmationForm : Form
             AutoScroll = true,
         };
 
-        int convert = Count(PlannedAction.Convert);
-        int equivalent = _plan.Files.Count(
-            f => f.Action == PlannedAction.Convert
-                 && f.Ambiguity == AmbiguityClass.TextEquivalent);
-
+        ConversionPlanSummary summary = _plan.Summary;
+        int convert = summary.ReadyToConvert;
         List<PlannedFile> refused = Refused;
 
         body.Controls.Add(Heading(
-            $"Convert {convert} of {_plan.Files.Count} selected file(s) to "
-            + _plan.TargetEncoding
-            + (_plan.TargetHasBom ? " with BOM" : " without BOM")));
+            "Review this conversion plan before changing files."));
 
-        // The three states, kept apart. The counts sum to the selected population.
+        body.Controls.Add(new Label
+        {
+            AutoSize = true,
+            MaximumSize = new Size(660, 0),
+            Padding = new Padding(0, 0, 0, 8),
+            Text = $"{_plan.Files.Count} selected file(s). Target: "
+                + $"{ScanEngine.DescribeTarget(_plan.TargetEncoding, _plan.TargetHasBom)}. "
+                + "No files have been changed yet.",
+        });
+
+        // The categories are mutually exclusive: every selected file has one outcome.
         body.Controls.Add(Rows(
         [
-            ("Encoding determined by the file's own bytes", convert - equivalent,
-             "Will convert."),
-            ("Encoding undetermined, every reading agrees on the text", equivalent,
-             "Will convert; the label is a choice, the content is not."),
-            ("Encoding undetermined, readings disagree on the text", refused.Count,
-             "WILL NOT be converted."),
-            ("Already in the target encoding", Count(PlannedAction.Unchanged),
-             "Nothing to do."),
-            ("Encoding could not be identified", Count(PlannedAction.Skip),
-             "Left alone."),
-            ("Could not be read", Count(PlannedAction.Refuse) - refused.Count,
-             "Left alone."),
+            ("Ready to convert", convert,
+             "EC can verify the conversion."),
+            ("Needs a source encoding", refused.Count,
+             "Left unchanged unless you choose one below."),
+            ("Already in the target encoding", summary.AlreadyTarget,
+             "No conversion is needed."),
+            ("Encoding not identified", summary.NotIdentified,
+             "Left unchanged because EC could not identify text."),
+            ("Cannot be processed safely", summary.OtherRefusals,
+             "Left unchanged because a safety check did not pass."),
         ]));
 
         body.Controls.Add(Rule());
@@ -121,12 +115,12 @@ internal sealed class ConversionConfirmationForm : Form
             ("Directory", _plan.BaseDirectory),
             ("Source encoding",
              string.IsNullOrEmpty(_plan.ExplicitSourceEncoding)
-                 ? "detected per file"
-                 : $"{_plan.ExplicitSourceEncoding} (chosen; detection bypassed)"),
+                 ? "Unicode and ASCII are automatic; legacy text needs your choice"
+                 : $"{_plan.ExplicitSourceEncoding} (chosen by you; strict checks still apply)"),
             ("Backups", _plan.BackupEnabled
-                ? "enabled — each original kept as <file>.bak"
-                : "DISABLED — originals will not be kept"),
-            ("Guarantees", ConversionSemantics.Describes),
+                ? "enabled — original as <file>.bak; record as <file>.ecmeta.json"
+                : "OFF — originals will not be kept"),
+            ("Before any replacement", "strict decoding and output verification must succeed"),
         ]));
 
         if (refused.Count > 0)
@@ -135,35 +129,35 @@ internal sealed class ConversionConfirmationForm : Form
         foreach (Control control in body.Controls)
             control.Dock = DockStyle.Top;
 
-        // Docked children stack in reverse, so the first added must be added last.
-        var ordered = body.Controls.Cast<Control>().Reverse().ToArray();
+        // Docked children stack in reverse order.
+        Control[] ordered = [.. body.Controls.Cast<Control>().Reverse()];
         body.Controls.Clear();
         body.Controls.AddRange(ordered);
 
         return body;
     }
 
-    private Control BuildRefusalPanel(List<PlannedFile> refused)
+    private Panel BuildRefusalPanel(List<PlannedFile> refused)
     {
         var panel = new Panel { AutoSize = true, Padding = new Padding(0, 12, 0, 0) };
 
         var explanation = new Label
         {
             AutoSize = true,
-            MaximumSize = new Size(620, 0),
+            MaximumSize = new Size(660, 0),
             ForeColor = Color.FromArgb(150, 40, 0),
             Text =
-                $"{refused.Count} file(s) need an explicit source encoding. More than "
-                + "one encoding fits their bytes, and those encodings produce different "
-                + "text, so converting would pick one reading without saying so. No "
-                + "changes will be made to them."
+                $@"{refused.Count} file(s) require their source encoding to be identified or confirmed. "
+                + @"Encoding Checker detected legacy text, but cannot safely process these files until you specify or confirm their original encoding."
                 + Environment.NewLine + Environment.NewLine
-                + "Untick any that are not in the encoding you choose - the files here "
-                + "may well be in different ones.",
+                + @"Select only files that use the same source encoding, then choose or confirm that encoding. "
+                + @"Leave files with a different or unknown encoding unchecked; you can review them later.",
         };
 
         var list = new ListView
         {
+            AccessibleName = "Files requiring source encoding",
+            AccessibleDescription = "Select files that share the source encoding chosen below.",
             View = View.Details,
             FullRowSelect = true,
             CheckBoxes = true,
@@ -171,20 +165,18 @@ internal sealed class ConversionConfirmationForm : Form
             Dock = DockStyle.Top,
         };
 
-        list.Columns.Add("File", 200);
-        list.Columns.Add("Detected", 110);
-        list.Columns.Add("Also fits, reading it differently", 300);
+        list.Columns.Add("File", 365);
+        list.Columns.Add("Detected encoding", 165);
 
-        foreach (PlannedFile file in refused.Take(200))
+        // The choice must cover every file the heading counts. Truncating this list made
+        // a large review say, for example, 310 files while the button could affect only
+        // the first 200.
+        foreach (PlannedFile file in refused)
         {
             list.Items.Add(new ListViewItem(
             [
                 file.RelativePath,
                 file.SourceEncoding,
-                string.Join(", ", file.CompetingEncodings.Take(6))
-                + (file.CompetingEncodings.Count > 6
-                    ? $", and {file.CompetingEncodings.Count - 6} more"
-                    : string.Empty),
             ])
             {
                 Checked = true,
@@ -206,15 +198,16 @@ internal sealed class ConversionConfirmationForm : Form
         {
             AutoSize = true,
             Padding = new Padding(0, 6, 0, 0),
-            Text = "Source encoding for the ticked files:",
+            Text = @"Source encoding for the ticked files:",
         });
 
         _sourceChoice.DropDownStyle = ComboBoxStyle.DropDownList;
-        _sourceChoice.Width = 160;
-        _sourceChoice.Items.Add("(leave them alone)");
+        _sourceChoice.AccessibleName = "Source encoding for selected legacy files";
+        _sourceChoice.AccessibleDescription = "Choose the original encoding for the ticked files.";
+        _sourceChoice.Width = 235;
+        _sourceChoice.Items.Add("Choose or confirm source encoding…");
 
-        // The same set the classifier drew its candidates from, so anything it named as
-        // a competing reading can be chosen here.
+        // Match the classifier's supported set.
         foreach (string charset in TextEncoding.SupportedCharsets)
             _sourceChoice.Items.Add(charset);
 
@@ -222,6 +215,11 @@ internal sealed class ConversionConfirmationForm : Form
         _sourceChoice.SelectedIndexChanged += (_, _) => UpdateScopeLabel();
 
         _resolve.AutoSize = true;
+        _resolve.AccessibleName = "Confirm selected source encoding";
+        _resolve.AccessibleDescription = "Rebuild the review using the chosen encoding for the ticked files.";
+        // Native themed buttons do not consistently add Padding to their preferred
+        // width. A minimum width gives the action a stable, readable target instead.
+        _resolve.MinimumSize = new Size(230, 0);
         _resolve.Click += (_, _) =>
         {
             ChosenSourceEncoding = (string)_sourceChoice.SelectedItem!;
@@ -238,14 +236,14 @@ internal sealed class ConversionConfirmationForm : Form
         var note = new Label
         {
             AutoSize = true,
-            MaximumSize = new Size(620, 0),
+            MaximumSize = new Size(660, 0),
             ForeColor = SystemColors.GrayText,
             Dock = DockStyle.Top,
             Text =
-                "Choosing an encoding replaces detection for these files and nothing "
-                + "else: the bytes must still decode strictly as it, the result is still "
-                + "verified to hold exactly the same text, and a failed backup still "
-                + "stops the conversion.",
+                "Choosing an encoding does not convert anything yet. EC will refresh this "
+                + "review first; you then decide whether to convert the newly ready files. "
+                + "The chosen bytes must still decode strictly; backup and output "
+                + "verification failures still stop the conversion.",
         };
 
         panel.Controls.Add(note);
@@ -258,29 +256,30 @@ internal sealed class ConversionConfirmationForm : Form
         return panel;
     }
 
-    /// <summary>The refused files currently ticked, as full paths.</summary>
+    /// <summary>
+    /// The currently selected refused files, as full paths.
+    /// </summary>
     private List<string> TickedFiles() =>
     [
         .. (_refusedList?.CheckedItems.Cast<ListViewItem>()
-            ?? Enumerable.Empty<ListViewItem>())
+            ?? [])
             .Select(i => i.Tag as string)
             .Where(p => p is not null)
             .Select(p => p!)
     ];
 
     /// <summary>
-    /// Keeps the button saying exactly how many files the choice would apply to, so the
-    /// scope of the answer is never something the user has to infer.
+    /// Keeps the button scope explicit.
     /// </summary>
     private void UpdateScopeLabel()
     {
         int ticked = _refusedList?.CheckedItems.Count ?? 0;
 
-        _resolve.Text = $"Use this encoding for {ticked} file(s)";
+        _resolve.Text = $@"Confirm for {ticked} file(s)";
         _resolve.Enabled = ticked > 0 && _sourceChoice.SelectedIndex > 0;
     }
 
-    private Control BuildButtons()
+    private FlowLayoutPanel BuildButtons()
     {
         var strip = new FlowLayoutPanel
         {
@@ -292,16 +291,23 @@ internal sealed class ConversionConfirmationForm : Form
 
         var cancel = new Button
         {
+            AccessibleDescription = "Close this review without changing files.",
             Text = "Cancel",
             DialogResult = DialogResult.Cancel,
             AutoSize = true,
         };
 
-        int convert = Count(PlannedAction.Convert);
+        int convert = _plan.Summary.ReadyToConvert;
+        int refused = Refused.Count;
 
         var proceed = new Button
         {
-            Text = convert > 0 ? $"Convert {convert} file(s)" : "Nothing to convert",
+            AccessibleDescription = "Convert only the files marked ready in this review.",
+            Text = convert == 0
+                ? "Nothing ready to convert"
+                : refused == 0
+                    ? $"Convert {convert} file(s)"
+                    : $"Convert {convert} ready file(s)",
             DialogResult = DialogResult.OK,
             AutoSize = true,
             Enabled = convert > 0,
@@ -320,19 +326,19 @@ internal sealed class ConversionConfirmationForm : Form
     {
         AutoSize = true,
         Font = new Font(SystemFonts.MessageBoxFont!, FontStyle.Bold),
-        MaximumSize = new Size(620, 0),
+        MaximumSize = new Size(660, 0),
         Padding = new Padding(0, 0, 0, 8),
         Text = text,
     };
 
-    private static Control Rule() => new Label
+    private static Label Rule() => new()
     {
         BorderStyle = BorderStyle.Fixed3D,
         Height = 2,
         Margin = new Padding(0, 8, 0, 8),
     };
 
-    private static Control Rows(IReadOnlyList<(string Label, int Count, string Note)> rows)
+    private static TableLayoutPanel Rows(IReadOnlyList<(string Label, int Count, string Note)> rows)
     {
         var table = new TableLayoutPanel
         {
@@ -343,8 +349,7 @@ internal sealed class ConversionConfirmationForm : Form
 
         foreach ((string label, int count, string note) in rows)
         {
-            // Zero-count categories are dropped: a list of noughts buries the lines that
-            // actually say something.
+            // Hide empty categories so the summary stays focused.
             if (count == 0)
                 continue;
 
@@ -369,7 +374,7 @@ internal sealed class ConversionConfirmationForm : Form
         return table;
     }
 
-    private static Control Rows(IReadOnlyList<(string Label, string Value)> rows)
+    private static TableLayoutPanel Rows(IReadOnlyList<(string Label, string Value)> rows)
     {
         var table = new TableLayoutPanel
         {

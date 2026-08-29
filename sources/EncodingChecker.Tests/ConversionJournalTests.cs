@@ -1,5 +1,7 @@
 ﻿using System.Text;
 
+using System.Text.Json;
+
 namespace EncodingChecker.Tests;
 
 /// <summary>
@@ -64,12 +66,11 @@ public sealed class ConversionJournalTests : IDisposable
 
     private ConversionJournal Load()
     {
-        ConversionJournal? journal = ConversionJournal.Load(JournalPath, out string? error);
-
-        Assert.Null(error);
+        ConversionJournal? journal = JsonSerializer.Deserialize<ConversionJournal>(
+            File.ReadAllText(JournalPath));
         Assert.NotNull(journal);
 
-        return journal;
+        return journal!;
     }
 
     private JournalEntry EntryFor(string name) =>
@@ -90,14 +91,14 @@ public sealed class ConversionJournalTests : IDisposable
         string path = Write("jp.txt", text, "shift_jis");
         string before = ConversionMetadataStore.ComputeSha256(path);
 
-        Assert.Equal(0, Convert("-Backup"));
+        Assert.Equal(0, Convert("-Backup", "-From", "shift_jis"));
 
         JournalEntry entry = EntryFor("jp.txt");
 
         // Believed.
-        Assert.Equal("Detected", entry.DetectionMode);
-        Assert.Equal("shift_jis", entry.DetectedEncoding);
-        Assert.Equal(AmbiguityClass.Unambiguous, entry.Ambiguity);
+        Assert.Equal("Explicit", entry.DetectionMode);
+        Assert.Null(entry.DetectedEncoding);
+        Assert.Equal(SourceInterpretation.ExplicitSource, entry.SourceInterpretation);
 
         // Decided.
         Assert.Equal(PlannedAction.Convert, entry.PlannedAction);
@@ -118,7 +119,7 @@ public sealed class ConversionJournalTests : IDisposable
         // target. Reporting that as what it was read as would invert what happened.
         Write("jp.txt", "こんにちは世界。日本語のテキストです。", "shift_jis");
 
-        Assert.Equal(0, Convert());
+        Assert.Equal(0, Convert("-From", "shift_jis"));
 
         JournalEntry entry = EntryFor("jp.txt");
 
@@ -128,7 +129,7 @@ public sealed class ConversionJournalTests : IDisposable
     }
 
     [Fact]
-    public void ARefusalIsRecordedWithTheEncodingsThatCompetedForIt()
+    public void ARefusalIsRecordedAsLegacyGuidanceRatherThanProof()
     {
         // The question a record most often has to answer is why something was left alone.
         string path = Write("ambiguous.txt", "Le café était déjà prêt", "windows-1252");
@@ -140,9 +141,8 @@ public sealed class ConversionJournalTests : IDisposable
 
         Assert.Equal(PlannedAction.Refuse, entry.PlannedAction);
         Assert.Equal(ConversionStatus.Refused, entry.Status);
-        Assert.Equal(AmbiguityClass.TextChanging, entry.Ambiguity);
-        Assert.NotEmpty(entry.DetectionCandidates);
-        Assert.Contains("could not be determined uniquely", entry.Reason);
+        Assert.Equal(SourceInterpretation.LegacyNeedsSourceChoice, entry.SourceInterpretation);
+        Assert.Contains("Automatic conversion of legacy text is disabled", entry.Reason);
 
         // Nothing was written, so there is no "after" — and the file still is what the
         // "before" says it is.
@@ -164,7 +164,7 @@ public sealed class ConversionJournalTests : IDisposable
 
         Assert.Equal("Explicit", entry.DetectionMode);
         Assert.Equal("windows-1252", entry.SourceEncoding);
-        Assert.Equal(AmbiguityReason.ExplicitlySpecified, entry.AmbiguityReason);
+        Assert.Equal(SourceInterpretation.ExplicitSource, entry.SourceInterpretation);
         Assert.Equal(ConversionStatus.Converted, entry.Status);
         Assert.Equal("windows-1252", Load().ExplicitSourceEncoding);
     }
@@ -182,8 +182,7 @@ public sealed class ConversionJournalTests : IDisposable
 
         Assert.Equal(3, journal.Entries.Count);
         Assert.Equal(3, journal.Summary.Values.Sum());
-        Assert.Equal(1, journal.Summary["Converted"]);
-        Assert.Equal(1, journal.Summary["Refused"]);
+        Assert.Equal(2, journal.Summary["Refused"]);
         Assert.Equal(1, journal.Summary["Unchanged"]);
     }
 
@@ -194,19 +193,19 @@ public sealed class ConversionJournalTests : IDisposable
         // the rules it was done under.
         Write("jp.txt", "こんにちは世界。テキスト", "shift_jis");
 
-        Convert("-Backup");
+        Convert("-Backup", "-From", "shift_jis");
 
         ConversionJournal journal = Load();
 
         Assert.Equal(ConversionJournal.CurrentJournalVersion, journal.JournalVersion);
         Assert.Equal(ConversionSemantics.Current, journal.SemanticsVersion);
         Assert.True(journal.Semantics.StrictDecoding);
-        Assert.True(journal.Semantics.AmbiguityRefusal);
+        Assert.True(journal.Semantics.LegacyRequiresExplicitSource);
         Assert.Equal("CommandLine", journal.Surface);
         Assert.Equal("utf-8", journal.TargetEncoding);
         Assert.False(journal.TargetHasBom);
         Assert.True(journal.BackupEnabled);
-        Assert.NotEmpty(journal.ECVersion);
+        Assert.NotEmpty(journal.EcVersion);
     }
 
     [Fact]
@@ -217,7 +216,7 @@ public sealed class ConversionJournalTests : IDisposable
         string planPath = Path.Combine(_root, "plan.json");
 
         Assert.Equal(0, Cli(
-            "-BasePath", _root, "-Target", "utf-8", "-Plan", planPath, "-Quiet"));
+            "-BasePath", _root, "-Target", "utf-8", "-From", "shift_jis", "-Plan", planPath, "-Quiet"));
 
         Assert.Equal(0, Cli("-Apply", planPath, "-Journal", JournalPath));
 
@@ -271,7 +270,7 @@ public sealed class ConversionJournalTests : IDisposable
         string path = Write("jp.txt", "こんにちは世界。テキスト", "shift_jis");
         byte[] before = File.ReadAllBytes(path);
 
-        Assert.Equal(0, Convert("-WhatIf"));
+        Assert.Equal(0, Convert("-WhatIf", "-From", "shift_jis"));
 
         JournalEntry entry = EntryFor("jp.txt");
 

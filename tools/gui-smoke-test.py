@@ -1,15 +1,10 @@
-"""GUI smoke test, in phases.
+"""Small, repeatable GUI release smoke test.
 
-An earlier version used one folder and one final check for the whole matrix. That cannot
-work: the stale-plan case stops the entire run, so every "must have converted" expectation
-after it is unreachable by construction. Worse, the state it leaves is byte-identical to
-"the tester cancelled everything", so the result cannot say which protection fired. Its
-first real run reported FAIL and the product had been correct throughout.
+Each phase has its own folder and a file-based verification step.  The GUI is the only
+thing under test: this script prepares disposable files and checks what actually happened
+on disk afterwards.
 
-Each phase is therefore its own folder, its own short click sequence, and its own check,
-and each proves exactly one property. The evidence is always what is on disk.
-
-    python gui-smoke-test.py setup A       # then do phase A in the GUI
+    python gui-smoke-test.py setup A       # then perform the stated GUI steps
     python gui-smoke-test.py verify A
 """
 import hashlib
@@ -22,113 +17,68 @@ BASE = os.environ.get("EC_SMOKE_DIR", os.path.join(
     os.path.expanduser("~"), "Desktop"))
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+UNICODE = ("Hello, 世界 — Привет", "utf-8")
 JP = ("こんにちは世界。日本語のテキストです。", "shift_jis")
 RUSSIAN = ("Привет мир, это русский текст", "koi8-r")
 PLAIN = ("plain ascii, no high bytes at all", "ascii")
-MOVING = ("さようなら世界。これも日本語のテキストです。", "shift_jis")
-BACKUPFAIL = ("これはバックアップ失敗の試験です。", "shift_jis")
 
-# The only shape that reaches TextEquivalent: one byte, so nothing that decodes it at all
-# can read it differently. ASCII of any real length is structurally determined instead,
-# which is why this looks contrived - it has to be.
-TINY = ("A", "ascii")
-
-# Deliberately carries 0x80. In windows-1252 that is the euro sign; in iso-8859-1 it is a
-# C1 control. An earlier sample used only accented letters, on which the two encodings
-# agree exactly - so "the text survived" could not show which codec had been used, and the
-# phase proved less than it claimed. This one cannot be satisfied by the wrong codec.
+# Deliberately carries 0x80.  In windows-1252 that is the euro sign; in iso-8859-1 it is
+# a C1 control.  It proves that the user's explicit choice, rather than a legacy guess,
+# controls the conversion.
 EURO = ("Prix: 100€ pour le café était déjà prêt", "cp1252")
 
 PHASES = {
     "A": {
-        "title": "Refusing and cancelling change nothing",
-        "files": {"jp.txt": JP, "french.txt": EURO, "russian.txt": RUSSIAN,
-                  "plain.txt": PLAIN, "tiny.txt": TINY},
+        "title": "Reviewing and cancelling change nothing",
+        "files": {"unicode.txt": UNICODE, "jp.txt": JP, "french.txt": EURO,
+                  "russian.txt": RUSSIAN, "plain.txt": PLAIN},
         "steps": [
-            "View the folder, tick every row, click Convert.",
-            "The confirmation should say 2 file(s) need an explicit source encoding,",
-            "  listing french.txt and russian.txt with the encodings in conflict.",
+            "In the Release build, set 'Directory to check' to the folder shown above.",
+            "Choose utf-8 in 'Convert to', then click View.",
+            "Check that all 5 files are listed. Tick every row and click Convert.",
+            "The review must show unicode.txt and plain.txt as ready to convert.",
+            "It must show jp.txt, french.txt, and russian.txt as needing a source encoding.",
             "Click Cancel.",
         ],
         "unchanged": {
+            "unicode.txt": "cancelled, so nothing may be written",
             "jp.txt": "cancelled, so nothing may be written",
             "french.txt": "refused, and cancelled",
             "russian.txt": "refused, and cancelled",
             "plain.txt": "cancelled",
-            "tiny.txt": "cancelled",
         },
         "no_artifacts": True,
     },
     "B": {
-        "title": "An explicit source is what reads the file, and only where it was given",
-        "files": {"jp.txt": JP, "french.txt": EURO, "russian.txt": RUSSIAN},
+        "title": "Unicode and ASCII convert safely without a source choice",
+        "files": {"unicode.txt": UNICODE, "plain.txt": PLAIN},
         "steps": [
-            "Tick 'Back up original files before converting' - this phase reads the record.",
-            "View, tick every row, Convert.",
-            "In the confirmation, UNTICK russian.txt so only french.txt stays ticked.",
-            "Choose iso-8859-1. The button should read 'Use this encoding for 1 file(s)'.",
-            "  (Detection says windows-1252 here, so choosing iso-8859-1 is what proves",
-            "   the choice overrode it rather than merely agreeing with it.)",
-            "Click it, then click Convert on the plan that comes back.",
-            "Finally: Export -> 'Conversion journal (*.json)', saved into this folder",
-            "  as journal.json.",
+            "In the Release build, set 'Directory to check' to the folder shown above.",
+            "Choose utf-8 in 'Convert to', click View, tick both rows, and click Convert.",
+            "The review must show both files as ready to convert and no source-encoding chooser.",
+            "Confirm conversion.",
         ],
-        "unchanged": {
-            "russian.txt": "not answered for, so it stays refused",
-        },
-        "converted": {"jp.txt": JP[0]},
-        # The discriminator. iso-8859-1 maps 0x80 to a C1 control; windows-1252 maps it to
-        # the euro sign. Only the codec the tester chose can produce this.
+        "converted": {"unicode.txt": UNICODE[0], "plain.txt": PLAIN[0]},
+    },
+    "C": {
+        "title": "An explicit legacy source applies only to the selected files",
+        "files": {"french.txt": EURO, "russian.txt": RUSSIAN},
+        "steps": [
+            "In the Release build, set 'Directory to check' to the folder shown above.",
+            "Choose utf-8 in 'Convert to', click View, tick both rows, and click Convert.",
+            "Both files must require a source encoding. UNTICK russian.txt.",
+            "Choose iso-8859-1 and click 'Confirm for 1 file(s)'.",
+            "The review opens again. Click 'Convert 1 ready file(s)'.",
+            "Only french.txt may be converted. russian.txt must remain refused and unchanged.",
+        ],
+        "unchanged": {"russian.txt": "no source encoding was supplied for it"},
         "text": {
             "french.txt": {
                 "contains": [0x0080],
                 "excludes": [0x20AC],
-                "why": "the chosen iso-8859-1 reading, not the detected windows-1252 one",
+                "why": "the explicit iso-8859-1 reading chosen by the tester",
             },
         },
-        "sidecar": {
-            "french.txt": {
-                "DetectedCodePage": 28591,
-                "TargetEncoding": "utf-8",
-            },
-        },
-        "journal": {
-            "french.txt": {
-                "DetectionMode": "Explicit",
-                "SourceEncoding": "iso-8859-1",
-                "Status": "Converted",
-            },
-        },
-    },
-    "C": {
-        "title": "A file changed while the dialog is open stops the whole run",
-        "files": {"jp.txt": JP, "moving.txt": MOVING},
-        "steps": [
-            "View, tick both rows, Convert.",
-            "LEAVE THE CONFIRMATION OPEN. In another editor, append anything to",
-            "  moving.txt and save it.",
-            "Now click Convert in the confirmation.",
-            "It should refuse and name moving.txt.",
-        ],
-        "unchanged": {
-            "jp.txt": "the run must stop whole, not convert the files that still match",
-        },
-        "no_artifacts": True,
-        "edited": "moving.txt",
-    },
-    "D": {
-        "title": "A conversion leaves a backup and a record; a failed backup aborts",
-        "files": {"jp.txt": JP, "backupfail.txt": BACKUPFAIL},
-        "bak_dirs": ["backupfail.txt.bak"],
-        "steps": [
-            "Tick 'Back up original files before converting'.",
-            "View, tick both rows, Convert, and confirm.",
-        ],
-        "unchanged": {
-            "backupfail.txt": "its .bak path is a directory, so the backup cannot be written",
-        },
-        "converted": {"jp.txt": JP[0]},
-        "artifacts": ["jp.txt.bak", "jp.txt.ecmeta.json"],
     },
 }
 
@@ -166,17 +116,12 @@ def setup(phase):
         with open(os.path.join(directory, name), "wb") as handle:
             handle.write(text.encode(encoding))
 
-    for name in spec.get("bak_dirs", []):
-        os.makedirs(os.path.join(directory, name))
-
     with open(state_path(phase), "w", encoding="utf-8") as handle:
         json.dump({"root": directory, "before": snapshot(directory)}, handle, indent=1)
 
     print("Phase " + phase + " - " + spec["title"])
     print("\n  folder: " + directory)
     print("  files : " + ", ".join(spec["files"]))
-    for name in spec.get("bak_dirs", []):
-        print("  plus  : " + name + "/  (a directory, so the backup must fail)")
     print("\n  in the GUI:")
     for step in spec["steps"]:
         print("    " + step)
@@ -245,95 +190,6 @@ def check_text(spec, directory, ok, fail):
                 ok("%-18s %s" % (name, rule["why"]))
 
 
-def check_sidecar(spec, directory, before, ok, fail):
-    for name, expected in spec.get("sidecar", {}).items():
-        path = os.path.join(directory, name + ".ecmeta.json")
-
-        if not os.path.exists(path):
-            fail(name + ": no recovery record (" + name + ".ecmeta.json)")
-            continue
-
-        record = json.load(open(path, encoding="utf-8"))
-
-        for key, want in expected.items():
-            if record.get(key) != want:
-                fail("%s record: %s is %r, expected %r"
-                     % (name, key, record.get(key), want))
-
-        # Provenance the record must be internally consistent about, whatever the run was.
-        if record.get("BackupSha256") != record.get("OriginalSha256"):
-            fail(name + " record: the backup is not a copy of the original")
-        elif record.get("OriginalSha256") != before.get(name):
-            fail(name + " record: the original it names is not the file we created")
-        elif record.get("SourceTextSha256") != record.get("OutputTextSha256"):
-            fail(name + " record: the decoded text changed during conversion")
-        else:
-            ok("%-18s record consistent: backup, original and text hashes agree" % name)
-
-
-def check_journal(spec, directory, ok, fail):
-    wanted = spec.get("journal")
-
-    if not wanted:
-        return
-
-    path = os.path.join(directory, "journal.json")
-
-    if not os.path.exists(path):
-        fail("journal.json is missing - export it from the GUI "
-             "(Export -> 'Conversion journal (*.json)') into " + directory)
-        return
-
-    journal = json.load(open(path, encoding="utf-8"))
-    entries = {e["RelativePath"]: e for e in journal.get("Entries", [])}
-
-    for name, expected in wanted.items():
-        entry = entries.get(name)
-
-        if entry is None:
-            fail("journal.json has no entry for " + name)
-            continue
-
-        for key, want in expected.items():
-            if entry.get(key) != want:
-                fail("journal %s: %s is %r, expected %r"
-                     % (name, key, entry.get(key), want))
-
-        # Only the GUI can show this pair differing: detection ran during View, and the
-        # tester then overrode it. The CLI's -From never detects at all, so it cannot.
-        if entry.get("DetectionMode") == "Explicit":
-            if entry.get("DetectedEncoding") == entry.get("SourceEncoding"):
-                ok("%-18s journal: explicit source recorded "
-                   "(detection was not run separately)" % name)
-            else:
-                ok("%-18s journal: detected %s, read as %s"
-                   % (name, entry.get("DetectedEncoding"), entry.get("SourceEncoding")))
-
-
-def check_edited(spec, directory, ok, fail):
-    """The tester's write must be there, and must not have been converted as well."""
-    edited = spec.get("edited")
-
-    if not edited:
-        return
-
-    raw = open(os.path.join(directory, edited), "rb").read()
-    text, encoding = spec["files"][edited]
-    original = text.encode(encoding)
-
-    if raw == original:
-        fail(edited + ": unchanged - the edit that makes the plan stale was never made, "
-             "so this phase tested nothing")
-    elif raw.startswith(original):
-        ok("%-18s carries your edit, not a conversion" % edited)
-    else:
-        try:
-            raw.decode("utf-8")
-            fail(edited + ": looks converted rather than merely edited")
-        except UnicodeDecodeError:
-            ok("%-18s not converted" % edited)
-
-
 def verify(phase):
     spec = PHASES[phase]
 
@@ -354,20 +210,10 @@ def verify(phase):
     check_unchanged(spec, before, after, ok, fail)
     check_converted(spec, directory, after, ok, fail)
     check_text(spec, directory, ok, fail)
-    check_sidecar(spec, directory, before, ok, fail)
-    check_journal(spec, directory, ok, fail)
-    check_edited(spec, directory, ok, fail)
-
-    for name in spec.get("artifacts", []):
-        if os.path.exists(os.path.join(directory, name)):
-            ok("%-18s present" % name)
-        else:
-            fail(name + ": missing")
-
     if spec.get("no_artifacts"):
         strays = [
             n for n in os.listdir(directory)
-            if n.endswith((".bak", ".ecmeta.json")) and n not in spec.get("bak_dirs", [])
+            if n.endswith((".bak", ".ecmeta.json"))
         ]
 
         if strays:

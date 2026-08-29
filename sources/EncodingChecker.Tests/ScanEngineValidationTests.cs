@@ -245,6 +245,31 @@ public sealed class ScanEngineValidationTests : IDisposable
     }
 
     [Fact]
+    public void ScanDirectory_ExplicitBomCapableCodec_DoesNotInventABom()
+    {
+        // Encoding.GetPreamble() says UTF-16 can carry a BOM; it must not cause EC to
+        // report one when this particular source does not start with it.
+        File.WriteAllText(
+            Path.Combine(_root, "utf16-nobom.txt"),
+            TestContent.Multilingual,
+            new UnicodeEncoding(bigEndian: false, byteOrderMark: false));
+
+        var options = new ScanDirectoryOptions
+        {
+            BaseDirectory = _root,
+            Action = ScanAction.Detect,
+            SourceCharset = "utf-16",
+        };
+
+        var entries = new EntrySink();
+        ScanEngine.ScanDirectory(options, entries.Add, CancellationToken.None);
+
+        ConversionReportEntry entry = Assert.Single(entries);
+        Assert.Equal("utf-16", entry.SourceEncoding);
+        Assert.False(entry.SourceHasBom);
+    }
+
+    [Fact]
     public void ScanDirectory_OneLockedFile_ReportsErrorWithoutAbortingOtherFiles()
     {
         File.WriteAllText(Path.Combine(_root, "good1.txt"), TestContent.Ascii, Encoding.ASCII);

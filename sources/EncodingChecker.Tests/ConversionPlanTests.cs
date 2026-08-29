@@ -107,7 +107,7 @@ public sealed class ConversionPlanTests : IDisposable
 
         Dictionary<string, byte[]> before = Snapshot(_root);
 
-        Assert.Equal(0, Plan());
+        Assert.Equal(0, Plan("-From", "shift_jis"));
 
         // The plan file lands in the same directory, so compare the originals rather
         // than the directory listing.
@@ -123,7 +123,7 @@ public sealed class ConversionPlanTests : IDisposable
         const string text = "こんにちは世界。日本語のテキストです。";
         string path = Write("jp.txt", text, "shift_jis");
 
-        Assert.Equal(0, Plan());
+        Assert.Equal(0, Plan("-From", "shift_jis"));
         Assert.Equal(PlannedAction.Convert, PlannedFor("jp.txt").Action);
 
         Assert.Equal(0, Run("-Apply", PlanPath));
@@ -140,7 +140,7 @@ public sealed class ConversionPlanTests : IDisposable
         string stable = Write("stable.txt", "こんにちは世界。テキスト", "shift_jis");
         string moved = Write("moved.txt", "さようなら世界。テキスト", "shift_jis");
 
-        Assert.Equal(0, Plan());
+        Assert.Equal(0, Plan("-From", "shift_jis"));
 
         byte[] stableBefore = File.ReadAllBytes(stable);
         File.WriteAllBytes(moved, Encoding.UTF8.GetBytes("replaced after the plan"));
@@ -158,7 +158,7 @@ public sealed class ConversionPlanTests : IDisposable
         string kept = Write("kept.txt", "こんにちは世界。テキスト", "shift_jis");
         string removed = Write("removed.txt", "さようなら世界。テキスト", "shift_jis");
 
-        Assert.Equal(0, Plan());
+        Assert.Equal(0, Plan("-From", "shift_jis"));
 
         byte[] keptBefore = File.ReadAllBytes(kept);
         File.Delete(removed);
@@ -199,9 +199,8 @@ public sealed class ConversionPlanTests : IDisposable
         PlannedFile planned = PlannedFor("ambiguous.txt");
 
         Assert.Equal(PlannedAction.Refuse, planned.Action);
-        Assert.True(planned.MayChangeText);
-        Assert.NotEmpty(planned.CompetingEncodings);
-        Assert.Contains("could not be determined uniquely", planned.Reason);
+        Assert.True(planned.NeedsSourceChoice);
+        Assert.Contains("Automatic conversion of legacy text is disabled", planned.Reason);
 
         Assert.Equal(0, Run("-Apply", PlanPath));
         Assert.Equal(original, File.ReadAllBytes(path));
@@ -215,15 +214,17 @@ public sealed class ConversionPlanTests : IDisposable
         // flag the first one carried.
         string path = Write("jp.txt", "こんにちは世界。テキスト", "shift_jis");
 
-        Assert.Equal(0, Plan("-Backup"));
+        Assert.Equal(0, Plan("-Backup", "-From", "shift_jis"));
         Assert.True(LoadPlan().BackupEnabled);
 
         Assert.Equal(0, Run("-Apply", PlanPath));
 
         Assert.True(File.Exists(path + ".bak"));
+        var metadata = JsonSerializer.Deserialize<ConversionMetadata>(
+            File.ReadAllText(ConversionMetadataStore.MetadataPathFor(path)))!;
         Assert.Equal(
-            RestoreAvailability.Available,
-            ConversionMetadataStore.Inspect(path).Availability);
+            ConversionMetadataStore.ComputeSha256(path + ".bak"),
+            metadata.OriginalSha256);
     }
 
     [Fact]
@@ -231,7 +232,7 @@ public sealed class ConversionPlanTests : IDisposable
     {
         string path = Write("jp.txt", "こんにちは世界。テキスト", "shift_jis");
 
-        Assert.Equal(0, Plan());
+        Assert.Equal(0, Plan("-From", "shift_jis"));
 
         Assert.Equal(
             ConversionMetadataStore.ComputeSha256(path),
@@ -316,15 +317,15 @@ public sealed class ConversionPlanTests : IDisposable
         Assert.Equal("utf-8", plan.TargetEncoding);
         Assert.False(plan.TargetHasBom);
         Assert.True(plan.BackupEnabled);
-        Assert.Equal("Detected", plan.DetectionMode);
+        Assert.Null(plan.ExplicitSourceEncoding);
         Assert.Equal(Path.GetFullPath(_root), plan.BaseDirectory);
-        Assert.NotEmpty(plan.ECVersion);
+        Assert.NotEmpty(plan.EcVersion);
 
         Assert.True(plan.Semantics.StrictDecoding);
         Assert.True(plan.Semantics.StrictEncoding);
         Assert.True(plan.Semantics.OutputVerification);
         Assert.True(plan.Semantics.AtomicInstall);
-        Assert.True(plan.Semantics.AmbiguityRefusal);
+        Assert.True(plan.Semantics.LegacyRequiresExplicitSource);
     }
 
     [Fact]
@@ -336,7 +337,6 @@ public sealed class ConversionPlanTests : IDisposable
 
         ConversionPlan plan = LoadPlan();
 
-        Assert.Equal("Explicit", plan.DetectionMode);
         Assert.Equal("shift_jis", plan.ExplicitSourceEncoding);
         Assert.True(Assert.Single(plan.Files).SourceWasSpecified);
         Assert.Contains("detection bypassed", plan.Summarize());
@@ -372,7 +372,7 @@ public sealed class ConversionPlanTests : IDisposable
         const string text = "こんにちは世界。テキスト";
         string original = Write("jp.txt", text, "shift_jis");
 
-        Assert.Equal(0, Plan());
+        Assert.Equal(0, Plan("-From", "shift_jis"));
 
         string copy = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(copy);
@@ -421,7 +421,7 @@ public sealed class ConversionPlanTests : IDisposable
         try
         {
             Write("jp.txt", "こんにちは世界。テキスト", "shift_jis");
-            Assert.Equal(0, Plan());
+            Assert.Equal(0, Plan("-From", "shift_jis"));
 
             Rewrite(fields =>
             {
@@ -479,12 +479,8 @@ public sealed class ConversionPlanTests : IDisposable
             Line("Will convert:")
             + Line("Already in target encoding:")
             + Line("Encoding not identified:")
-            + Line("Refused, ambiguous encoding:")
+            + Line("Needs legacy source choice:")
             + Line("Refused, unreadable:"));
-
-        Assert.Equal(
-            Line("Will convert:"),
-            Line("  encoding determined:") + Line("  same text either way:"));
 
         Assert.Equal(plan.Files.Count, Line("Selected:"));
     }

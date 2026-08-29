@@ -22,21 +22,22 @@ internal enum ConversionStatus
     /// <summary>Encoding not identified; not touched.</summary>
     Skipped,
 
-    /// <summary>Converting could not be shown to be safe; not touched.</summary>
+    /// <summary>Conversion could not be shown to be safe; not touched.</summary>
     Refused,
 
-    /// <summary>Conversion was attempted and did not complete; not touched.</summary>
+    /// <summary>Conversion was attempted but did not complete; not touched.</summary>
     Failed,
 
     /// <summary>
-    /// Decided, and deliberately not carried out - a preview, or a run that stopped
-    /// before reaching this file.
+    /// Decided but deliberately not carried out, such as in a preview or after an earlier
+    /// failure stopped the run.
     /// </summary>
     NotAttempted,
 }
 
 /// <summary>
-/// One file's line in the journal: what EC believed, what it decided, and what it wrote.
+///
+/// One file's journal entry: what EC believed, decided, and actually wrote.
 /// </summary>
 internal sealed record JournalEntry
 {
@@ -46,13 +47,11 @@ internal sealed record JournalEntry
     public required string Sha256Before { get; init; }
 
     /// <summary>
-    /// The file's bytes afterwards, or <see langword="null"/> when nothing was written.
+    /// The file's bytes afterward, or <see langword="null"/> when nothing was written.
     /// </summary>
     /// <remarks>
-    /// Present only for a conversion that completed. A null here and a
-    /// <see cref="ConversionStatus"/> other than <see cref="ConversionStatus.Converted"/>
-    /// together say that the file on disk is still the one <see cref="Sha256Before"/>
-    /// describes.
+    /// Only completed conversions have an after-hash; all other statuses leave the
+    /// original bytes identified by <see cref="Sha256Before"/>.
     /// </remarks>
     public string? Sha256After { get; init; }
 
@@ -61,8 +60,14 @@ internal sealed record JournalEntry
     /// <summary>Whether the source encoding was detected or supplied.</summary>
     public required string DetectionMode { get; init; }
 
-    /// <summary>What detection concluded, kept even when a person overrode it.</summary>
-    public required string DetectedEncoding { get; init; }
+    /// <summary>
+    /// What detection concluded, or <see langword="null"/> when detection did not run.
+    /// </summary>
+    /// <remarks>
+    /// Null under <c>-From</c>, which supplies the source encoding instead of running
+    /// detection.
+    /// </remarks>
+    public string? DetectedEncoding { get; init; }
 
     /// <summary>The encoding the conversion actually read the file as.</summary>
     public required string SourceEncoding { get; init; }
@@ -72,13 +77,7 @@ internal sealed record JournalEntry
     public required bool SourceHasBom { get; init; }
 
     [JsonConverter(typeof(JsonStringEnumConverter))]
-    public required AmbiguityClass Ambiguity { get; init; }
-
-    [JsonConverter(typeof(JsonStringEnumConverter))]
-    public required AmbiguityReason AmbiguityReason { get; init; }
-
-    /// <summary>Encodings that also fit these bytes and read them differently.</summary>
-    public IReadOnlyList<string> DetectionCandidates { get; init; } = [];
+    public required SourceInterpretation SourceInterpretation { get; init; }
 
     // ---- what EC decided, and what happened
 
@@ -87,7 +86,7 @@ internal sealed record JournalEntry
 
     public required ConversionStatus Status { get; init; }
 
-    /// <summary>Why, when the outcome was not a plain conversion.</summary>
+    /// <summary>Why the outcome was not a plain conversion.</summary>
     public string? Reason { get; init; }
 
     /// <summary>Where the original was kept, when it was.</summary>
@@ -95,41 +94,34 @@ internal sealed record JournalEntry
 }
 
 /// <summary>
-/// A record of one conversion run: every file EC looked at, what it concluded, what it
-/// decided, and what it actually wrote.
+/// A record of one conversion run: what EC concluded, decided, and actually wrote.
 /// </summary>
 /// <remarks>
-/// Distinct from the per-file <see cref="ConversionMetadata"/> sidecar, which exists so a
-/// single conversion can be undone and is written only where there is a backup to undo it
-/// from. This is the run, whole: the files that were refused and the files that were
-/// skipped are in it too, because "why did EC not convert this?" is a question people ask
-/// more often than "how do I put this one back?", and until now nothing answered it after
-/// the console output scrolled away.
+/// Unlike the per-file <see cref="ConversionMetadata"/> sidecar, this records the whole
+/// run, including refused and skipped files, so the conversion history remains auditable.
 /// <para>
-/// It records the decision that was carried out rather than the detector's raw output.
-/// Those differ whenever somebody named the source encoding, and the difference is
-/// exactly what an audit needs: what EC believed, what it decided, what was approved, and
-/// what it wrote.
+/// It preserves both detection and the effective decision. Those differ when an explicit
+/// source encoding was supplied, and that distinction matters for an audit trail.
 /// </para>
 /// </remarks>
 internal sealed record ConversionJournal
 {
-    internal const int CurrentJournalVersion = 1;
+    internal const int CurrentJournalVersion = 2;
 
     public int JournalVersion { get; init; } = CurrentJournalVersion;
 
-    /// <summary>The conversion behaviour this run was carried out under.</summary>
+    /// <summary>The conversion behaviour this run used.</summary>
     public int SemanticsVersion { get; init; } = ConversionSemantics.Current;
 
     public ConversionSemantics Semantics { get; init; } = new();
 
-    public required string ECVersion { get; init; }
+    public required string EcVersion { get; init; }
 
     public required string StartedUtc { get; init; }
 
     public required string CompletedUtc { get; init; }
 
-    /// <summary>Which interface ran it: the command line, or the application window.</summary>
+    /// <summary>Which interface ran the conversion.</summary>
     public required string Surface { get; init; }
 
     public required string BaseDirectory { get; init; }
@@ -140,26 +132,18 @@ internal sealed record ConversionJournal
 
     public required bool BackupEnabled { get; init; }
 
-    /// <summary>The source encoding named by a person, if any.</summary>
+    /// <summary>The source encoding explicitly supplied by the user, if any.</summary>
     public string? ExplicitSourceEncoding { get; init; }
 
-    /// <summary>
-    /// The plan this run carried out, when it carried out a written one.
-    /// </summary>
+    /// <summary>The plan applied by the run, when one was used.</summary>
     public string? AppliedPlan { get; init; }
 
-    /// <summary>Whether this was a preview, which wrote nothing.</summary>
-    /// <remarks>
-    /// A preview reports its rows as "would be converted", and a journal that copied that
-    /// through would claim files had been rewritten when the directory is untouched. The
-    /// hashes would give it away - before and after would match - but a record should not
-    /// need to be caught out to be read correctly.
-    /// </remarks>
+    /// <summary>Whether this was a preview and therefore wrote nothing.</summary>
     public bool Preview { get; init; }
 
     public required IReadOnlyList<JournalEntry> Entries { get; init; }
 
-    /// <summary>Counts by outcome, so the run can be read without tallying it.</summary>
+    /// <summary>Counts by outcome, so the run can be read without tallying entries.</summary>
     public IReadOnlyDictionary<string, int> Summary =>
         Entries
             .GroupBy(entry => entry.Status.ToString())
@@ -171,14 +155,20 @@ internal sealed record ConversionJournal
         WriteIndented = true,
     };
 
-    /// <summary>
-    /// Builds the journal from the entries a run finished with.
-    /// </summary>
+    /// <summary>Builds a journal from the results of one run.</summary>
+    /// <param name="surface">Which interface ran the conversion.</param>
     /// <param name="startedUtc">When the run began.</param>
+    /// <param name="entries">The entries to include in the journal.</param>
+    /// <param name="baseDirectory">The base directory for the conversion.</param>
+    /// <param name="targetCharset">The target charset for the conversion.</param>
+    /// <param name="targetHasBom">Indicates whether the target file has a BOM.</param>
+    /// <param name="backupEnabled">Indicates whether backups are enabled.</param>
+    /// <param name="explicitSource">The explicit source encoding, if any.</param>
+    /// <param name="appliedPlan">The plan applied by the run, when one was used.</param>
+    /// <param name="preview">Indicates whether the run was a preview.</param>
     /// <remarks>
-    /// Reads each converted file once more to record what was actually written. That is
-    /// the whole point of the last column: a journal that reports what EC intended is a
-    /// journal that cannot be checked against the disk.
+    /// Completed conversions are hashed again so the journal records the bytes actually
+    /// written, not merely what the conversion intended to write.
     /// </remarks>
     internal static ConversionJournal FromRun(
         IEnumerable<ConversionReportEntry> entries,
@@ -199,7 +189,7 @@ internal sealed record ConversionJournal
         {
             ConversionStatus status = entry.Result switch
             {
-                // "Would be converted" is a decision, not an outcome.
+                // A preview records the decision, not a conversion that happened.
                 ConversionRowResult.Converted when preview
                     => ConversionStatus.NotAttempted,
                 ConversionRowResult.Converted => ConversionStatus.Converted,
@@ -211,9 +201,7 @@ internal sealed record ConversionJournal
                 _ => ConversionStatus.NotAttempted,
             };
 
-            // What the conversion read, recorded at the time. Falling back to the
-            // effective label would report a converted file's new encoding as the one it
-            // was read as, which is the opposite of what happened.
+            // Record the encoding actually used to read the source file.
             ScanEngine.ParseCharsetLabel(
                 entry.ResolvedSourceLabel ?? entry.EffectiveSourceLabel,
                 out string sourceCharset,
@@ -227,7 +215,7 @@ internal sealed record ConversionJournal
             }
             catch (ArgumentException)
             {
-                // Zero records that the label named no code page EC could resolve.
+                // Zero means EC could not resolve a code page for the recorded label.
             }
 
             string backupPath = entry.FilePath + ".bak";
@@ -235,27 +223,23 @@ internal sealed record ConversionJournal
             lines.Add(new JournalEntry
             {
                 RelativePath = Path.GetRelativePath(root, entry.FilePath),
-                // The plan-bound paths already carry the approved hash, so a journal
-                // over them costs no extra reading at all.
+                // Reuse the plan's hash when available; avoid rereading the source.
                 Sha256Before = entry.JournalSourceSha256
                                ?? entry.ExpectedSourceSha256
                                ?? Hash(entry.FilePath),
 
-                // Only a completed conversion changed anything, so only it has an
-                // "after". Hashing the others would report a second reading of bytes
-                // nothing touched, which reads as evidence and is not.
+                // Only a completed conversion needs an after-hash.
                 Sha256After = status == ConversionStatus.Converted
                     ? Hash(entry.FilePath)
                     : null,
 
                 DetectionMode = entry.SourceEncodingWasSpecified ? "Explicit" : "Detected",
-                DetectedEncoding = entry.SourceEncoding,
+                DetectedEncoding = entry.DetectedEncodingLabel,
                 SourceEncoding = sourceCharset,
                 SourceCodePage = codePage,
                 SourceHasBom = sourceHasBom,
-                Ambiguity = entry.Ambiguity ?? AmbiguityClass.TextChanging,
-                AmbiguityReason = entry.AmbiguityReason,
-                DetectionCandidates = entry.CompetingEncodings,
+                SourceInterpretation = entry.SourceInterpretation
+                    ?? SourceInterpretation.NotApplicable,
                 PlannedAction = entry.Action ?? PlannedAction.Skip,
                 Status = status,
                 Reason = string.IsNullOrEmpty(entry.Diagnostic) ? null : entry.Diagnostic,
@@ -270,7 +254,7 @@ internal sealed record ConversionJournal
 
         return new ConversionJournal
         {
-            ECVersion = typeof(ConversionJournal).Assembly.GetName().Version?.ToString()
+            EcVersion = typeof(ConversionJournal).Assembly.GetName().Version?.ToString()
                         ?? "unknown",
             StartedUtc = startedUtc.ToString("O", CultureInfo.InvariantCulture),
             CompletedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
@@ -314,27 +298,4 @@ internal sealed record ConversionJournal
         }
     }
 
-    internal static ConversionJournal? Load(string path, out string? error)
-    {
-        try
-        {
-            ConversionJournal? journal =
-                JsonSerializer.Deserialize<ConversionJournal>(File.ReadAllText(path));
-
-            if (journal is null)
-            {
-                error = $"'{path}' is empty.";
-                return null;
-            }
-
-            error = null;
-            return journal;
-        }
-        catch (Exception ex) when (
-            ex is IOException or UnauthorizedAccessException or JsonException)
-        {
-            error = ex.Message;
-            return null;
-        }
-    }
 }

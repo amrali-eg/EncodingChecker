@@ -1,0 +1,47 @@
+name: Shared Unicode detector parity
+
+on:
+  push:
+    branches: [ master ]
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  parity:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: encoding-checker
+
+      - uses: actions/checkout@v7
+        with:
+          repository: amrali-eg/LineEndingNormalizer
+          ref: master
+          path: line-ending-normalizer
+
+      - uses: actions/checkout@v7
+        with:
+          repository: amrali-eg/CorpusTesters
+          ref: master
+          path: corpus-testers
+
+      - name: Verify shared Unicode detector
+        shell: pwsh
+        run: |
+          $ec = Get-Content 'encoding-checker/sources/EncodingChecker/UnicodeDetector.cs' -Raw
+          $len = Get-Content 'line-ending-normalizer/UnicodeDetector.cs' -Raw
+          $corpus = Get-Content 'corpus-testers/CorpusTesting/UnicodeDetector.cs' -Raw
+          $ec = $ec -replace 'namespace EncodingChecker;', 'namespace SharedUnicodeDetector;'
+          $len = $len -replace 'namespace LineEndingNormalizer;', 'namespace SharedUnicodeDetector;'
+          $corpus = $corpus -replace 'namespace CorpusTesting;', 'namespace SharedUnicodeDetector;'
+          $ec = $ec -replace '^using System;\r?\n', ''
+          $len = $len -replace '^using System;\r?\n', ''
+          $corpus = $corpus -replace '^using System;\r?\n', ''
+          $ec = [regex]::Replace($ec, "`r?`n", "`n").TrimStart([char]0xFEFF)
+          $len = [regex]::Replace($len, "`r?`n", "`n").TrimStart([char]0xFEFF)
+          $corpus = [regex]::Replace($corpus, "`r?`n", "`n").TrimStart([char]0xFEFF)
+          if ($ec -cne $len -or $ec -cne $corpus) {
+            throw 'UnicodeDetector.cs differs between EncodingChecker, LineEndingNormalizer, and CorpusTesters. Keep the shared algorithm synchronized; application-specific TextEncoding wrappers may differ.'
+          }

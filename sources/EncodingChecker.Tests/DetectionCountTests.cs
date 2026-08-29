@@ -138,7 +138,9 @@ public sealed class DetectionCountTests : IDisposable
 
                     answered = true;
                     return new ConfirmationResponse(
-                        ConfirmationChoice.ChooseSourceEncoding, "windows-1252");
+                        ConfirmationChoice.ChooseSourceEncoding,
+                        "windows-1252",
+                        [Path.Combine(_root, "ambiguous.txt")]);
                 })
                 .Run(
                     entries, _root, "utf-8", targetWriteBom: false,
@@ -147,9 +149,9 @@ public sealed class DetectionCountTests : IDisposable
                     _ => { },
                     CancellationToken.None));
 
-        // Two on the first pass. The re-plan classifies nothing at all: the file the user
-        // named needs no examining, and the other one keeps the decision it already had.
-        Assert.Equal(2, convert.Classifications);
+        // Two on the first pass, then one more for the file whose source the user chose.
+        // The other entry keeps its existing decision.
+        Assert.Equal(3, convert.Classifications);
         Assert.Equal(0, convert.Detections);
     }
 
@@ -180,7 +182,7 @@ public sealed class DetectionCountTests : IDisposable
     {
         WriteThreeFiles();
 
-        var run = Measure(() => Assert.Equal(0, Cli(
+        var run = Measure(() => Assert.Equal(3, Cli(
             "-BasePath", _root, "-Target", "utf-8", "-Quiet")));
 
         Assert.Equal(3, run.Detections);

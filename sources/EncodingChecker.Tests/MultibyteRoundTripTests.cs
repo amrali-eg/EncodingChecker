@@ -46,6 +46,9 @@ public sealed class MultibyteRoundTripTests : IDisposable
         SourceHasBom = false,
         TargetEncoding = sourceCharset,
         TargetHasBom = false,
+        // These engine tests name the source codec deliberately; automatic legacy
+        // detection is intentionally refused by the product policy.
+        SourceEncodingWasSpecified = true,
     };
 
     private static ConversionReportEntry Convert(

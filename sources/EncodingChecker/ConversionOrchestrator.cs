@@ -5,7 +5,7 @@ using System.Threading;
 
 namespace EncodingChecker;
 
-/// <summary>What the person being asked said.</summary>
+/// <summary>What the person being asked chose.</summary>
 internal enum ConfirmationChoice
 {
     /// <summary>Carry out the plan as shown.</summary>
@@ -14,15 +14,15 @@ internal enum ConfirmationChoice
     /// <summary>Change nothing.</summary>
     Cancel,
 
-    /// <summary>Answer the refusal by naming the source encoding, then ask again.</summary>
+    /// <summary>Name the source encoding for the refused files, then ask again.</summary>
     ChooseSourceEncoding,
 }
 
-/// <summary>The answer, the encoding chosen when there was one, and what it applies to.</summary>
+/// <summary>The user's choice, optional encoding, and files it applies to.</summary>
 /// <param name="Files">
 /// The files the chosen encoding applies to, or <see langword="null"/> for every refused
-/// file. Never every <em>selected</em> file: a batch can hold refused files in different
-/// encodings, and one answer is only an answer for the files it was given about.
+/// file. It never means every selected file because refused files may use different
+/// encodings.
 /// </param>
 internal readonly record struct ConfirmationResponse(
     ConfirmationChoice Choice,
@@ -46,19 +46,19 @@ internal enum OrchestrationOutcome
     /// <summary>The user declined. Nothing was written.</summary>
     Cancelled,
 
-    /// <summary>Files changed between the plan and the confirmation. Nothing was written.</summary>
+    /// <summary>The planned files changed, so nothing was written.</summary>
     PlanWentStale,
 
-    /// <summary>The run could not be planned at all. Nothing was written.</summary>
+    /// <summary>The run could not be planned. Nothing was written.</summary>
     CouldNotPlan,
 }
 
-/// <summary>The result of a run, and the plan the user was actually shown.</summary>
+/// <summary>The result of a run and the plan shown to the user.</summary>
 internal sealed record OrchestrationResult
 {
     internal required OrchestrationOutcome Outcome { get; init; }
 
-    /// <summary>The plan as confirmed, or <see langword="null"/> if it never got that far.</summary>
+    /// <summary>The confirmed plan, or <see langword="null"/> if none was confirmed.</summary>
     internal ConversionPlan? Plan { get; init; }
 
     /// <summary>What to tell the user when nothing ran.</summary>
@@ -66,44 +66,44 @@ internal sealed record OrchestrationResult
 }
 
 /// <summary>
-/// Decide, then ask, then carry out exactly what was agreed.
+/// Decides, confirms, and carries out exactly the confirmed conversion plan.
 /// </summary>
 /// <remarks>
-/// This lives outside the form on purpose. The defect that prompted it - the GUI
-/// converting files the CLI refuses - was not in any component. Every component was
-/// correct and tested. It was in the sequence: a Detect-mode scan feeding entries into a
-/// conversion, with no step in between that classified them. Sequences that live inside a
-/// <c>Form</c>, spread across button handlers and background-worker callbacks, are
-/// sequences nothing can run end to end, and this project has now been shown what that
-/// costs.
+/// The orchestration is kept separate from the UI so the complete sequence can be tested
+/// independently of any form or event handler.
 /// <para>
-/// So the sequence is a class, the confirmation is a delegate, and the conversion engine
-/// underneath is the real one. A test can drive the whole thing and read the bytes on
-/// disk afterwards.
-/// </para>
+/// Classification and conversion use the same entries. The UI only confirms the decided
+/// plan; it does not perform another detection pass.
+///</para>
 /// </remarks>
 internal sealed class ConversionOrchestrator
 {
     private readonly Func<ConversionPlan, ConfirmationResponse> _confirm;
 
     /// <param name="confirm">
-    /// Shows a decided plan and returns what the user said. Called on whatever thread the
-    /// orchestrator runs on; a UI caller marshals inside it.
+    /// Shows the decided plan and returns the user's choice. A UI caller is responsible
+    /// for any required thread marshaling.
     /// </param>
     internal ConversionOrchestrator(Func<ConversionPlan, ConfirmationResponse> confirm) =>
         _confirm = confirm;
 
     /// <summary>
-    /// Runs one conversion: a pass that decides, a confirmation, and a pass that acts.
+    /// Runs one conversion: decide, confirm, then carry out the confirmed plan.
     /// </summary>
     /// <param name="entries">
-    /// The files to convert. Mutated in place, and the same objects are used by both
-    /// passes - which is what stops the second pass from classifying anything again.
+    /// The files to process. The same entries are used for both passes so the second pass
+    /// does not classify them again.
     /// </param>
+    /// <param name="backup">Whether to create backup files.</param>
     /// <param name="preview">
-    /// When true, only the deciding pass runs. A preview writes nothing, so it is its own
-    /// answer and there is nothing to confirm.
+    /// When true, only the deciding pass runs and nothing is written.
     /// </param>
+    /// <param name="baseDirectory">The directory containing the files to process.</param>
+    /// <param name="targetCharset">The character set to convert to.</param>
+    /// <param name="targetWriteBom">Whether to write a BOM when converting to the target charset.</param>
+    /// <param name="maxParallelism">The maximum number of parallel conversion operations.</param>
+    /// <param name="onEntry">The action to perform for each entry.</param>
+    /// <param name="cancellationToken"></param>
     internal OrchestrationResult Run(
         IReadOnlyList<ConversionReportEntry> entries,
         string baseDirectory,
@@ -117,7 +117,7 @@ internal sealed class ConversionOrchestrator
     {
         ArgumentNullException.ThrowIfNull(entries);
 
-        // Pass one. Decides, writes nothing, and leaves the decision on each entry.
+        // Decide without writing; the resulting actions stay on the entries.
         RunPass(
             entries, targetCharset, targetWriteBom,
             backup, whatIf: true, maxParallelism, onEntry, cancellationToken);
@@ -142,8 +142,7 @@ internal sealed class ConversionOrchestrator
             }
             catch (InvalidOperationException ex)
             {
-                // An entry that got here undecided or unclassified is a bug in the
-                // caller. Nothing has been written, and nothing will be.
+                // An undecided entry means the caller failed to provide a complete plan.
                 return new OrchestrationResult
                 {
                     Outcome = OrchestrationOutcome.CouldNotPlan,
@@ -164,8 +163,7 @@ internal sealed class ConversionOrchestrator
 
             if (response.Choice == ConfirmationChoice.ChooseSourceEncoding)
             {
-                // The user answered the refusal. Only the files it was about change, so a
-                // mixed batch does not have one codec imposed on all of it.
+                // Scope the user's answer to the refused files it was intended for.
                 if (!ApplyChosenSource(
                         response.SourceEncoding, response.Files, entries))
                 {
@@ -183,9 +181,7 @@ internal sealed class ConversionOrchestrator
                 continue;
             }
 
-            // Confirmed. The same check -Apply makes, for the same reason: the plan was
-            // approved for the files as they were, and a person reading a dialog takes
-            // time. All-or-nothing, because a plan is reviewed as a whole.
+            // Recheck the approved plan because files may have changed while it was being reviewed.
             IReadOnlyList<string> stale = plan.FindStaleFiles();
 
             if (stale.Count > 0)
@@ -203,8 +199,7 @@ internal sealed class ConversionOrchestrator
                 };
             }
 
-            // Carried again at the moment of installation, so the window between the
-            // check above and each individual write is narrowed too.
+            // Carry the approved hashes into the write pass to narrow the time-of-check gap.
             BindToPlannedBytes(entries, plan);
 
             RunPass(
@@ -239,9 +234,9 @@ internal sealed class ConversionOrchestrator
             cancellationToken);
 
     /// <summary>
-    /// Replaces detection with the user's answer, for the refused files only.
+    /// Replaces detection with the user's source encoding for the refused files in scope.
     /// </summary>
-    /// <returns><see langword="false"/> if there was nothing to apply it to.</returns>
+    /// <returns><see langword="false"/> when no refused file matched the scope.</returns>
     private static bool ApplyChosenSource(
         string? charset,
         IReadOnlyList<string>? files,
@@ -258,23 +253,21 @@ internal sealed class ConversionOrchestrator
 
         foreach (ConversionReportEntry entry in entries)
         {
-            if (entry.Action != PlannedAction.Refuse || !entry.MayChangeText())
+            if (entry.Action != PlannedAction.Refuse ||
+                entry.SourceInterpretation != SourceInterpretation.LegacyNeedsSourceChoice)
                 continue;
 
             if (scope is not null && !scope.Contains(entry.FilePath))
                 continue;
 
-            // The engine's existing override point: SourceEncoding keeps the scan's
-            // answer for the report, and this is what the conversion reads.
+            // Use the existing source override so conversion reads the chosen encoding.
             entry.CurrentCharsetLabel = charset;
             entry.SourceEncodingWasSpecified = true;
-            entry.CompetingEncodings = [];
             entry.Diagnostic = null;
 
-            // Cleared together so the policy decides again rather than reusing the
-            // refusal, and re-records the classification for the new source.
+            // The conversion pass decides again using the explicit source choice.
             entry.Action = null;
-            entry.Ambiguity = null;
+            entry.SourceInterpretation = null;
 
             changed = true;
         }
@@ -283,7 +276,7 @@ internal sealed class ConversionOrchestrator
     }
 
     /// <summary>
-    /// Ties each entry to the bytes the plan was approved for.
+    /// Ties each planned conversion to the bytes that were approved.
     /// </summary>
     private static void BindToPlannedBytes(
         IReadOnlyList<ConversionReportEntry> entries, ConversionPlan plan)
@@ -298,7 +291,7 @@ internal sealed class ConversionOrchestrator
         foreach (ConversionReportEntry entry in entries)
         {
             entry.ExpectedSourceSha256 =
-                hashes.TryGetValue(entry.FilePath, out string? hash) ? hash : null;
+                hashes.GetValueOrDefault(entry.FilePath);
         }
     }
 }

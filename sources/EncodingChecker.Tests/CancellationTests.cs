@@ -29,7 +29,7 @@ public sealed class CancellationTests : IDisposable
     }
 
     private static string[] TempArtifacts(string root) =>
-        Directory.GetFiles(root, $"*.{EncodingConverter.TEMP_FILE_SUFFIX}");
+        Directory.GetFiles(root, $"*.{EncodingConverter.TempFileSuffix}");
 
     [Fact]
     public void Convert_PreCancelledToken_ReportsCancelled_WithoutTouchingTheFile()
