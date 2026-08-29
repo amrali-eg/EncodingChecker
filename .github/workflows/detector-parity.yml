@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: amrali-eg/CorpusTesters
-          ref: master
+          ref: main
           path: corpus-testers
 
       - name: Verify shared Unicode detector
