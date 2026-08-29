@@ -78,8 +78,7 @@ public sealed class ConversionSafetyInvariantTests : IDisposable
     public void PostWriteVerificationFailure_RefusesAndLeavesTheSourceUnchanged()
     {
         // An encoding whose code page cannot be rebuilt keeps its own codecs, so
-        // a substituting encoder reaches the SHA-256 backstop. Whatever the
-        // route, the file must survive.
+        // strict reconstruction must fail before a substituting codec can write.
         string path = Path.Combine(_root, "verify.txt");
         byte[] original = Encoding.UTF8.GetBytes("Привет мир");
         File.WriteAllBytes(path, original);
@@ -88,8 +87,7 @@ public sealed class ConversionSafetyInvariantTests : IDisposable
             path, path, Encoding.UTF8, new SubstitutingEncoding(), new ConversionOptions());
 
         Assert.False(result.Success);
-        Assert.Equal(ConversionErrorCode.UnicodeMismatch, result.ErrorCode);
-        Assert.False(result.VerificationPassed);
+        Assert.Equal(ConversionErrorCode.SourceDecodeError, result.ErrorCode);
         Assert.Equal(original, File.ReadAllBytes(path));
     }
 

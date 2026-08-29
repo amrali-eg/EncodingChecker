@@ -1,5 +1,4 @@
 using System;
-using System.Globalization;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -12,22 +11,31 @@ namespace EncodingChecker;
 /// The sidecar written next to a backup, recording how to reverse a conversion.
 /// </summary>
 /// <remarks>
-/// A conversion is only reversible for someone who still knows which codec produced it,
-/// and that knowledge previously existed solely in the conversion report - an artifact a
-/// user running the GUI has no reason to keep. Recovery that depends on a file nobody
-/// kept is not recovery.
+/// The sidecar preserves the source codec needed for recovery independently of the
+/// conversion report.
 /// <para>
-/// Written as a plain JSON file rather than an NTFS alternate data stream: an ADS is lost
-/// by ordinary copying, archiving and most cloud sync, which are exactly the operations
-/// that separate a backup from its origin. A sidecar survives them and can be read
-/// without EncodingChecker.
-/// </para>
+/// It is a separate JSON file rather than an NTFS alternate data stream so it survives
+/// normal copying, archiving, and cloud synchronization.
+///</para>
 /// </remarks>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+internal enum SourceEncodingMode
+{
+    /// <summary>EC determined it from the file's bytes.</summary>
+    Detected,
+
+    /// <summary>The user supplied it explicitly.</summary>
+    Explicit,
+}
+
 internal sealed record ConversionMetadata
 {
-    /// <summary>Schema version, so a later reader can tell what it is looking at.</summary>
+    /// <summary>The schema version written and understood by this build.</summary>
+    internal const int CurrentMetadataVersion = 2;
+
+    /// <summary>Schema version for future readers.</summary>
     [JsonPropertyOrder(0)]
-    public int MetadataVersion { get; init; } = 1;
+    public int MetadataVersion { get; init; } = CurrentMetadataVersion;
 
     [JsonPropertyOrder(1)]
     public required string ConversionId { get; init; }
@@ -36,7 +44,7 @@ internal sealed record ConversionMetadata
     public required string ConversionTimestampUtc { get; init; }
 
     [JsonPropertyOrder(3)]
-    public required string ECVersion { get; init; }
+    public required string EcVersion { get; init; }
 
     [JsonPropertyOrder(4)]
     public required string OriginalPath { get; init; }
@@ -53,69 +61,64 @@ internal sealed record ConversionMetadata
     [JsonPropertyOrder(8)]
     public required string BackupSha256 { get; init; }
 
-    [JsonPropertyOrder(9)]
-    public required string DetectedEncoding { get; init; }
-
     /// <summary>
-    /// The code page identifies the codec where a name may not: "cp949" and
-    /// "ks_c_5601-1987" are one encoding, and only the number says so unambiguously.
+    /// The codec that actually read the file. This is the authoritative recovery key.
     /// </summary>
-    [JsonPropertyOrder(10)]
-    public required int DetectedCodePage { get; init; }
+    /// <remarks>
+    /// The numeric identifier is authoritative because encoding names can have aliases.
+    /// </remarks>
+    [JsonPropertyOrder(9)]
+    public required int SourceEncodingId { get; init; }
 
+    /// <summary>The source codec's human-readable name.</summary>
+    [JsonPropertyOrder(10)]
+    public required string SourceEncodingName { get; init; }
+
+    /// <summary>Whether the source codec was detected or explicitly supplied.</summary>
     [JsonPropertyOrder(11)]
-    public required bool DetectedBom { get; init; }
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public required SourceEncodingMode SourceEncodingMode { get; init; }
 
     [JsonPropertyOrder(12)]
-    public required string TargetEncoding { get; init; }
+    public required bool SourceHasBom { get; init; }
 
+    /// <summary>
+    /// What detection concluded, or <see langword="null"/> when detection did not run.
+    /// </summary>
+    /// <remarks>
+    /// This is null only when detection did not run, such as a CLI <c>-From</c>
+    /// conversion. A GUI user can explicitly choose a source after a scan; in that
+    /// case the sidecar preserves both the detector's earlier conclusion and the
+    /// codec the conversion actually used.
+    /// </remarks>
     [JsonPropertyOrder(13)]
-    public required int TargetCodePage { get; init; }
+    public int? DetectedEncodingId { get; init; }
 
+    /// <summary>The detected codec's name, or <see langword="null"/> when none exists.</summary>
     [JsonPropertyOrder(14)]
-    public required bool TargetBom { get; init; }
+    public string? DetectedEncodingName { get; init; }
 
+    /// <summary>The codec the file was converted to.</summary>
     [JsonPropertyOrder(15)]
-    public required string SourceTextSha256 { get; init; }
+    public required int TargetEncodingId { get; init; }
 
     [JsonPropertyOrder(16)]
-    public required string OutputTextSha256 { get; init; }
+    public required string TargetEncodingName { get; init; }
 
     [JsonPropertyOrder(17)]
+    public required bool TargetHasBom { get; init; }
+
+    [JsonPropertyOrder(18)]
+    public required string SourceTextSha256 { get; init; }
+
+    [JsonPropertyOrder(19)]
+    public required string OutputTextSha256 { get; init; }
+
+    [JsonPropertyOrder(20)]
     public required long UnicodeScalars { get; init; }
 }
 
-/// <summary>Whether a converted file can be restored from what is on disk.</summary>
-internal enum RestoreAvailability
-{
-    /// <summary>Backup and metadata are present and agree.</summary>
-    Available,
-
-    /// <summary>No backup file exists.</summary>
-    BackupMissing,
-
-    /// <summary>A backup exists but no metadata describes it.</summary>
-    MetadataMissing,
-
-    /// <summary>Metadata exists but cannot be read or is not a version we understand.</summary>
-    MetadataUnreadable,
-
-    /// <summary>The backup's hash does not match what the metadata recorded.</summary>
-    BackupCorrupted,
-}
-
-internal sealed record RestoreStatus
-{
-    internal required RestoreAvailability Availability { get; init; }
-
-    internal ConversionMetadata? Metadata { get; init; }
-
-    internal string? Detail { get; init; }
-
-    internal bool CanRestore => Availability == RestoreAvailability.Available;
-}
-
-/// <summary>Reads and writes the conversion sidecar.</summary>
+/// <summary>Reads and writes conversion sidecars.</summary>
 internal static class ConversionMetadataStore
 {
     internal const string Suffix = ".ecmeta.json";
@@ -136,13 +139,11 @@ internal static class ConversionMetadataStore
     }
 
     /// <summary>
-    /// Writes the sidecar and reads it back, returning <see langword="null"/> on success
-    /// or a message describing the failure.
+    /// Writes the sidecar and verifies that it can be read back.
     /// </summary>
     /// <remarks>
-    /// Read back deliberately. A write that appeared to succeed but produced a file that
-    /// cannot be parsed would leave the caller believing the conversion is reversible
-    /// when it is not, which is the failure this whole mechanism exists to prevent.
+    /// Read-back verification prevents a write that appeared successful from leaving an
+    /// apparently reversible conversion with unusable metadata.
     /// </remarks>
     internal static string? Write(string filePath, ConversionMetadata metadata)
     {
@@ -159,8 +160,7 @@ internal static class ConversionMetadataStore
             if (readBack is null)
                 return $"'{path}' was written but could not be read back.";
 
-            if (readBack.BackupSha256 != metadata.BackupSha256 ||
-                readBack.OriginalSha256 != metadata.OriginalSha256)
+            if (!MatchesForRecovery(readBack, metadata))
             {
                 return $"'{path}' was written but does not describe the expected file.";
             }
@@ -175,99 +175,30 @@ internal static class ConversionMetadataStore
     }
 
     /// <summary>
-    /// Determines whether <paramref name="filePath"/> can be restored, verifying the
-    /// backup against the recorded hash rather than trusting that a ".bak" exists.
+    /// Ensures the serialized sidecar still describes the exact conversion that passed
+    /// the pre-install safety checks, rather than merely preserving its two hashes.
     /// </summary>
-    internal static RestoreStatus Inspect(string filePath)
-    {
-        string backupPath = filePath + ".bak";
-        string metadataPath = MetadataPathFor(filePath);
+    private static bool MatchesForRecovery(
+        ConversionMetadata actual,
+        ConversionMetadata expected) =>
+        actual.MetadataVersion == ConversionMetadata.CurrentMetadataVersion &&
+        actual.ConversionId == expected.ConversionId &&
+        actual.OriginalPath == expected.OriginalPath &&
+        actual.OriginalSize == expected.OriginalSize &&
+        actual.OriginalSha256 == expected.OriginalSha256 &&
+        actual.BackupPath == expected.BackupPath &&
+        actual.BackupSha256 == expected.BackupSha256 &&
+        actual.SourceEncodingId == expected.SourceEncodingId &&
+        actual.SourceEncodingName == expected.SourceEncodingName &&
+        actual.SourceEncodingMode == expected.SourceEncodingMode &&
+        actual.SourceHasBom == expected.SourceHasBom &&
+        actual.DetectedEncodingId == expected.DetectedEncodingId &&
+        actual.DetectedEncodingName == expected.DetectedEncodingName &&
+        actual.TargetEncodingId == expected.TargetEncodingId &&
+        actual.TargetEncodingName == expected.TargetEncodingName &&
+        actual.TargetHasBom == expected.TargetHasBom &&
+        actual.SourceTextSha256 == expected.SourceTextSha256 &&
+        actual.OutputTextSha256 == expected.OutputTextSha256 &&
+        actual.UnicodeScalars == expected.UnicodeScalars;
 
-        if (!File.Exists(backupPath))
-        {
-            return new RestoreStatus
-            {
-                Availability = RestoreAvailability.BackupMissing,
-                Detail = $"No backup at '{backupPath}'.",
-            };
-        }
-
-        if (!File.Exists(metadataPath))
-        {
-            return new RestoreStatus
-            {
-                Availability = RestoreAvailability.MetadataMissing,
-                Detail =
-                    $"A backup exists at '{backupPath}' but no '{Suffix}' describes it, "
-                    + "so the encoding it was converted from is unknown.",
-            };
-        }
-
-        ConversionMetadata? metadata;
-
-        try
-        {
-            metadata = JsonSerializer.Deserialize<ConversionMetadata>(
-                File.ReadAllText(metadataPath));
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
-        {
-            return new RestoreStatus
-            {
-                Availability = RestoreAvailability.MetadataUnreadable,
-                Detail = ex.Message,
-            };
-        }
-
-        if (metadata is null || metadata.MetadataVersion != 1)
-        {
-            return new RestoreStatus
-            {
-                Availability = RestoreAvailability.MetadataUnreadable,
-                Detail = metadata is null
-                    ? "The metadata file is empty."
-                    : string.Format(
-                        CultureInfo.InvariantCulture,
-                        "Metadata version {0} is not supported.",
-                        metadata.MetadataVersion),
-            };
-        }
-
-        string actual;
-
-        try
-        {
-            actual = ComputeSha256(backupPath);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return new RestoreStatus
-            {
-                Availability = RestoreAvailability.BackupCorrupted,
-                Metadata = metadata,
-                Detail = ex.Message,
-            };
-        }
-
-        // Both comparisons matter and they are not the same check. The first says the
-        // backup is the file the metadata describes; the second says that file is the
-        // original. A backup that matches neither is not a restore candidate.
-        if (actual != metadata.BackupSha256 || actual != metadata.OriginalSha256)
-        {
-            return new RestoreStatus
-            {
-                Availability = RestoreAvailability.BackupCorrupted,
-                Metadata = metadata,
-                Detail =
-                    $"The backup hashes to {actual}, but the record expects "
-                    + $"{metadata.BackupSha256} (original {metadata.OriginalSha256}).",
-            };
-        }
-
-        return new RestoreStatus
-        {
-            Availability = RestoreAvailability.Available,
-            Metadata = metadata,
-        };
-    }
 }

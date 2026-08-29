@@ -189,16 +189,17 @@ partial class MainForm
         tlnkExport.IsLink = true;
         tlnkExport.Name = "tlnkExport";
         resources.ApplyResources(tlnkExport, "tlnkExport");
+        tlnkExport.AutoSize = true;
         tlnkExport.Click += OnExport;
         // 
         // btnExportReport
         // 
         btnExportReport.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
         resources.ApplyResources(btnExportReport, "btnExportReport");
+        btnExportReport.AutoSize = true;
         btnExportReport.ForeColor = System.Drawing.Color.Blue;
         btnExportReport.Name = "btnExportReport";
-        btnExportReport.ShowDropDownArrow = false;
-        btnExportReport.Click += OnExportReport;
+        btnExportReport.ShowDropDownArrow = true;
         // 
         // actionProgress
         // 

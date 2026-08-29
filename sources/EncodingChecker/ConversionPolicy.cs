@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 
 namespace EncodingChecker;
 
@@ -7,17 +6,8 @@ namespace EncodingChecker;
 /// The one place that decides what happens to a file.
 /// </summary>
 /// <remarks>
-/// Every surface - the CLI, a written plan, and the GUI - asks this and acts on the
-/// answer, rather than each working out for itself what is safe. That is not tidiness.
-/// The GUI previously reached its own conclusion by omission: ambiguity was classified
-/// only during a Convert-mode scan, and the GUI scans in Detect mode, so every entry
-/// arrived at conversion carrying the default "unambiguous" and the refusal that the
-/// CLI applied never fired. The tool converted, on the strength of whatever detection
-/// returned, the exact files it tells CLI users it will not convert.
-/// <para>
-/// A safety rule that lives at one call site is a safety rule the next call site does
-/// not have.
-/// </para>
+/// Every surface - CLI, plan, and GUI - uses the same decision instead of reimplementing
+/// the safety rules. This keeps conversion behaviour consistent across interfaces.
 /// </remarks>
 internal static class ConversionPolicy
 {
@@ -27,59 +17,61 @@ internal static class ConversionPolicy
     /// <param name="reason">
     /// Why, in words a user can act on, when the answer is not a plain conversion.
     /// </param>
+    /// <param name="sourceCharset">The character set of the source file.</param>
+    /// <param name="sourceHasBom">Whether the source file has a BOM.</param>
+    /// <param name="targetCharset">The character set to convert to.</param>
+    /// <param name="targetHasBom">Whether to write a BOM when converting to the target charset.</param>
+    /// <returns>The planned action for the file.</returns>
     internal static PlannedAction Decide(
         string sourceCharset,
         bool sourceHasBom,
         string targetCharset,
         bool targetHasBom,
-        AmbiguityClass? ambiguity,
-        IReadOnlyList<string> competingEncodings,
+        bool sourceWasSpecified,
+        bool isUnicodeOrAscii,
+        out SourceInterpretation sourceInterpretation,
         out string? reason)
     {
         reason = null;
 
         if (string.Equals(
-                sourceCharset, ScanEngine.UNKNOWN_CHARSET, StringComparison.Ordinal))
+                sourceCharset, ScanEngine.UnknownCharset, StringComparison.Ordinal))
         {
+            sourceInterpretation = SourceInterpretation.NotApplicable;
             reason = "The file's encoding could not be identified from its contents.";
             return PlannedAction.Skip;
         }
 
-        // Checked before ambiguity on purpose: a file already in the target encoding is
-        // not written at all, so there is no reading of it to get wrong.
+        // An unchanged file is not read or rewritten, so no source choice is needed.
         if (string.Equals(sourceCharset, targetCharset, StringComparison.OrdinalIgnoreCase)
             && sourceHasBom == targetHasBom)
         {
+            sourceInterpretation = SourceInterpretation.NotApplicable;
             return PlannedAction.Unchanged;
         }
 
-        // The bytes do not identify the encoding that wrote them, and the readings that
-        // fit disagree about the text. Detection still produced an answer; acting on it
-        // rewrites the file into one of several possible readings without saying so.
-        if (ambiguity == AmbiguityClass.TextChanging)
+        // Legacy byte streams do not normally identify the historical codec that wrote
+        // them. Treat detection as guidance, not permission to rewrite a user's file.
+        // The user can select the codec explicitly with -From or the GUI chooser; all
+        // strict decoding, verification, backup, and atomic-install safeguards remain.
+        if (!sourceWasSpecified && !isUnicodeOrAscii)
         {
-            reason = AmbiguityAnalysis.DescribeRefusal(sourceCharset, competingEncodings);
+            sourceInterpretation = SourceInterpretation.LegacyNeedsSourceChoice;
+            reason = $"'{sourceCharset}' is a legacy encoding. Automatic conversion of "
+                     + "legacy text is disabled because the original codec cannot be "
+                     + "established from bytes alone. Specify the source encoding "
+                     + $"explicitly (for example, -From {sourceCharset}).";
             return PlannedAction.Refuse;
         }
 
-        // Nobody looked. That is a bug in the caller, not a property of the file, and it
-        // must not read as permission - which is exactly how the GUI's conversions were
-        // being allowed. Refused rather than thrown because this runs inside a parallel
-        // conversion loop, where refusing leaves every file intact and throwing would
-        // take down a run mid-flight.
-        if (ambiguity is null)
-        {
-            reason = "This file was never classified, so whether converting it would "
-                     + "change its text is unknown. No conversion was performed. This is "
-                     + "an internal error; please report it.";
-            return PlannedAction.Refuse;
-        }
-
+        sourceInterpretation = sourceWasSpecified
+            ? SourceInterpretation.ExplicitSource
+            : SourceInterpretation.AutomaticUnicodeOrAscii;
         return PlannedAction.Convert;
     }
 
     /// <summary>
-    /// How an action reads in a report row.
+    /// Maps a planned action to its report result.
     /// </summary>
     internal static ConversionRowResult ToRowResult(PlannedAction action) => action switch
     {
@@ -88,16 +80,4 @@ internal static class ConversionPolicy
         PlannedAction.Refuse => ConversionRowResult.Error,
         _ => ConversionRowResult.Converted,
     };
-
-    /// <summary>
-    /// Whether converting this file could change its Unicode content, as opposed to only
-    /// re-labelling it.
-    /// </summary>
-    /// <remarks>
-    /// The distinction a confirmation has to draw. A file whose encoding is undetermined
-    /// but whose candidate readings all agree on the text - plain ASCII being the common
-    /// case - is not something to warn about; a file whose candidates disagree is.
-    /// </remarks>
-    internal static bool NeedsDisclosure(AmbiguityClass? ambiguity) =>
-        ambiguity == AmbiguityClass.TextEquivalent;
 }

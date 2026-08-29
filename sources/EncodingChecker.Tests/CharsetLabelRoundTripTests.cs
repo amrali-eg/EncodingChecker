@@ -63,4 +63,17 @@ public sealed class CharsetLabelRoundTripTests
         Assert.True(hasBom);
         Assert.Equal("utf-8", baseCharset);
     }
+
+    [Theory]
+    [MemberData(nameof(BomAwareCharsets))]
+    public void IsBomCapable_RecognizesEveryEncodingOfferedWithABom(string charset) =>
+        Assert.True(ScanEngine.IsBomCapable(charset));
+
+    [Fact]
+    public void DescribeTarget_DoesNotInventABomForAscii()
+    {
+        Assert.False(ScanEngine.IsBomCapable("us-ascii"));
+        Assert.Equal("us-ascii", ScanEngine.DescribeTarget("us-ascii", hasBom: false));
+        Assert.Equal("utf-8 without a BOM", ScanEngine.DescribeTarget("utf-8", hasBom: false));
+    }
 }

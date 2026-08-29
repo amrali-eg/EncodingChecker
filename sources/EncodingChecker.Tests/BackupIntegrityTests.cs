@@ -82,7 +82,7 @@ public sealed class BackupIntegrityTests : IDisposable
         Assert.Equal(ConversionRowResult.Converted, Assert.Single(entries).Result);
         Assert.True(File.Exists(path + ".bak"));
         // Temp filename shape: "<name>.<guid>.bak.<TEMP_FILE_SUFFIX>".
-        Assert.Empty(Directory.GetFiles(_root, $"*.bak.{EncodingConverter.TEMP_FILE_SUFFIX}"));
+        Assert.Empty(Directory.GetFiles(_root, $"*.bak.{EncodingConverter.TempFileSuffix}"));
     }
 
     [Fact]
@@ -122,7 +122,7 @@ public sealed class BackupIntegrityTests : IDisposable
 
         // A leftover temp-conversion artifact, as could survive a crash mid-conversion.
         File.WriteAllText(
-            Path.Combine(_root, $"other.txt.{Guid.NewGuid():N}.{EncodingConverter.TEMP_FILE_SUFFIX}"),
+            Path.Combine(_root, $"other.txt.{Guid.NewGuid():N}.{EncodingConverter.TempFileSuffix}"),
             "leftover temp file content");
 
         var options = new ScanDirectoryOptions

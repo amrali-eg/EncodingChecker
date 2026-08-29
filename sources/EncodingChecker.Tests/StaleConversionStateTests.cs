@@ -211,7 +211,7 @@ public sealed class StaleConversionStateTests : IDisposable
         string path = Path.Combine(_root, "unknown.txt");
         File.WriteAllText(path, TestContent.Ascii, Encoding.ASCII);
 
-        ConversionReportEntry entry = Entry(path, ScanEngine.UNKNOWN_CHARSET);
+        ConversionReportEntry entry = Entry(path, ScanEngine.UnknownCharset);
         byte[] originalBytes = File.ReadAllBytes(path);
 
         Convert(entry, "utf-16", targetWriteBom: true);

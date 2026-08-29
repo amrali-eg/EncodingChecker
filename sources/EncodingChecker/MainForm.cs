@@ -48,6 +48,8 @@ public partial class MainForm : Form
 
     private readonly ListViewColumnSorter _lvwColumnSorter;
     private readonly BackgroundWorker _actionWorker;
+    private readonly ToolStripMenuItem _exportCsv = new("CSV report...");
+    private readonly ToolStripMenuItem _exportJournal = new("Conversion history (JSON)...");
 
     private CurrentAction _currentAction;
     private Settings _settings = new();
@@ -58,26 +60,20 @@ public partial class MainForm : Form
     private Dictionary<string, ListViewItem>? _convertItemsByPath;
     private string? _convertTargetLabel;
 
-    // Written by the worker and read after completion. e.Result cannot be used
-    // because its getter throws when the operation is cancelled.
+    // The worker writes results here because e.Result is unavailable after cancellation.
     private ConcurrentBag<ConversionReportEntry>? _convertResults;
 
-    // Set by OnConvert and read by ConvertWorkerCompleted to distinguish
-    // actual conversion from preview ("would be converted").
+    // Set by OnConvert and read by ConvertWorkerCompleted to distinguish conversion from preview.
     private bool _convertWasPreview;
 
-    // When the last conversion began, so a journal exported afterwards can say. Null
-    // until one has run: there is nothing to journal before that.
+    // Start time for the last conversion, used when exporting its journal.
     private DateTime? _lastConversionStartedUtc;
 
-    // Held so the completion handler can read how the run ended, as reported by
-    // ConversionOrchestrator: converted, previewed, cancelled, or stopped because the
-    // files moved underneath the plan. The worker method is static and writes into it.
+    // Shared with the completion handler so it can report how the run ended.
     private ConvertWorkerArgs? _convertArgs;
 
     // Indices into imgsResults (see SetKeyName calls in MainForm.Designer.cs).
-    // Reuses the existing Failed and Warning icons; the Warning icon carries the
-    // preview/would-change state.
+    // Reuses the existing Failed and Warning icons; Warning marks preview rows.
     private const int RESULT_ICON_SUCCESS = 0;
     private const int RESULT_ICON_FAILED = 1;
     private const int RESULT_ICON_WOULD_CHANGE = 2;
@@ -90,14 +86,15 @@ public partial class MainForm : Form
     public MainForm()
     {
         InitializeComponent();
+        ConfigureExportMenu();
 
-			// Default to deterministic filename sorting instead of parallel completion order.
-			_lvwColumnSorter = new ListViewColumnSorter
-			{
-			    SortColumn = RESULTS_COLUMN_FILE_NAME,
-			    Order = SortOrder.Ascending,
-			};
-			lstResults.ListViewItemSorter = _lvwColumnSorter;
+        // Keep result ordering deterministic despite parallel processing.
+        _lvwColumnSorter = new ListViewColumnSorter
+        {
+            SortColumn = RESULTS_COLUMN_FILE_NAME,
+            Order = SortOrder.Ascending,
+        };
+        lstResults.ListViewItemSorter = _lvwColumnSorter;
 
         _actionWorker = new BackgroundWorker
         {
@@ -108,6 +105,15 @@ public partial class MainForm : Form
         _actionWorker.DoWork += ActionWorkerDoWork;
         _actionWorker.ProgressChanged += ActionWorkerProgressChanged;
         _actionWorker.RunWorkerCompleted += ActionWorkerCompleted;
+    }
+
+    private void ConfigureExportMenu()
+    {
+        _exportCsv.Click += OnExportCsvReport;
+        _exportJournal.Click += OnExportJournal;
+
+        btnExportReport.DropDownItems.AddRange([_exportCsv, _exportJournal]);
+        btnExportReport.DropDownOpening += OnExportResultsOpening;
     }
 
     #region Form events
@@ -122,14 +128,14 @@ public partial class MainForm : Form
         {
             try
             {
-                // Add only charsets supported by .NET.
+                // Show only charsets supported by .NET.
                 var encoding = Encoding.GetEncoding(validCharset);
 
                 lstValidCharsets.Items.Add(encoding.WebName);
                 lstConvert.Items.Add(encoding.WebName);
 
-                // Add BOM variants after UTF-8/16/32.
-                if (encoding.WebName is "utf-16BE" or "utf-16" or "utf-8" or "utf-32" or "utf-32BE")
+                // Add BOM variants for encodings where BOM is meaningful.
+                if (ScanEngine.IsBomCapable(encoding.WebName))
                 {
                     lstValidCharsets.Items.Add(encoding.WebName + "-bom");
                     lstConvert.Items.Add(encoding.WebName + "-bom");
@@ -138,7 +144,7 @@ public partial class MainForm : Form
             catch (Exception ex) when (
                 ex is ArgumentException or NotSupportedException)
             {
-                // Ignore unsupported charsets.
+                // Ignore charsets unavailable in the current runtime.
             }
         }
 
@@ -153,10 +159,10 @@ public partial class MainForm : Form
 
         LoadSettings();
 
-        // Reflect the default sort column/order set in the constructor.
+        // Match the sorter state shown in the header.
         lstResults.SetSortIcon(_lvwColumnSorter.SortColumn, _lvwColumnSorter.Order);
 
-        // Size columns for the initial window size.
+        // Size columns for the initial window.
         lstResults.Columns[RESULTS_COLUMN_CHARSET]
             .AutoResize(ColumnHeaderAutoResizeStyle.HeaderSize);
 
@@ -177,7 +183,7 @@ public partial class MainForm : Form
     {
         if (_actionWorker.IsBusy)
         {
-            // Cancel and defer the close until the worker settles, not mid-operation.
+            // Let the worker finish its cancellation path before closing.
             e.Cancel = true;
 
             if (!_closeRequested)
@@ -222,6 +228,10 @@ public partial class MainForm : Form
     }
 
     private void OnResultItemChecked(object? sender, ItemCheckedEventArgs e)
+        => UpdateSelectDeselectAllState();
+
+    /// <summary>Synchronizes the tri-state selector with the individual result rows.</summary>
+    private void UpdateSelectDeselectAllState()
     {
         chkSelectDeselectAll.CheckedChanged -= OnSelectDeselectAll;
 
@@ -278,143 +288,6 @@ public partial class MainForm : Form
         aboutForm.ShowDialog(this);
     }
 
-    private void OnExport(object? sender, EventArgs e)
-    {
-        if (lstResults.CheckedItems.Count == 0)
-        {
-            ShowWarning("Select one or more files to export");
-            return;
-        }
-
-        var saveFileDialog = new SaveFileDialog
-        {
-            Title = @"Export to a Text File",
-            Filter = @"Text files (*.txt)|*.txt",
-            FileName = "Encoding.txt",
-            RestoreDirectory = true,
-        };
-
-        if (saveFileDialog.ShowDialog(this) != DialogResult.OK)
-            return;
-
-        try
-        {
-            using var writer = new StreamWriter(saveFileDialog.FileName, false, Encoding.UTF8);
-
-            foreach (ListViewItem item in lstResults.CheckedItems)
-            {
-                string charset =
-                    item.SubItems[RESULTS_COLUMN_CHARSET].Text;
-
-                string fileName =
-                    item.SubItems[RESULTS_COLUMN_FILE_NAME].Text;
-
-                string directory =
-                    item.SubItems[RESULTS_COLUMN_DIRECTORY].Text;
-
-                writer.WriteLine(
-                    "{0}\t{1}\\{2}",
-                    charset,
-                    directory,
-                    fileName);
-            }
-        }
-        catch (Exception ex) when (
-            ex is IOException or UnauthorizedAccessException)
-        {
-            ShowWarning(
-                "Failed to export the report: {0}",
-                ex.Message);
-        }
-    }
-
-    private void OnExportReport(object? sender, EventArgs e)
-    {
-        if (lstResults.Items.Count == 0)
-        {
-            ShowWarning("There are no results to export");
-            return;
-        }
-
-        var saveFileDialog = new SaveFileDialog
-        {
-            Title = @"Export Conversion Report",
-
-            // Two records, not two formats of one. The CSV is the results table as
-            // shown; the journal is what EC believed, decided and wrote for every file,
-            // including the ones it refused.
-            Filter = @"CSV files (*.csv)|*.csv|Conversion journal (*.json)|*.json",
-            FileName = "Conversion report.csv",
-            RestoreDirectory = true,
-        };
-
-        if (saveFileDialog.ShowDialog(this) != DialogResult.OK)
-            return;
-
-        var entries =
-            new List<ConversionReportEntry>(lstResults.Items.Count);
-
-        // Tag is always set to the entry when the row is added (ActionWorkerProgressChanged).
-        foreach (ListViewItem item in lstResults.Items)
-            entries.Add((ConversionReportEntry)item.Tag!);
-
-        if (saveFileDialog.FilterIndex == 2)
-        {
-            ExportJournal(entries, saveFileDialog.FileName);
-            return;
-        }
-
-        try
-        {
-            using var writer =
-                new StreamWriter(saveFileDialog.FileName, false, Encoding.UTF8);
-
-            ConversionReport.WriteCsv(entries, writer);
-        }
-        catch (Exception ex) when (
-            ex is IOException or UnauthorizedAccessException)
-        {
-            ShowWarning(
-                "Failed to export the csv report: {0}",
-                ex.Message);
-        }
-    }
-
-    /// <summary>Writes the record of what the last conversion actually did.</summary>
-    private void ExportJournal(List<ConversionReportEntry> entries, string path)
-    {
-        if (_lastConversionStartedUtc is not { } startedUtc)
-        {
-            ShowWarning(
-                "There is no conversion to journal yet. Run Convert first; a journal "
-                + "records what a conversion did, which a detection scan has not.");
-
-            return;
-        }
-
-        ScanEngine.ParseCharsetLabel(
-            (string)lstConvert.SelectedItem!,
-            out string targetCharset,
-            out bool targetWriteBom);
-
-        string? error = ConversionJournal.FromRun(
-                entries,
-                lstBaseDirectory.Text,
-                targetCharset,
-                targetWriteBom,
-                chkCreateBackup.Checked,
-                explicitSource: entries.Count > 0
-                                && entries.TrueForAll(e => e.SourceEncodingWasSpecified)
-                    ? entries[0].ResolvedSourceLabel
-                    : null,
-                surface: "Gui",
-                startedUtc)
-            .Save(path);
-
-        if (error != null)
-            ShowWarning("Failed to export the journal: {0}", error);
-    }
-
     private void OnBaseDirectoryDragEnter(object? sender, DragEventArgs e)
     {
         e.Effect =
@@ -459,687 +332,7 @@ public partial class MainForm : Form
 
     #endregion
 
-    #region Action button handling
 
-    private void OnAction(object? sender, EventArgs e)
-    {
-        // Only btnView/btnValidate are wired to this handler, and both have Tag set below.
-        CurrentAction action =
-            (CurrentAction)((Button)sender!).Tag!;
-
-        StartAction(action);
-    }
-
-    private void StartAction(CurrentAction action)
-    {
-        if (_actionWorker.IsBusy)
-            return;
-
-        string directory = lstBaseDirectory.Text;
-
-        if (string.IsNullOrEmpty(directory))
-        {
-            ShowWarning("Please specify a directory to check");
-            return;
-        }
-
-        if (!Directory.Exists(directory))
-        {
-            ShowWarning(
-                "The directory you specified '{0}' does not exist",
-                directory);
-            return;
-        }
-
-        if (action == CurrentAction.Validate &&
-            lstValidCharsets.CheckedItems.Count == 0)
-        {
-            ShowWarning(
-                "Select one or more valid character sets to proceed with validation");
-            return;
-        }
-
-        _currentAction = action;
-        _settings.AddRecentDirectory(directory);
-
-        UpdateControlsOnActionStart();
-
-        // Suspend redraw until ScanWorkerCompleted, once results stop streaming in.
-        lstResults.BeginUpdate();
-        lstResults.ListViewItemSorter = null;
-        lstResults.ItemChecked -= OnResultItemChecked;
-        lstResults.Items.Clear();
-
-        var validCharsets =
-            new List<string>(lstValidCharsets.CheckedItems.Count);
-
-        foreach (string validCharset in lstValidCharsets.CheckedItems)
-            validCharsets.Add(validCharset);
-
-        _actionCancellation?.Dispose();
-        _actionCancellation = new CancellationTokenSource();
-
-        var args = new WorkerArgs
-        {
-            Action = action,
-            BaseDirectory = directory,
-            IncludeSubdirectories = chkIncludeSubdirectories.Checked,
-            FileMasks = txtFileMasks.Text,
-            ValidCharsets = validCharsets,
-            CancellationToken = _actionCancellation.Token,
-        };
-
-        _actionWorker.RunWorkerAsync(args);
-    }
-
-    private void OnConvert(object? sender, EventArgs e)
-    {
-        if (_actionWorker.IsBusy)
-            return;
-
-        if (lstResults.CheckedItems.Count == 0)
-        {
-            ShowWarning("Select one or more files to convert");
-            return;
-        }
-
-        // BOM is handled separately from the charset name.
-        // lstConvert is DropDownList-style and OnFormLoad selects index 0 once
-        // populated, so SelectedItem is never null here.
-        string targetLabel = (string)lstConvert.SelectedItem!;
-
-        ScanEngine.ParseCharsetLabel(
-            targetLabel,
-            out string targetBaseCharset,
-            out bool writeBom);
-
-        var itemsByPath =
-            new Dictionary<string, ListViewItem>(
-                StringComparer.OrdinalIgnoreCase);
-
-        var entries =
-            new List<ConversionReportEntry>(
-                lstResults.CheckedItems.Count);
-
-        // Tag is always set to the entry when the row is added (ActionWorkerProgressChanged).
-        foreach (ListViewItem item in lstResults.CheckedItems)
-        {
-            var entry = (ConversionReportEntry)item.Tag!;
-
-            itemsByPath[entry.FilePath] = item;
-            entries.Add(entry);
-        }
-
-        var completed = new ConcurrentBag<ConversionReportEntry>();
-
-        _convertItemsByPath = itemsByPath;
-        _convertTargetLabel = targetLabel;
-        _convertResults = completed;
-        _convertWasPreview = chkPreviewChanges.Checked;
-        _currentAction = CurrentAction.Convert;
-
-        UpdateControlsOnActionStart();
-
-        _actionCancellation?.Dispose();
-        _actionCancellation = new CancellationTokenSource();
-
-        var args = new ConvertWorkerArgs
-        {
-            Entries = entries,
-            BaseDirectory = lstBaseDirectory.Text,
-            TargetBaseCharset = targetBaseCharset,
-            TargetWriteBom = writeBom,
-            Preview = chkPreviewChanges.Checked,
-            Backup = chkCreateBackup.Checked,
-            Completed = completed,
-
-            // Runs on the worker thread, so the dialog is marshalled back here. The
-            // orchestrator does not know or care which thread it is on.
-            Confirm = plan => (ConfirmationResponse)Invoke(() => Confirm(plan)),
-            CancellationToken = _actionCancellation.Token,
-        };
-
-        _convertArgs = args;
-        _lastConversionStartedUtc = DateTime.UtcNow;
-        _actionWorker.RunWorkerAsync(args);
-    }
-
-    /// <summary>Shows a decided plan and reports what the user said.</summary>
-    private ConfirmationResponse Confirm(ConversionPlan plan)
-    {
-        using var dialog = new ConversionConfirmationForm(plan);
-
-        return dialog.ShowDialog(this) switch
-        {
-            DialogResult.OK => ConfirmationResponse.Proceed,
-            DialogResult.Retry when dialog.ChosenSourceEncoding is { } chosen =>
-                new ConfirmationResponse(
-                    ConfirmationChoice.ChooseSourceEncoding,
-                    chosen,
-                    dialog.ChosenFiles),
-            _ => ConfirmationResponse.Cancel,
-        };
-    }
-
-    private void OnCancelAction(object? sender, EventArgs e)
-    {
-        if (_actionWorker.IsBusy)
-        {
-            btnCancel.Visible = false;
-            _actionWorker.CancelAsync();
-            _actionCancellation?.Cancel();
-        }
-    }
-
-    #endregion
-
-    #region Background worker event handlers
-
-    private static void ActionWorkerDoWork(
-        object? sender,
-        DoWorkEventArgs e)
-    {
-        if (e.Argument is ConvertWorkerArgs convertArgs)
-        {
-            ConvertWorkerDoWork(convertArgs, e);
-            return;
-        }
-
-        var worker = (BackgroundWorker)sender!;
-        var args = (WorkerArgs)e.Argument!;
-
-        List<string> includePatterns =
-            SplitFileMasks(args.FileMasks);
-
-        var scanOptions = new ScanDirectoryOptions
-        {
-            BaseDirectory = args.BaseDirectory,
-            IncludeSubdirectories = args.IncludeSubdirectories,
-            IncludePatterns = includePatterns,
-            Action =
-                args.Action == CurrentAction.Validate
-                    ? ScanAction.Validate
-                    : ScanAction.Detect,
-            ValidCharsets = args.ValidCharsets,
-        };
-
-        try
-        {
-            ScanEngine.ScanDirectory(
-                scanOptions,
-                onEntry: entry =>
-                {
-                    // Hide files that already pass validation.
-                    if (args.Action == CurrentAction.Validate &&
-                        entry.Result == ConversionRowResult.Unchanged)
-                    {
-                        return;
-                    }
-
-                    worker.ReportProgress(0, entry);
-                },
-                args.CancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            e.Cancel = true;
-        }
-    }
-
-    // No per-file progress to report; results are applied in one batch in
-    // ConvertWorkerCompleted. Results accumulate into args.Completed (the caller's
-    // _convertResults) rather than e.Result, which is unreadable once e.Cancel is set.
-    private static void ConvertWorkerDoWork(
-        ConvertWorkerArgs args,
-        DoWorkEventArgs e)
-    {
-        try
-        {
-            args.Outcome = new ConversionOrchestrator(args.Confirm).Run(
-                args.Entries,
-                args.BaseDirectory,
-                args.TargetBaseCharset,
-                args.TargetWriteBom,
-                backup: args.Backup,
-                preview: args.Preview,
-                ScanEngine.DefaultMaxParallelism,
-                onEntry: args.Completed.Add,
-                args.CancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            e.Cancel = true;
-        }
-    }
-
-    // GUI masks are newline-separated; ScanEngine receives split patterns.
-    private static List<string> SplitFileMasks(string fileMaskString)
-    {
-        if (string.IsNullOrWhiteSpace(fileMaskString))
-            return [];
-
-        return
-        [
-            .. fileMaskString
-                .Split(
-                    [Environment.NewLine],
-                    StringSplitOptions.RemoveEmptyEntries)
-                .Select(mask => mask.Trim())
-                .Where(mask => mask.Length > 0)
-        ];
-    }
-
-    private void ActionWorkerProgressChanged(
-        object? sender,
-        ProgressChangedEventArgs e)
-    {
-        if (e.UserState is not ConversionReportEntry entry)
-            return;
-
-        string charsetLabel =
-            ScanEngine.FormatCharsetLabel(
-                entry.SourceEncoding,
-                entry.SourceHasBom);
-
-        var resultItem = new ListViewItem(
-            [
-                charsetLabel,
-                Path.GetFileName(entry.FilePath),
-                Path.GetExtension(entry.FilePath),
-                Path.GetDirectoryName(entry.FilePath) ?? string.Empty
-            ],
-            -1)
-        {
-            Tag = entry,
-        };
-
-        lstResults.Items.Add(resultItem);
-        actionStatus.Text = entry.FilePath;
-    }
-
-    private void ActionWorkerCompleted(
-        object? sender,
-        RunWorkerCompletedEventArgs e)
-    {
-        if (_currentAction == CurrentAction.Convert)
-            ConvertWorkerCompleted(e);
-        else
-            ScanWorkerCompleted(e);
-
-        // Deferred from OnFormClosing while this operation was still running.
-        if (_closeRequested)
-            Close();
-    }
-
-    private void ScanWorkerCompleted(RunWorkerCompletedEventArgs e)
-    {
-        if (e.Error != null)
-        {
-            ShowWarning(
-                "An unexpected error occurred while scanning: {0}",
-                e.Error.Message);
-        }
-
-        if (lstResults.Items.Count > 0)
-        {
-            foreach (ColumnHeader columnHeader in lstResults.Columns)
-            {
-                columnHeader.AutoResize(
-                    ColumnHeaderAutoResizeStyle.ColumnContent);
-            }
-        }
-
-        // Redraw was suspended in StartAction; restore sorting and resume now.
-        lstResults.ListViewItemSorter = _lvwColumnSorter;
-        lstResults.ItemChecked += OnResultItemChecked;
-        lstResults.Sort();
-        lstResults.EndUpdate();
-
-        string statusMessage = e.Cancelled
-            ? "Cancelled - {0} files processed"
-            : _currentAction == CurrentAction.View
-                ? "{0} files processed"
-                : "{0} files do not have the correct encoding";
-
-        UpdateControlsOnActionDone(
-            string.Format(statusMessage, lstResults.Items.Count));
-    }
-
-    private void ConvertWorkerCompleted(RunWorkerCompletedEventArgs e)
-    {
-        string targetLabel = _convertTargetLabel!;
-        Dictionary<string, ListViewItem> itemsByPath = _convertItemsByPath!;
-        ConcurrentBag<ConversionReportEntry> completed = _convertResults ?? [];
-        bool wasPreview = _convertWasPreview;
-        OrchestrationResult? outcome = _convertArgs?.Outcome;
-
-        _convertItemsByPath = null;
-        _convertTargetLabel = null;
-        _convertResults = null;
-        _convertWasPreview = false;
-        _convertArgs = null;
-
-        // Every one of these leaves the files untouched. Reported before the rows are
-        // updated, because there is nothing to update.
-        if (e.Error is null && !e.Cancelled && outcome is not null &&
-            outcome.Outcome is not (OrchestrationOutcome.Converted
-                                    or OrchestrationOutcome.Previewed))
-        {
-            if (outcome.Message is not null)
-                ShowWarning("{0}", outcome.Message);
-
-            UpdateControlsOnActionDone(
-                outcome.Outcome == OrchestrationOutcome.Cancelled
-                    ? "Conversion cancelled. No files were modified."
-                    : "Conversion did not run. No files were modified.");
-
-            return;
-        }
-
-        if (e.Error != null)
-        {
-            ShowWarning(
-                "An unexpected error occurred while converting: {0}",
-                e.Error.Message);
-
-            UpdateControlsOnActionDone("Conversion failed.");
-            return;
-        }
-
-        int convertedCount = 0;
-        int unchangedCount = 0;
-        int errorCount = 0;
-
-        // Update the UI only after parallel processing completes.
-        lstResults.BeginUpdate();
-        lstResults.ItemChecked -= OnResultItemChecked;
-
-        foreach (ConversionReportEntry entry in completed)
-        {
-            if (!itemsByPath.TryGetValue(
-                    entry.FilePath,
-                    out ListViewItem? item))
-            {
-                continue;
-            }
-
-            UpdateResultItem(item, entry, targetLabel, wasPreview);
-
-            switch (entry.Result)
-            {
-                case ConversionRowResult.Converted:
-                    convertedCount++;
-                    break;
-                case ConversionRowResult.Error:
-                    errorCount++;
-                    break;
-                default:
-                    unchangedCount++;
-                    break;
-            }
-        }
-
-        // The Charset column changed for converted rows.
-        lstResults.Sort();
-
-        lstResults.ItemChecked += OnResultItemChecked;
-        lstResults.EndUpdate();
-
-        OnResultItemChecked(
-            lstResults,
-            new ItemCheckedEventArgs(lstResults.Items[0]));
-
-        btnExportReport.Visible = lstResults.Items.Count > 0;
-
-        // Preview writes nothing, so the summary must not claim files were converted.
-        string statusMessage = wasPreview
-            ? (e.Cancelled
-                ? $"Preview cancelled: {convertedCount} file(s) would be converted, " +
-                  $"{unchangedCount} unchanged, {errorCount} failed"
-                : $"Preview complete: {convertedCount} file(s) would be converted, " +
-                  $"{unchangedCount} unchanged, {errorCount} failed")
-            : (e.Cancelled
-                ? $"Conversion cancelled: {convertedCount} converted, " +
-                  $"{unchangedCount} unchanged, {errorCount} failed"
-                : $"Conversion complete: {convertedCount} converted, " +
-                  $"{unchangedCount} unchanged, {errorCount} failed");
-
-        UpdateControlsOnActionDone(statusMessage);
-    }
-
-    // Reconciles one result row with the outcome of processing it. Kept internal so
-    // preview/convert presentation behavior can be tested without creating a real form.
-    internal static void UpdateResultItem(
-        ListViewItem item,
-        ConversionReportEntry entry,
-        string targetLabel,
-        bool wasPreview)
-    {
-        // The row's own entry is what OnExportReport writes to CSV, so it has to be the
-        // entry that produced this presentation. Processing normally mutates the entry
-        // in place, but ScanEngine.RunParallel substitutes a fresh error entry if a file
-        // throws, and that substitute would otherwise never reach the row - leaving the
-        // CSV reporting a stale pre-error result while the row displayed the failure.
-        item.Tag = entry;
-
-        if (entry.Result == ConversionRowResult.Converted)
-        {
-            // Under preview nothing was written, so the row must keep describing the
-            // file as it still is on disk: same charset, still checked so a follow-up
-            // real Convert doesn't silently skip it. Only the icon changes, marking
-            // "this would be converted".
-            if (wasPreview)
-            {
-                item.ImageIndex = RESULT_ICON_WOULD_CHANGE;
-                return;
-            }
-
-            item.Checked = false;
-            item.ImageIndex = RESULT_ICON_SUCCESS;
-            item.SubItems[RESULTS_COLUMN_CHARSET].Text = targetLabel;
-        }
-        else if (entry.Result == ConversionRowResult.Error)
-        {
-            // The row keeps its charset and stays checked so the failure can be
-            // retried; only the icon marks it as failed.
-            item.ImageIndex = RESULT_ICON_FAILED;
-
-            Debug.WriteLine(
-                $"Conversion failed for {entry.FilePath}: {entry.Diagnostic}");
-        }
-        else if (entry.Result == ConversionRowResult.Skipped)
-        {
-            Debug.WriteLine(
-                $"Conversion skipped for {entry.FilePath}: encoding could not be determined.");
-        }
-        // Unchanged: already matches the target; leave the row unchanged.
-    }
-
-    #endregion
-
-    #region Loading and saving settings
-
-    private void LoadSettings()
-    {
-        string settingsFileName = GetSettingsFileName();
-
-        // A missing file is the first run, not a reason to skip applying
-        // settings: the defaults on Settings are the intended startup state, and
-        // returning here left them unapplied so the checkboxes showed whatever
-        // the designer happened to set.
-        Settings settings = new();
-
-        if (!File.Exists(settingsFileName))
-        {
-            ApplySettings(settings);
-            return;
-        }
-
-        try
-        {
-            using (var settingsFile = new FileStream(
-                settingsFileName,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.Read))
-            {
-                var serializer = new XmlSerializer(typeof(Settings));
-
-                settings =
-                    serializer.Deserialize(settingsFile) as Settings
-                    ?? new Settings();
-            }
-        }
-        catch (Exception ex) when (
-            ex is IOException or
-            UnauthorizedAccessException or
-            InvalidOperationException)
-        {
-            // Corrupt or unreadable settings shouldn't prevent startup.
-            settings = new Settings();
-        }
-
-        ApplySettings(settings);
-    }
-
-    /// <summary>Applies loaded or default settings to the form.</summary>
-    private void ApplySettings(Settings settings)
-    {
-        _settings = settings;
-
-        if (settings.RecentDirectories.Count > 0)
-        {
-            foreach (string recentDirectory in
-                     settings.RecentDirectories)
-            {
-                lstBaseDirectory.Items.Add(recentDirectory);
-            }
-
-            lstBaseDirectory.SelectedIndex = 0;
-        }
-        else
-        {
-            lstBaseDirectory.Text =
-                Environment.CurrentDirectory;
-        }
-
-        chkIncludeSubdirectories.Checked =
-            settings.IncludeSubdirectories;
-
-        chkCreateBackup.Checked =
-            settings.CreateBackup;
-
-        // Restore CRLF for the multiline textbox; XmlSerializer writes LF.
-        txtFileMasks.Text = settings.FileMasks
-            .Replace("\r\n", "\n")
-            .Replace("\n", "\r\n");
-
-        if (settings.ValidCharsets.Length > 0)
-        {
-            for (int i = 0;
-                 i < lstValidCharsets.Items.Count;
-                 i++)
-            {
-                if (Array.Exists(
-                    settings.ValidCharsets,
-                    charset => charset.Equals(
-                        (string)lstValidCharsets.Items[i],
-                        StringComparison.OrdinalIgnoreCase)))
-                {
-                    lstValidCharsets.SetItemChecked(i, true);
-                }
-            }
-        }
-
-        settings.WindowPosition.ApplyTo(this);
-    }
-
-    private void SaveSettings()
-    {
-        _settings.IncludeSubdirectories =
-            chkIncludeSubdirectories.Checked;
-
-        _settings.CreateBackup =
-            chkCreateBackup.Checked;
-
-        _settings.FileMasks =
-            txtFileMasks.Text;
-
-        _settings.ValidCharsets =
-            new string[lstValidCharsets.CheckedItems.Count];
-
-        for (int i = 0;
-             i < lstValidCharsets.CheckedItems.Count;
-             i++)
-        {
-            _settings.ValidCharsets[i] =
-                (string)lstValidCharsets.CheckedItems[i]!;
-        }
-
-        _settings.WindowPosition =
-            new WindowPosition
-            {
-                Left = Left,
-                Top = Top,
-                Width = Width,
-                Height = Height
-            };
-
-        string settingsFileName =
-            GetSettingsFileName();
-
-        try
-        {
-            using var settingsFile = new FileStream(
-                settingsFileName,
-                FileMode.Create,
-                FileAccess.Write,
-                FileShare.None);
-
-            var serializer =
-                new XmlSerializer(typeof(Settings));
-
-            serializer.Serialize(
-                settingsFile,
-                _settings);
-
-            settingsFile.Flush();
-        }
-        catch (Exception ex) when (
-            ex is IOException or
-            UnauthorizedAccessException or
-            InvalidOperationException)
-        {
-            // Settings are non-critical; don't block closing the app over this.
-        }
-    }
-
-    private static string GetSettingsFileName()
-    {
-        string dataDirectory =
-            Environment.GetFolderPath(
-                Environment.SpecialFolder.ApplicationData);
-
-        if (string.IsNullOrEmpty(dataDirectory) ||
-            !Directory.Exists(dataDirectory))
-        {
-            dataDirectory = Environment.CurrentDirectory;
-        }
-
-        dataDirectory =
-            Path.Combine(
-                dataDirectory,
-                "EncodingChecker");
-
-        if (!Directory.Exists(dataDirectory))
-            Directory.CreateDirectory(dataDirectory);
-
-        return Path.Combine(
-            dataDirectory,
-            "Settings.xml");
-    }
-
-    #endregion
 
     private void UpdateControlsOnActionStart()
     {
@@ -1151,9 +344,7 @@ public partial class MainForm : Form
         btnConvert.Enabled = false;
         chkSelectDeselectAll.Enabled = false;
 
-        // Reset only the tri-state widget; without detaching this handler, CheckedChanged
-        // calls OnSelectDeselectAll and clears all row selections. Preview must preserve
-        // those selections for a later real Convert.
+        // Reset the tri-state control without changing individual row selections.
         chkSelectDeselectAll.CheckedChanged -= OnSelectDeselectAll;
 
         try
@@ -1166,7 +357,7 @@ public partial class MainForm : Form
             chkSelectDeselectAll.CheckedChanged += OnSelectDeselectAll;
         }
 
-        // Preserve the user's option choices across runs; disable only while the action runs.
+        // Preserve user options; disable them only while processing.
         chkCreateBackup.Enabled = false;
         chkPreviewChanges.Enabled = false;
 
@@ -1174,7 +365,7 @@ public partial class MainForm : Form
 
         btnCancel.Visible = true;
 
-        // Total file count isn't known up front, so show activity, not a percentage.
+        // Total work is unknown, so use an activity indicator rather than a percentage.
         actionProgress.Style =
             ProgressBarStyle.Marquee;
 

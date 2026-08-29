@@ -96,7 +96,7 @@ internal static class TextEncoding
         if (!stream.CanSeek)
         {
             throw new ArgumentException(
-                "The stream must be seekable.",
+                @"The stream must be seekable.",
                 nameof(stream));
         }
 
@@ -171,10 +171,6 @@ internal static class TextEncoding
 
         buffer = buffer[..bytesToExamine];
 
-        // Every detection route funnels through here, so this is the one place that has
-        // to record it. See DetectionCounters for why the count exists.
-        DetectionCounters.RecordDetection();
-
         // Reject high-entropy data as likely binary.
         if (buffer.Length >= MinimumEntropyProbeBytes &&
             BinaryEntropy(buffer) > BinaryEntropyThreshold)
@@ -234,10 +230,7 @@ internal static class TextEncoding
     /// Every charset EC can name or convert to.
     /// </summary>
     /// <remarks>
-    /// Shared with <see cref="EncodingAmbiguity"/>, which needs the same set to decide
-    /// whether a file's bytes identify one encoding or several. That question must be
-    /// answered against what EC actually supports; deriving the candidates from any
-    /// other source would make the answer depend on something the user cannot see.
+    /// Used by the explicit-source picker and command-line validation.
     /// </remarks>
     internal static readonly string[] SupportedCharsets =
     [
@@ -264,22 +257,12 @@ internal static class TextEncoding
     ];
 
 
-
     /// <summary>
-    /// Returns an encoding whose decoder and encoder actually enforce strict fallback.
+    /// Returns an encoding whose decoder and encoder enforce strict fallback.
     /// </summary>
     /// <remarks>
-    /// Assigning <see cref="Decoder.Fallback"/> or <see cref="Encoder.Fallback"/> after
-    /// <see cref="Encoding.GetDecoder"/>/<see cref="Encoding.GetEncoder"/> has no effect for
-    /// the encodings supplied by <see cref="System.Text.CodePagesEncodingProvider"/>: those
-    /// codecs take their fallbacks from the parent <see cref="Encoding"/> when they are
-    /// created, so a later assignment is silently ignored and unmappable input is replaced
-    /// instead of throwing. The fallbacks must be supplied up front, to
-    /// <see cref="Encoding.GetEncoding(int, EncoderFallback, DecoderFallback)"/>.
-    /// <para>
-    /// Only the codecs come from the returned encoding; callers that emit a preamble must
-    /// keep using their original instance, which is what carries the requested BOM policy.
-    /// </para>
+    /// Fallbacks are supplied when the encoding is created because changing them
+    /// afterwards is not reliable for code-page encodings.
     /// </remarks>
     internal static Encoding Strict(
         Encoding encoding)
@@ -301,11 +284,26 @@ internal static class TextEncoding
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
         {
-            // An encoding that cannot be rebuilt from its code page keeps the original
-            // instance rather than failing the caller outright.
-            return encoding;
+            // Returning the original encoding here could silently re-enable its
+            // replacement fallback. A caller that cannot obtain strict semantics must
+            // refuse conversion instead.
+            throw new NotSupportedException(
+                $"EC could not construct a strict codec for code page {encoding.CodePage}.",
+                ex);
         }
     }
+
+    /// <summary>
+    /// Whether a detected source is safe to convert without asking the user to name the
+    /// source codec. This deliberately covers only Unicode and ASCII.
+    /// </summary>
+    internal static bool IsUnicodeOrAscii(Encoding encoding) => encoding.CodePage is
+        20127 or // US-ASCII
+        65001 or // UTF-8
+        1200 or  // UTF-16LE
+        1201 or  // UTF-16BE
+        12000 or // UTF-32LE
+        12001;  // UTF-32BE
 
 
     /// <summary>

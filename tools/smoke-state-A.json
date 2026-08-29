@@ -1,0 +1,10 @@
+{
+ "root": "C:\\Users\\Amr\\AppData\\Local\\Temp\\claude\\C--Users-Amr-source-repos-EncodingChecker-master-sources\\f62617c4-21ad-4a35-b7ea-b0001ef44ef5\\scratchpad\\smoke\\EC-smoke-A",
+ "before": {
+  "french.txt": "b68ef7e557d738885f658c500f81d643281b6f8e90ed928508992f039a5948a5",
+  "jp.txt": "19c4aa22feba56d5f00824dca3a4b3d305fccb96c64f9910f2f6a07b6a6a3a54",
+  "plain.txt": "98ddbfb7dd3f0462985d7f4b99021577e056e3d7b3761b4423c8dc49031e221f",
+  "russian.txt": "dfe8afa124991d12a87d090d3c8b607da58563e70323d2afc6adf730b741250d",
+  "tiny.txt": "559aead08264d5795d3909718cdd05abd49572e84fe55590eef31a88a08fdffd"
+ }
+}

@@ -47,8 +47,7 @@ internal sealed class ScanDirectoryOptions
     internal IReadOnlyList<string>? ExcludePatterns { get; init; }
 
     /// <summary>
-    /// Full path of a file to exclude regardless of pattern matches - e.g. an
-    /// in-progress -Report output, so it isn't rescanned as input on a later run.
+    /// Full path of a file to exclude regardless of pattern matches.
     /// </summary>
     internal string? ExcludedFullPath { get; init; }
 
@@ -64,27 +63,15 @@ internal sealed class ScanDirectoryOptions
     /// Source charset chosen by the caller, used instead of detection.
     /// </summary>
     /// <remarks>
-    /// This replaces detection, and nothing else. Every verification still applies: the
-    /// bytes must strictly decode as this encoding, the output must re-decode to exactly
-    /// the same text, the backup must verify, and the record must be written before
-    /// anything is installed. It answers "which encoding is this?", not "convert it
-    /// regardless".
-    /// <para>
-    /// It is also the escape from an ambiguity refusal. Where the bytes cannot identify
-    /// the encoding, someone who knows has to say - and saying so must be possible, or
-    /// the refusal is advice the user cannot take.
-    /// </para>
+    /// Choosing the source does not bypass conversion safeguards or verification.
     /// </remarks>
     internal string? SourceCharset { get; init; }
 
     /// <summary>
-    /// Record each file's bytes before converting it, so a journal can report what the
-    /// file was as well as what it became.
+    /// Capture each source file's hash for the conversion journal.
     /// </summary>
     /// <remarks>
-    /// Off by default: a conversion overwrites the original, so the hash has to be taken
-    /// in advance, and taking it for every run would charge an extra full read to the
-    /// runs that never asked for a journal.
+    /// Disabled by default to avoid an extra full read when no journal is needed.
     /// </remarks>
     internal bool CaptureSourceHashes { get; init; }
 
@@ -107,20 +94,16 @@ internal static class ScanEngine
     internal static readonly int DefaultMaxParallelism =
         Math.Min(Environment.ProcessorCount, 4);
 
-    /// <summary>Charset label for a file whose encoding could not be established.</summary>
-    internal const string UNKNOWN_CHARSET = "(Unknown)";
+    /// <summary>Charset label used when the source encoding cannot be established.</summary>
+    internal const string UnknownCharset = "(Unknown)";
 
     #region Public API
 
     /// <summary>
     /// Scans the base directory and processes matching files with bounded parallelism.
-    /// Traversal skips excluded directories, reparse points, and the tool's own
-    /// backup/temp files. Likely binary files are not filtered here: they are rejected
-    /// later, during encoding detection, and reported as Skipped.
     /// </summary>
     /// <remarks>
-    /// <paramref name="onEntry"/> is invoked concurrently from worker threads; callers
-    /// must marshal to the UI thread themselves rather than touch UI controls directly.
+    /// <paramref name="onEntry"/> is invoked concurrently from worker threads.
     /// </remarks>
     internal static void ScanDirectory(
         ScanDirectoryOptions options,
@@ -131,8 +114,7 @@ internal static class ScanEngine
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(onEntry);
 
-        // Resolved once and reused per file; also makes an invalid target fail the
-        // whole scan immediately, including under -WhatIf.
+        // Resolve shared settings once and fail before scanning any file.
         Encoding? targetEncoding = ValidateOptions(options);
 
         List<Regex> includePatterns =
@@ -160,9 +142,7 @@ internal static class ScanEngine
     }
 
     /// <summary>
-    /// Validates options up front, independent of caller-side validation. Returns the
-    /// resolved target <see cref="Encoding"/> for <see cref="ScanAction.Convert"/>, or
-    /// <see langword="null"/> otherwise.
+    /// Validates options independently of caller-side validation.
     /// </summary>
     private static Encoding? ValidateOptions(ScanDirectoryOptions options)
     {
@@ -170,15 +150,15 @@ internal static class ScanEngine
             !Directory.Exists(options.BaseDirectory))
         {
             throw new ArgumentException(
-                $"Base directory '{options.BaseDirectory}' does not exist.",
+                $@"Base directory '{options.BaseDirectory}' does not exist.",
                 nameof(options));
         }
 
         if (DirectoryTraversal.IsReparsePointDirectory(options.BaseDirectory))
         {
             throw new ArgumentException(
-                $"Base directory '{options.BaseDirectory}' is a symbolic link or " +
-                "other reparse point.",
+                $@"Base directory '{options.BaseDirectory}' is a symbolic link or " +
+                $@"other reparse point.",
                 nameof(options));
         }
 
@@ -187,7 +167,7 @@ internal static class ScanEngine
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.MaxParallelism,
-                "MaxParallelism must be at least 1.");
+                @"MaxParallelism must be at least 1.");
         }
 
         switch (options.Action)
@@ -196,7 +176,7 @@ internal static class ScanEngine
                 if (string.IsNullOrWhiteSpace(options.TargetCharset))
                 {
                     throw new ArgumentException(
-                        "TargetCharset is required for Convert.",
+                        @"TargetCharset is required for Convert.",
                         nameof(options));
                 }
 
@@ -207,7 +187,7 @@ internal static class ScanEngine
                     options.ValidCharsets.Count == 0)
                 {
                     throw new ArgumentException(
-                        "ValidCharsets is required for Validate.",
+                        @"ValidCharsets is required for Validate.",
                         nameof(options));
                 }
 
@@ -220,9 +200,18 @@ internal static class ScanEngine
     /// <summary>
     /// Converts previously detected entries with bounded parallelism.
     /// </summary>
-    /// <param name="whatIf">Simulate conversion without writing, matching ScanDirectory's option.</param>
-    /// <param name="backup">Back up each original before conversion, matching ScanDirectory's option.</param>
-    /// <remarks>Same concurrent-<paramref name="onEntry"/> contract as <see cref="ScanDirectory"/>.</remarks>
+    /// <param name="maxParallelism">The maximum number of concurrent operations.</param>
+    /// <param name="whatIf">Simulate conversion without writing.</param>
+    /// <param name="backup">Back up each original before conversion.</param>
+    /// <param name="entries">The list of files to convert.</param>
+    /// <param name="targetCharset">The character set to convert to.</param>
+    /// <param name="targetWriteBom">Whether to write a BOM when converting to the target charset.</param>
+    /// <param name="onEntry">The callback to invoke for each converted entry.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <remarks>
+    /// <paramref name="onEntry"/> has the same concurrent-callback contract as
+    /// <see cref="ScanDirectory"/>.
+    /// </remarks>
     internal static void ConvertFiles(
         IEnumerable<ConversionReportEntry> entries,
         string targetCharset,
@@ -236,7 +225,7 @@ internal static class ScanEngine
         ArgumentNullException.ThrowIfNull(entries);
         ArgumentNullException.ThrowIfNull(onEntry);
 
-        // Resolved once instead of per file, matching ScanDirectory.
+        // Resolve the target once, matching ScanDirectory.
         Encoding targetEncoding = Encoding.GetEncoding(targetCharset);
 
         RunParallel(
@@ -245,22 +234,17 @@ internal static class ScanEngine
             getPath: entry => entry.FilePath,
             processItem: entry =>
             {
-                // A row this tool already converted no longer matches its original scan
-                // data, so the label recorded at install time wins. Decoding the new file
-                // with the old encoding can silently produce mojibake that neither strict
-                // decoding nor hash verification catches, since both would use the same
-                // wrong encoding.
+                // Use the label that describes the file as it exists now.
                 ParseCharsetLabel(
                     entry.EffectiveSourceLabel,
                     out string sourceCharset,
                     out bool sourceHasBom);
 
-                // Stands in for ConversionPolicy's answer for an unidentified source,
-                // which has to be given before Encoding.GetEncoding is reached rather
-                // than inside ApplyConversion. Pinned as agreeing in ConversionPolicyTests.
-                if (sourceCharset == UNKNOWN_CHARSET)
+                // Unknown sources are skipped before reaching Encoding.GetEncoding.
+                if (sourceCharset == UnknownCharset)
                 {
                     entry.Action = PlannedAction.Skip;
+                    entry.SourceInterpretation = SourceInterpretation.NotApplicable;
                     entry.Result = ConversionRowResult.Skipped;
                     return entry;
                 }
@@ -273,7 +257,10 @@ internal static class ScanEngine
                 }
                 catch (ArgumentException)
                 {
+                    entry.Action = PlannedAction.Refuse;
+                    entry.SourceInterpretation = SourceInterpretation.NotApplicable;
                     entry.Result = ConversionRowResult.Error;
+                    entry.Diagnostic = $"The source encoding '{sourceCharset}' is not available.";
                     return entry;
                 }
 
@@ -313,12 +300,26 @@ internal static class ScanEngine
         bool hasBom) =>
         hasBom ? baseCharset + "-bom" : baseCharset;
 
+    /// <summary>Whether EC offers this Unicode encoding with an optional BOM.</summary>
+    internal static bool IsBomCapable(string charset) =>
+        charset.Equals("utf-8", StringComparison.OrdinalIgnoreCase)
+        || charset.Equals("utf-16", StringComparison.OrdinalIgnoreCase)
+        || charset.Equals("utf-16BE", StringComparison.OrdinalIgnoreCase)
+        || charset.Equals("utf-32", StringComparison.OrdinalIgnoreCase)
+        || charset.Equals("utf-32BE", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Formats a target for people without inventing BOM semantics for ASCII.</summary>
+    internal static string DescribeTarget(string charset, bool hasBom) =>
+        IsBomCapable(charset)
+            ? charset + (hasBom ? " with a BOM" : " without a BOM")
+            : charset;
+
     #endregion
 
 
     #region Per-File Processing
 
-    private static ConversionReportEntry? ProcessFileForScan(
+    private static ConversionReportEntry ProcessFileForScan(
         string path,
         ScanDirectoryOptions options,
         Encoding? targetEncoding,
@@ -341,15 +342,19 @@ internal static class ScanEngine
         }
         else
         {
+            // Record the application's request for automatic detection. Keeping this
+            // here makes TextEncoding a pure byte-to-encoding utility, while tests can
+            // still prove that View, conversion, and -Apply never re-detect a file.
+            DetectionCounters.RecordDetection();
             detected = TextEncoding.DetectFromFile(path);
         }
 
-        bool hasBom =
-            detected != null &&
-            detected.GetPreamble().Length > 0;
+        // A codec having a preamble does not mean this particular file has one.
+        // Preserve the bytes' actual BOM state in plans and reports.
+        bool hasBom = detected != null && HasPreamble(path, detected);
 
         string sourceCharset =
-            detected?.WebName ?? UNKNOWN_CHARSET;
+            detected?.WebName ?? UnknownCharset;
 
         var entry = new ConversionReportEntry
         {
@@ -359,20 +364,19 @@ internal static class ScanEngine
             TargetEncoding = sourceCharset,
             TargetHasBom = hasBom,
             Result = ConversionRowResult.Unchanged,
+            // Preserve whether the source was detected or explicitly supplied.
+            SourceEncodingWasSpecified = sourceWasSpecified,
+            CaptureSourceHash = options.CaptureSourceHashes
         };
 
-        // Classified here, beside the detection it qualifies, and carried on the entry.
-        // The conversion path then reads a decision rather than re-deriving one, and a
-        // caller who supplies the source encoding instead of detecting it gets the
-        // default - correctly, since there is nothing ambiguous about an answer somebody
-        // gave.
-        entry.SourceEncodingWasSpecified = sourceWasSpecified;
-        entry.CaptureSourceHash = options.CaptureSourceHashes;
+        // Record detection only when detection actually ran.
+        if (!sourceWasSpecified && detected is not null)
+            entry.DetectedEncodingLabel = detected.WebName;
 
         switch (options.Action)
         {
             case ScanAction.Detect:
-                if (sourceCharset == UNKNOWN_CHARSET)
+                if (sourceCharset == UnknownCharset)
                     entry.Result = ConversionRowResult.Skipped;
 
                 break;
@@ -382,7 +386,7 @@ internal static class ScanEngine
                     FormatCharsetLabel(sourceCharset, hasBom);
 
                 bool isValid =
-                    sourceCharset != UNKNOWN_CHARSET &&
+                    sourceCharset != UnknownCharset &&
                     options.ValidCharsets is not null &&
                     options.ValidCharsets.Contains(
                         label,
@@ -424,6 +428,36 @@ internal static class ScanEngine
     }
 
     /// <summary>
+    /// Determines whether this file begins with the given codec's actual preamble.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Encoding.GetPreamble"/> describes a codec's optional marker, not the
+    /// bytes in any particular file. A BOM-less UTF file must remain BOM-less in a plan.
+    /// </remarks>
+    private static bool HasPreamble(string path, Encoding encoding)
+    {
+        byte[] preamble = encoding.GetPreamble();
+
+        if (preamble.Length == 0)
+            return false;
+
+        using FileStream stream = new(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            preamble.Length,
+            FileOptions.SequentialScan);
+
+        if (stream.Length < preamble.Length)
+            return false;
+
+        Span<byte> prefix = stackalloc byte[preamble.Length];
+        stream.ReadExactly(prefix);
+        return prefix.SequenceEqual(preamble);
+    }
+
+    /// <summary>
     /// Converts when the source does not already match the target.
     /// </summary>
     private static void ApplyConversion(
@@ -443,10 +477,8 @@ internal static class ScanEngine
         entry.TargetHasBom = targetWriteBom;
         entry.ResolvedSourceLabel = FormatCharsetLabel(sourceCharset, sourceHasBom);
 
-        // Before anything can overwrite it. A converted file's original bytes are not
-        // recoverable from the file afterwards, so a journal that wants them has to say
-        // so in advance.
-        if (entry.CaptureSourceHash && entry.JournalSourceSha256 is null)
+        // Capture the original hash before anything can overwrite the file.
+        if (entry is { CaptureSourceHash: true, JournalSourceSha256: null })
         {
             try
             {
@@ -455,50 +487,27 @@ internal static class ScanEngine
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // Left null; the journal records an empty hash rather than a wrong one.
+                // Leave the hash empty; the journal will reflect that it was unavailable.
             }
         }
 
-        // Classified here, at the point where the decision is actually made, so that
-        // every caller reaching a conversion has it - the CLI's Convert scan, a plan
-        // being written, and the GUI alike. Doing it during the scan instead meant the
-        // GUI, which scans in Detect mode, never had it.
-        //
-        // Skipped when the user named the source encoding: there is nothing ambiguous
-        // about an answer somebody gave. Skipped too when the entry already carries a
-        // decision, which means a plan made it earlier - classifying again there would
-        // be the second detection pass a plan exists to avoid, and its answer, not this
-        // one, is what the user approved. The policy below still re-asserts the gate
-        // from what the plan recorded.
-        if (entry.SourceEncodingWasSpecified)
-        {
-            // Recorded rather than left unset: there is nothing ambiguous about an answer
-            // somebody gave, and that is a classification, not the absence of one.
-            entry.Ambiguity = AmbiguityClass.Unambiguous;
-            entry.AmbiguityReason = AmbiguityReason.ExplicitlySpecified;
-            entry.CompetingEncodings = [];
-        }
-        else if (entry.Action is null)
-        {
-            AmbiguityAnalysis? analysis = AnalyzeAmbiguity(path, sourceEncoding);
-
-            // A file with no bytes to examine has nothing that could be misread, so this
-            // is an answer and not a failure to reach one.
-            entry.Ambiguity = analysis?.Class ?? AmbiguityClass.Unambiguous;
-            entry.AmbiguityReason = analysis?.Reason ?? AmbiguityReason.SingleCandidate;
-            entry.CompetingEncodings = analysis?.CompetingCandidates ?? [];
-        }
+        // A previously reviewed entry still has its source and target attached. Recheck
+        // the small deterministic rule for each pass, but never detect the bytes again.
+        if (entry.Action is null)
+            DetectionCounters.RecordClassification();
 
         PlannedAction action = ConversionPolicy.Decide(
             sourceCharset,
             sourceHasBom,
             targetCharset,
             targetWriteBom,
-            entry.Ambiguity,
-            entry.CompetingEncodings,
+            entry.SourceEncodingWasSpecified,
+            TextEncoding.IsUnicodeOrAscii(sourceEncoding),
+            out SourceInterpretation sourceInterpretation,
             out string? policyReason);
 
         entry.Action = action;
+        entry.SourceInterpretation = sourceInterpretation;
 
         if (action != PlannedAction.Convert)
         {
@@ -532,22 +541,16 @@ internal static class ScanEngine
         {
             WriteBom = targetWriteBom,
 
-            // Only when a backup exists is there anything to describe. Without one
-            // there is nothing to restore from, so a record would document a
-            // conversion that cannot be undone.
+            // Without a backup there is nothing to restore from.
             RecordConversion = backup
-                ? record => WriteConversionMetadata(path, record)
+                ? record => WriteConversionMetadata(path, record, entry)
                 : null,
 
-            // Non-null only under -Apply, where an earlier run committed to these exact
-            // bytes. An ordinary conversion has nothing to compare against.
+            // Present only when an approved plan pinned the original bytes.
             ExpectedSourceSha256 = entry.ExpectedSourceSha256,
         };
 
-        // Without the token, Parallel.ForEach could only observe cancellation between
-        // files, so a large in-flight conversion had to finish first. Convert's own
-        // checkpoints make cancelling mid-file safe: nothing is installed until the
-        // temp file is written, verified, and atomically replaced.
+        // Conversion checks cancellation between safe installation points.
         ConversionResult result =
             EncodingConverter.Convert(
                 path,
@@ -558,16 +561,11 @@ internal static class ScanEngine
                 progress: null,
                 cancellationToken);
 
-        // Convert reports cancellation as a result code rather than an exception.
-        // Rethrow it so a user-initiated cancel unwinds the scan like every other
-        // cancellation instead of being recorded as a per-file conversion failure.
+        // Propagate cancellation rather than recording it as a file error.
         if (result.ErrorCode == ConversionErrorCode.Cancelled)
             throw new OperationCanceledException(cancellationToken);
 
-        // Gated on whether the file was actually replaced, not on overall success:
-        // MetadataRestoreFailed reports Success == false after the replacement has
-        // already been installed, so the file on disk is the target encoding even
-        // though the row is an error.
+        // Track what encoding the file contains after the replacement attempt.
         if (result.ReplacementCommitted == true)
         {
             entry.CurrentCharsetLabel =
@@ -575,10 +573,8 @@ internal static class ScanEngine
         }
         else if (result.ReplacementCommitted is null)
         {
-            // The replacement outcome is unknown, so neither the original scan data nor
-            // the target describes the file reliably. "(Unknown)" makes a later
-            // conversion skip the row instead of decoding it with a guess.
-            entry.CurrentCharsetLabel = UNKNOWN_CHARSET;
+            // Unknown replacement state must not be decoded using either old or new metadata.
+            entry.CurrentCharsetLabel = UnknownCharset;
         }
 
         entry.Result =
@@ -586,7 +582,6 @@ internal static class ScanEngine
                 ? ConversionRowResult.Converted
                 : ConversionRowResult.Error;
 
-        // Cleared on success so a retry that succeeds doesn't keep the previous failure.
         entry.Diagnostic =
             result.Success
                 ? null
@@ -594,18 +589,17 @@ internal static class ScanEngine
     }
 
     /// <summary>
-    /// Writes "<paramref name="path"/>.bak" via temp-file-then-atomic-replace, so a
-    /// crash mid-write can't leave a truncated backup (unlike a plain File.Copy).
+    /// Writes "<paramref name="path"/>.bak" through a temporary file before replacement.
     /// </summary>
     /// <summary>
     /// Writes the sidecar describing how to undo this conversion, next to the backup.
     /// </summary>
     /// <remarks>
-    /// Called from inside <see cref="EncodingConverter.Convert"/> after verification and
-    /// before installation, so a failure here aborts with the original intact rather than
-    /// leaving a converted file whose provenance is unrecorded.
+    /// Called after output verification and before installation so metadata failure leaves
+    /// the original file intact.
     /// </remarks>
-    private static string? WriteConversionMetadata(string path, ConversionRecord record)
+    private static string? WriteConversionMetadata(
+        string path, ConversionRecord record, ConversionReportEntry entry)
     {
         string backupPath = path + ".bak";
 
@@ -620,9 +614,7 @@ internal static class ScanEngine
             return $"the backup at '{backupPath}' could not be read: {ex.Message}";
         }
 
-        // The backup must be the file being converted, not merely present. A stale
-        // ".bak" left by an earlier run would otherwise be recorded as this
-        // conversion's original and silently restore the wrong content.
+        // Reject stale backups; only the current source is a valid restore point.
         if (!string.IsNullOrEmpty(record.SourceSha256) &&
             !backupHash.Equals(record.SourceSha256, StringComparison.OrdinalIgnoreCase))
         {
@@ -635,52 +627,45 @@ internal static class ScanEngine
             ConversionId = Guid.NewGuid().ToString("D"),
             ConversionTimestampUtc =
                 DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
-            ECVersion = typeof(ScanEngine).Assembly.GetName().Version?.ToString()
+            EcVersion = typeof(ScanEngine).Assembly.GetName().Version?.ToString()
                         ?? "unknown",
             OriginalPath = path,
             OriginalSize = record.SourceBytes,
             OriginalSha256 = record.SourceSha256,
             BackupPath = backupPath,
             BackupSha256 = backupHash,
-            DetectedEncoding = record.SourceEncoding,
-            DetectedCodePage = record.SourceCodePage,
-            DetectedBom = record.SourceHasBom,
-            TargetEncoding = record.TargetEncoding,
-            TargetCodePage = record.TargetCodePage,
-            TargetBom = record.TargetHasBom,
+            // The recovery key is the codec that actually read the source.
+            SourceEncodingId = record.SourceCodePage,
+            SourceEncodingName = record.SourceEncoding,
+            SourceEncodingMode = entry.SourceEncodingWasSpecified
+                ? SourceEncodingMode.Explicit
+                : SourceEncodingMode.Detected,
+            SourceHasBom = record.SourceHasBom,
+
+            // Provenance is null when detection did not run.
+            DetectedEncodingId = ResolveCodePage(entry.DetectedEncodingLabel),
+            DetectedEncodingName = entry.DetectedEncodingLabel,
+
+            TargetEncodingId = record.TargetCodePage,
+            TargetEncodingName = record.TargetEncoding,
+            TargetHasBom = record.TargetHasBom,
             SourceTextSha256 = record.SourceTextSha256,
             OutputTextSha256 = record.OutputTextSha256,
             UnicodeScalars = record.UnicodeScalars,
         });
     }
 
-    /// <summary>
-    /// Reads the detector's sample again and asks whether it identifies one encoding.
-    /// Returns <see langword="null"/> when the file cannot be read, leaving the decision
-    /// to the conversion itself rather than refusing on an I/O error.
-    /// </summary>
-    private static AmbiguityAnalysis? AnalyzeAmbiguity(string path, Encoding sourceEncoding)
+    /// <summary>The code page for a charset label, or null when it cannot be resolved.</summary>
+    private static int? ResolveCodePage(string? label)
     {
+        if (string.IsNullOrEmpty(label))
+            return null;
+
         try
         {
-            using FileStream stream = new(
-                path, FileMode.Open, FileAccess.Read,
-                FileShare.ReadWrite | FileShare.Delete,
-                4096, FileOptions.SequentialScan);
-
-            int length = (int)Math.Min(stream.Length, EncodingAmbiguity.SampleBytes);
-
-            if (length == 0)
-                return null;
-
-            byte[] buffer = new byte[length];
-            int read = stream.ReadAtLeast(buffer, length, throwOnEndOfStream: false);
-
-            return read == 0
-                ? null
-                : EncodingAmbiguity.Analyze(buffer.AsSpan(0, read), sourceEncoding);
+            return Encoding.GetEncoding(label).CodePage;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (ArgumentException)
         {
             return null;
         }
@@ -696,11 +681,10 @@ internal static class ScanEngine
                 $"Could not determine a directory for path '{path}'.");
         }
 
-        // Sharing the conversion temp suffix means this file is excluded from future
-        // scans by DirectoryTraversal's existing rule, rather than needing a second one.
+        // Reuse the existing temp-file naming rule so the backup temp stays out of scans.
         string tempPath = Path.Combine(
             directory,
-            $"{Path.GetFileName(path)}.{Guid.NewGuid():N}.bak.{EncodingConverter.TEMP_FILE_SUFFIX}");
+            $"{Path.GetFileName(path)}.{Guid.NewGuid():N}.bak.{EncodingConverter.TempFileSuffix}");
 
         try
         {
@@ -709,17 +693,17 @@ internal static class ScanEngine
                        FileMode.Open,
                        FileAccess.Read,
                        FileShare.Read,
-                       EncodingConverter.DEFAULT_BUFFER_SIZE,
+                       EncodingConverter.DefaultBufferSize,
                        FileOptions.SequentialScan))
             using (FileStream destination = new(
                        tempPath,
                        FileMode.CreateNew,
                        FileAccess.Write,
                        FileShare.None,
-                       EncodingConverter.DEFAULT_BUFFER_SIZE,
+                       EncodingConverter.DefaultBufferSize,
                        FileOptions.SequentialScan))
             {
-                source.CopyTo(destination, EncodingConverter.DEFAULT_BUFFER_SIZE);
+                source.CopyTo(destination, EncodingConverter.DefaultBufferSize);
                 destination.Flush(flushToDisk: true);
             }
 
@@ -735,7 +719,7 @@ internal static class ScanEngine
             catch (Exception ex) when (
                 ex is IOException or UnauthorizedAccessException)
             {
-                // Cleanup failure does not affect the backup result.
+                // Cleanup failure does not invalidate the completed backup.
             }
         }
     }

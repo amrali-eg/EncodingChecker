@@ -111,13 +111,10 @@ public sealed class EncodingConverterRobustnessTests : IDisposable
     }
 
     [Fact]
-    public void Convert_EncodingThatCannotBeRebuiltStrictly_IsCaughtByHashVerification()
+    public void Convert_EncodingThatCannotBeRebuiltStrictly_IsRefusedBeforeWriting()
     {
-        // MakeStrictEncoding rebuilds an encoding from its code page to make the fallbacks
-        // stick, and documents that an encoding it cannot rebuild keeps its original
-        // codecs - leaving the SHA-256 comparison as the backstop. That path is otherwise
-        // unreachable through the BCL encodings, so it is pinned with an encoding whose
-        // code page does not exist and whose encoder substitutes rather than throws.
+        // The old fallback to the original encoding could silently substitute. A strict
+        // codec must be constructible before EC will write anything.
         string path = WriteFile("substituting.txt", "Привет", new UTF8Encoding(false));
         byte[] originalBytes = File.ReadAllBytes(path);
 
@@ -125,8 +122,7 @@ public sealed class EncodingConverterRobustnessTests : IDisposable
             path, path, Encoding.UTF8, new SubstitutingEncoding(), new ConversionOptions());
 
         Assert.False(result.Success);
-        Assert.Equal(ConversionErrorCode.UnicodeMismatch, result.ErrorCode);
-        Assert.False(result.VerificationPassed);
+        Assert.Equal(ConversionErrorCode.SourceDecodeError, result.ErrorCode);
         Assert.Equal(originalBytes, File.ReadAllBytes(path));
     }
 

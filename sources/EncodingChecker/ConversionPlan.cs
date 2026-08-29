@@ -27,81 +27,59 @@ internal enum PlannedAction
 }
 
 /// <summary>
-/// What a conversion carried out by this build of EC guarantees.
+/// The guarantees provided by this build of EC during conversion.
 /// </summary>
 /// <remarks>
-/// Recorded in every plan so that <c>-Apply</c> is not merely repeating a list of files
-/// but re-asserting the conversion those files were approved for. None of these are
-/// user-settable today; they are written down because a plan approved under them must
-/// not be carried out by a build that no longer provides them.
+/// Recorded in every plan so an approved plan cannot later be applied under different
+/// conversion or classification behaviour.
 /// </remarks>
 internal sealed record ConversionSemantics
 {
     /// <summary>
-    /// Bumped whenever conversion or classification behaviour changes in a way that
-    /// makes an older plan's decisions no longer the ones this build would make.
+    /// Changes only when the meaning of an existing plan's decisions changes.
     /// </summary>
-    /// <remarks>
-    /// Deliberately separate from the assembly version. Tying plan validity to the
-    /// version number would invalidate every plan on a release that changed nothing
-    /// about conversion, which teaches people to work around the check rather than read
-    /// it. This moves only when the meaning of a plan moves.
-    /// </remarks>
-    internal const int Current = 1;
+    internal const int Current = 3;
 
-    /// <summary>
-    /// The guarantees of <see cref="Current"/>, in words, for a person reading a summary.
-    /// </summary>
-    /// <remarks>
-    /// Comes from the build rather than from a loaded plan's booleans on purpose. A plan
-    /// is an editable file; describing what it claims about itself would let an edited
-    /// one state something untrue about the conversion that is actually going to happen.
-    /// A plan only reaches a summary once its semantics version has been accepted, so
-    /// describing this build is describing that plan.
-    /// </remarks>
+    /// <summary>The guarantees of <see cref="Current"/> shown to the reader.</summary>
     internal const string Describes =
-        "strict codecs, verified output, atomic install, ambiguity refusal";
+        "strict codecs, verified output, atomic install, explicit source required for legacy text";
 
     /// <summary>Malformed input is rejected rather than replaced.</summary>
     public bool StrictDecoding { get; init; } = true;
 
-    /// <summary>Content the target cannot represent is rejected, not substituted.</summary>
+    /// <summary>Unrepresentable content is rejected rather than substituted.</summary>
     public bool StrictEncoding { get; init; } = true;
 
-    /// <summary>The output is re-decoded and compared before it is installed.</summary>
+    /// <summary>Output is re-decoded and compared before installation.</summary>
     public bool OutputVerification { get; init; } = true;
 
     /// <summary>The source is never rewritten in place.</summary>
     public bool AtomicInstall { get; init; } = true;
 
     /// <summary>
-    /// Files whose bytes do not identify their encoding, where the rival readings
-    /// disagree about the text, are refused rather than converted on a guess.
+    /// Automatically detected legacy text requires a user-selected source codec;
+    /// Unicode and ASCII are converted automatically.
     /// </summary>
-    public bool AmbiguityRefusal { get; init; } = true;
+    public bool LegacyRequiresExplicitSource { get; init; } = true;
 }
 
 /// <summary>One file's entry in a conversion plan.</summary>
 internal sealed record PlannedFile
 {
     /// <summary>
-    /// The file's path relative to the plan's <see cref="ConversionPlan.BaseDirectory"/>.
+    /// The path relative to the plan's <see cref="ConversionPlan.BaseDirectory"/>.
     /// </summary>
     /// <remarks>
-    /// The identity, in place of an absolute path. A plan carrying absolute paths that is
-    /// copied alongside its tree still names the original tree, so applying it from the
-    /// copy would convert the files somewhere else - and every hash would match, because
-    /// those are the files the plan was made from. Resolving against the recorded root
-    /// makes that impossible to do by accident, and makes the plan legible as a document
-    /// about a directory rather than about one machine.
+    /// Relative paths keep the plan bound to its recorded directory rather than to the
+    /// machine on which it was created.
     /// </remarks>
     public required string RelativePath { get; init; }
 
     public required long Size { get; init; }
 
     /// <summary>
-    /// The file's bytes when the plan was made. What binds the plan to reality: if this
-    /// no longer matches, the plan describes a file that no longer exists.
+    /// The file's SHA-256 when the plan was created. Applying the plan requires this
+    /// value to remain unchanged.
     /// </summary>
     public required string Sha256 { get; init; }
 
@@ -116,60 +94,45 @@ internal sealed record PlannedFile
     public required bool SourceWasSpecified { get; init; }
 
     [JsonConverter(typeof(JsonStringEnumConverter))]
-    public required AmbiguityClass Ambiguity { get; init; }
+    public required SourceInterpretation SourceInterpretation { get; init; }
 
-    [JsonConverter(typeof(JsonStringEnumConverter))]
-    public required AmbiguityReason AmbiguityReason { get; init; }
-
-    /// <summary>Encodings that read this file differently, when there are any.</summary>
-    public IReadOnlyList<string> CompetingEncodings { get; init; } = [];
-
-    /// <summary>Why this action, in words, when the action is not a plain conversion.</summary>
+    /// <summary>Why this action was chosen, when it is not a plain conversion.</summary>
     public string? Reason { get; init; }
 
-    /// <summary>Whether converting this file could change its Unicode content.</summary>
-    public bool MayChangeText => Ambiguity == AmbiguityClass.TextChanging;
+    /// <summary>Whether automatic conversion needs the user to name the source codec.</summary>
+    public bool NeedsSourceChoice =>
+        SourceInterpretation == SourceInterpretation.LegacyNeedsSourceChoice;
 }
 
 /// <summary>
-/// A conversion plan: what EC would do, recorded so it can be reviewed before anything is
-/// changed and then executed exactly as reviewed.
+/// A conversion plan that can be reviewed before execution and then applied as approved.
 /// </summary>
 /// <remarks>
-/// The point is not the preview but the binding. A preview that is followed by a fresh
-/// detection pass is a demonstration, not a promise: the second pass can reach different
-/// conclusions, and the user approved the first. Every file therefore carries the hash it
-/// had when the plan was made, and applying the plan verifies each one. A file that
-/// changed in between invalidates the plan rather than being converted on the strength of
-/// a decision made about different bytes.
+/// Every planned file carries its original hash, so applying the plan fails rather than
+/// converting bytes that changed after review.
 /// <para>
-/// The plan also describes the conversion itself - root, target, BOM policy, source
-/// encoding and how it was arrived at, backup policy, and the guarantees the converting
-/// build provides - so that applying it needs no ambient option state at all. The file is
-/// the whole approval.
-/// </para>
+/// The plan also records the conversion settings and guarantees it was created under, so
+/// applying it does not depend on unrelated current options.
+///</para>
 /// </remarks>
 internal sealed record ConversionPlan
 {
-    /// <summary>The plan file's schema. Changed only when this shape changes.</summary>
-    internal const int CurrentPlanVersion = 2;
+    /// <summary>The plan file schema version.</summary>
+    internal const int CurrentPlanVersion = 3;
 
     public int PlanVersion { get; init; } = CurrentPlanVersion;
 
-    /// <summary>The conversion behaviour this plan was made under. Checked on apply.</summary>
+    /// <summary>The conversion behaviour this plan was created under.</summary>
     public int SemanticsVersion { get; init; } = ConversionSemantics.Current;
 
     public required string CreatedUtc { get; init; }
 
-    public required string ECVersion { get; init; }
+    public required string EcVersion { get; init; }
 
-    /// <summary>
-    /// What the conversion guaranteed when the plan was approved. Recorded for the
-    /// reader; <see cref="SemanticsVersion"/> is what the tool enforces.
-    /// </summary>
+    /// <summary>The guarantees recorded for the reader.</summary>
     public ConversionSemantics Semantics { get; init; } = new();
 
-    /// <summary>The directory every <see cref="PlannedFile.RelativePath"/> is under.</summary>
+    /// <summary>The directory containing all planned relative paths.</summary>
     public required string BaseDirectory { get; init; }
 
     public required string TargetEncoding { get; init; }
@@ -178,16 +141,12 @@ internal sealed record ConversionPlan
 
     public required bool BackupEnabled { get; init; }
 
-    /// <summary>The source encoding named by the caller, if any.</summary>
+    /// <summary>The source encoding explicitly supplied by the caller, if any.</summary>
     public string? ExplicitSourceEncoding { get; init; }
 
-    /// <summary>
-    /// Whether the source encoding was chosen by the caller or worked out from the bytes.
-    /// </summary>
-    public string DetectionMode =>
-        string.IsNullOrEmpty(ExplicitSourceEncoding) ? "Detected" : "Explicit";
-
     public required IReadOnlyList<PlannedFile> Files { get; init; }
+
+    internal ConversionPlanSummary Summary => ConversionPlanSummary.From(Files);
 
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -207,11 +166,7 @@ internal sealed record ConversionPlan
 
         foreach (ConversionReportEntry entry in entries)
         {
-            // Taken from the decision itself rather than re-derived from the row result,
-            // which cannot tell a refusal apart from a conversion that failed. An
-            // undecided entry is a caller that skipped the policy, and planning a
-            // conversion nobody decided on is the failure this whole mechanism exists to
-            // prevent - so it is raised, not defaulted.
+            // Planning requires a completed policy decision.
             PlannedAction action = entry.Action
                 ?? throw new InvalidOperationException(
                     $"'{entry.FilePath}' reached a conversion plan without a decision. "
@@ -227,15 +182,13 @@ internal sealed record ConversionPlan
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // A file that cannot be read now cannot be planned for. Recorded as a
-                // refusal rather than omitted, so the plan still accounts for it.
+                // Keep unreadable files visible in the plan rather than silently dropping them.
                 hash = string.Empty;
                 size = 0;
                 action = PlannedAction.Refuse;
             }
 
-            // What the conversion will actually read the file as, which is not always
-            // the scan's original answer: a user may have named the encoding since.
+            // Record the encoding the conversion will actually use.
             ScanEngine.ParseCharsetLabel(
                 entry.EffectiveSourceLabel,
                 out string sourceCharset,
@@ -249,7 +202,7 @@ internal sealed record ConversionPlan
             }
             catch (ArgumentException)
             {
-                // Leave it at zero: an unrecognised label is itself part of the record.
+                // Zero indicates that no code page could be resolved.
             }
 
             files.Add(new PlannedFile
@@ -262,12 +215,10 @@ internal sealed record ConversionPlan
                 SourceCodePage = codePage,
                 SourceHasBom = sourceHasBom,
                 SourceWasSpecified = entry.SourceEncodingWasSpecified,
-                Ambiguity = entry.Ambiguity
+                SourceInterpretation = entry.SourceInterpretation
                     ?? throw new InvalidOperationException(
                         $"'{entry.FilePath}' reached a conversion plan without being "
-                        + "classified."),
-                AmbiguityReason = entry.AmbiguityReason,
-                CompetingEncodings = entry.CompetingEncodings,
+                        + "decided."),
                 Reason = string.IsNullOrEmpty(entry.Diagnostic) ? null : entry.Diagnostic,
             });
         }
@@ -275,7 +226,7 @@ internal sealed record ConversionPlan
         return new ConversionPlan
         {
             CreatedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
-            ECVersion = typeof(ConversionPlan).Assembly.GetName().Version?.ToString()
+            EcVersion = typeof(ConversionPlan).Assembly.GetName().Version?.ToString()
                         ?? "unknown",
             BaseDirectory = root,
             TargetEncoding = targetEncoding,
@@ -322,22 +273,14 @@ internal sealed record ConversionPlan
                 return null;
             }
 
-            // The schema can be identical while the conversion it describes is not. A
-            // plan approved under different behaviour is not this build's plan, whatever
-            // its file format says.
+            // A compatible file shape does not imply compatible conversion behaviour.
             if (plan.SemanticsVersion != ConversionSemantics.Current)
             {
                 error = "This plan was made under different conversion behaviour "
                         + $"(semantics version {plan.SemanticsVersion}; this build uses "
                         + $"{ConversionSemantics.Current}, and the plan was written by "
-                        + $"EC {plan.ECVersion}). What it approved is not what this "
+                        + $"EC {plan.EcVersion}). What it approved is not what this "
                         + "build would do. Re-run -Plan and review the result.";
-                return null;
-            }
-
-            if (plan.Files is null)
-            {
-                error = $"'{path}' does not list any files.";
                 return null;
             }
 
@@ -353,13 +296,10 @@ internal sealed record ConversionPlan
     }
 
     /// <summary>
-    /// The absolute path of a planned file, resolved against the plan's own root.
+    /// Resolves a planned file against the plan's recorded directory.
     /// </summary>
     /// <returns>
-    /// The full path, or <see langword="null"/> if the entry resolves outside that root -
-    /// a plan is an ordinary file that anyone can edit, and one naming
-    /// <c>..\..\Windows\System32</c> must not reach outside the directory it claims to
-    /// be about.
+    /// The full path, or <see langword="null"/> when the path escapes the plan's directory.
     /// </returns>
     internal string? ResolvePath(PlannedFile file)
     {
@@ -383,16 +323,12 @@ internal sealed record ConversionPlan
     }
 
     /// <summary>
-    /// Confirms every file is still exactly what it was when the plan was made.
+    /// Finds planned files whose bytes no longer match the approved plan.
     /// </summary>
-    /// <returns>
-    /// The files that no longer match, empty when the plan is still valid.
-    /// </returns>
+    /// <returns>The files that changed, or an empty list when all remain valid.</returns>
     /// <remarks>
-    /// Deliberately all-or-nothing. Converting the files that still match and skipping
-    /// the rest would apply a plan the user reviewed as a whole to a directory that is no
-    /// longer the one they reviewed, and the files most likely to have changed are the
-    /// ones something else is actively writing.
+    /// Any stale planned file invalidates the run rather than partially applying a plan
+    /// that was reviewed as a whole.
     /// </remarks>
     internal IReadOnlyList<string> FindStaleFiles()
     {
@@ -431,39 +367,23 @@ internal sealed record ConversionPlan
         return stale;
     }
 
-    /// <summary>The summary a person reads before deciding.</summary>
-    /// <remarks>
-    /// Written so the counts add up on the page. A reader who cannot see that the
-    /// categories sum to the whole has to trust the numbers instead of checking them,
-    /// which is the opposite of what a preflight is for. The two indented lines break
-    /// down the one above them and are not part of that sum.
-    /// </remarks>
+    /// <summary>The summary shown before the user decides.</summary>
     internal string Summarize()
     {
-        int Count(PlannedAction action) => Files.Count(f => f.Action == action);
-
-        int convert = Count(PlannedAction.Convert);
-        int equivalent = Files.Count(
-            f => f.Action == PlannedAction.Convert
-                 && f.Ambiguity == AmbiguityClass.TextEquivalent);
-        int changing = Files.Count(f => f.MayChangeText);
-        int otherRefusals = Count(PlannedAction.Refuse) - changing;
+        ConversionPlanSummary summary = Summary;
 
         var lines = new List<string>
         {
-            $"Selected:                     {Files.Count}",
+            $"Selected:                     {summary.Selected}",
             string.Empty,
-            $"Will convert:                 {convert}",
-            $"  encoding determined:        {convert - equivalent}",
-            $"  same text either way:       {equivalent}",
-            $"Already in target encoding:   {Count(PlannedAction.Unchanged)}",
-            $"Encoding not identified:      {Count(PlannedAction.Skip)}",
-            $"Refused, ambiguous encoding:  {changing}",
-            $"Refused, unreadable:          {otherRefusals}",
+            $"Will convert:                 {summary.ReadyToConvert}",
+            $"Already in target encoding:   {summary.AlreadyTarget}",
+            $"Encoding not identified:      {summary.NotIdentified}",
+            $"Needs legacy source choice:   {summary.NeedsSourceChoice}",
+            $"Refused, unreadable:          {summary.OtherRefusals}",
             string.Empty,
             $"Directory:                    {BaseDirectory}",
-            $"Target:                       {TargetEncoding}"
-                + (TargetHasBom ? " with BOM" : " without BOM"),
+            $"Target:                       {ScanEngine.DescribeTarget(TargetEncoding, TargetHasBom)}",
             "Source encoding:              "
                 + (string.IsNullOrEmpty(ExplicitSourceEncoding)
                     ? "detected per file"

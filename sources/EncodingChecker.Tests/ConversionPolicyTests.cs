@@ -5,12 +5,11 @@ namespace EncodingChecker.Tests;
 /// <summary>
 /// One policy engine, asked by every surface.
 ///
-/// This exists because the GUI had quietly grown a second answer. Ambiguity was
-/// classified only during a Convert-mode scan; the GUI scans in Detect mode and converts
-/// the rows the user checks, so every entry arrived carrying the default "unambiguous"
-/// and the refusal never fired. The tool converted, on the strength of whatever detection
-/// returned, the exact files it tells CLI users it will not convert — and nothing failed,
-/// because no test drove the GUI's sequence.
+/// This exists because the GUI had quietly grown a second answer. The legacy-source
+/// safeguard originally ran only during a Convert-mode scan; the GUI scans in Detect mode
+/// and converts the rows the user checks, so the safeguard never fired. The tool converted,
+/// on the strength of whatever detection returned, the exact files it tells CLI users it
+/// will not convert — and nothing failed, because no test drove the GUI's sequence.
 ///
 /// The lesson is the one the audit already taught once: a safety rule enforced at one
 /// call site is a safety rule the next call site does not have. So the decision lives in
@@ -85,8 +84,8 @@ public sealed class ConversionPolicyTests : IDisposable
 
         Assert.Equal(PlannedAction.Refuse, entry.Action);
         Assert.Equal(ConversionRowResult.Error, entry.Result);
-        Assert.Equal(AmbiguityClass.TextChanging, entry.Ambiguity);
-        Assert.Contains("could not be determined uniquely", entry.Diagnostic);
+        Assert.Equal(SourceInterpretation.LegacyNeedsSourceChoice, entry.SourceInterpretation);
+        Assert.Contains("Automatic conversion of legacy text is disabled", entry.Diagnostic);
         Assert.Equal(original, File.ReadAllBytes(path));
     }
 
@@ -94,8 +93,8 @@ public sealed class ConversionPolicyTests : IDisposable
     public void TheGuiSequenceStillConvertsWhatIsSafe()
     {
         // The other direction. A gate that refuses everything is not safe, it is broken.
-        const string text = "こんにちは世界。日本語のテキストです。";
-        string path = Write("jp.txt", text, "shift_jis");
+        const string text = "plain ASCII is safe.";
+        string path = Write("ascii.txt", text, "ascii");
 
         ConversionReportEntry entry = Assert.Single(ViewThenConvert());
 
@@ -138,33 +137,43 @@ public sealed class ConversionPolicyTests : IDisposable
     }
 
     [Fact]
-    public void TheThreeClassificationsMapToTheirActions()
-    {
-        // Unambiguous converts; several codecs agreeing on the text converts, with the
-        // ambiguity disclosed; several codecs disagreeing refuses until somebody chooses.
-        // These three are the whole user-facing contract of the refusal.
-        AssertMaps(AmbiguityClass.Unambiguous, PlannedAction.Convert, discloses: false);
-        AssertMaps(AmbiguityClass.TextEquivalent, PlannedAction.Convert, discloses: true);
-        AssertMaps(AmbiguityClass.TextChanging, PlannedAction.Refuse, discloses: false);
-    }
-
-    private static void AssertMaps(
-        AmbiguityClass ambiguity, PlannedAction expected, bool discloses)
+    public void DetectedLegacyTextRequiresAnExplicitSourceChoice()
     {
         PlannedAction action = ConversionPolicy.Decide(
             "windows-1252", sourceHasBom: false,
-            "utf-8", targetHasBom: false,
-            ambiguity, ["iso-8859-1"], out string? reason);
+            "utf-16le", targetHasBom: false,
+            sourceWasSpecified: false, isUnicodeOrAscii: false,
+            out SourceInterpretation interpretation, out string? reason);
 
-        Assert.Equal(expected, action);
-
-        // A refusal always says why; a conversion never needs to.
-        Assert.Equal(expected == PlannedAction.Refuse, reason is not null);
-        Assert.Equal(discloses, ConversionPolicy.NeedsDisclosure(ambiguity));
+        Assert.Equal(PlannedAction.Refuse, action);
+        Assert.Equal(SourceInterpretation.LegacyNeedsSourceChoice, interpretation);
+        Assert.Contains("-From windows-1252", reason);
     }
 
     [Fact]
-    public void AFileAlreadyInTheTargetEncodingIsNotRefusedForAmbiguity()
+    public void UnicodeAndExplicitSourcesCanConvert()
+    {
+        Assert.Equal(
+            PlannedAction.Convert,
+            ConversionPolicy.Decide(
+            "utf-8", sourceHasBom: false,
+            "utf-16le", targetHasBom: false,
+            sourceWasSpecified: false, isUnicodeOrAscii: true,
+            out SourceInterpretation automatic, out _));
+        Assert.Equal(SourceInterpretation.AutomaticUnicodeOrAscii, automatic);
+
+        Assert.Equal(
+            PlannedAction.Convert,
+            ConversionPolicy.Decide(
+            "windows-1252", sourceHasBom: false,
+            "utf-8", targetHasBom: false,
+            sourceWasSpecified: true, isUnicodeOrAscii: false,
+            out SourceInterpretation explicitSource, out _));
+        Assert.Equal(SourceInterpretation.ExplicitSource, explicitSource);
+    }
+
+    [Fact]
+    public void AFileAlreadyInTheTargetEncodingIsNotRefusedForLegacyDetection()
     {
         // Nothing is written, so there is no reading of it to get wrong. Refusing here
         // would report a danger that does not exist.
@@ -173,7 +182,9 @@ public sealed class ConversionPolicyTests : IDisposable
             ConversionPolicy.Decide(
                 "utf-8", sourceHasBom: false,
                 "utf-8", targetHasBom: false,
-                AmbiguityClass.TextChanging, ["iso-8859-1"], out _));
+                sourceWasSpecified: false, isUnicodeOrAscii: true,
+                out SourceInterpretation interpretation, out _));
+        Assert.Equal(SourceInterpretation.NotApplicable, interpretation);
     }
 
     [Fact]
@@ -184,14 +195,16 @@ public sealed class ConversionPolicyTests : IDisposable
         Assert.Equal(
             PlannedAction.Skip,
             ConversionPolicy.Decide(
-                ScanEngine.UNKNOWN_CHARSET, sourceHasBom: false,
+                ScanEngine.UnknownCharset, sourceHasBom: false,
                 "utf-8", targetHasBom: false,
-                AmbiguityClass.Unambiguous, [], out _));
+                sourceWasSpecified: false, isUnicodeOrAscii: false,
+                out SourceInterpretation interpretation, out _));
+        Assert.Equal(SourceInterpretation.NotApplicable, interpretation);
 
         var entry = new ConversionReportEntry
         {
             FilePath = Write("binary.bin", "irrelevant", "ascii"),
-            SourceEncoding = ScanEngine.UNKNOWN_CHARSET,
+            SourceEncoding = ScanEngine.UnknownCharset,
             SourceHasBom = false,
             TargetEncoding = "utf-8",
             TargetHasBom = false,
@@ -237,7 +250,7 @@ public sealed class ConversionPolicyTests : IDisposable
 
         ConversionReportEntry result = Assert.Single(completed);
 
-        // The policy let it through - naming the encoding settled the ambiguity - and
+        // The policy lets it through after the source choice, and
         // the conversion engine refused it anyway.
         Assert.Equal(PlannedAction.Convert, result.Action);
         Assert.Equal(ConversionRowResult.Error, result.Result);
@@ -253,9 +266,7 @@ public sealed class ConversionPolicyTests : IDisposable
     {
         entry.CurrentCharsetLabel = charset;
         entry.SourceEncodingWasSpecified = true;
-        entry.Ambiguity = AmbiguityClass.Unambiguous;
-        entry.AmbiguityReason = AmbiguityReason.ExplicitlySpecified;
-        entry.CompetingEncodings = [];
+        entry.SourceInterpretation = null;
         entry.Diagnostic = null;
         entry.Action = null;
     }
@@ -343,13 +354,13 @@ public sealed class ConversionPolicyTests : IDisposable
         Assert.Equal("koi8-r", planned.SourceEncoding);
         Assert.Equal(PlannedAction.Convert, planned.Action);
         Assert.True(planned.SourceWasSpecified);
-        Assert.False(planned.MayChangeText);
+        Assert.Equal(SourceInterpretation.ExplicitSource, planned.SourceInterpretation);
     }
 
     [Fact]
     public void ChoosingAnEncodingTheBytesCannotBeIsStillRefused()
     {
-        // Explicit source ends the ambiguity question, not the conversion safeguards.
+        // Explicit source answers the source question, not the conversion safeguards.
         // These EUC-JP bytes carry a JIS X 0212 sequence code page 51932 cannot map.
         byte[] unrepresentable =
             [0x8F, 0xB0, 0xDF, 0xB9, 0xA5, 0xA1, 0xA4, 0xC0, 0xA4, 0xB3];

@@ -462,7 +462,7 @@
     <value>Help</value>
   </data>
   <data name="tlnkAbout.Size" type="System.Drawing.Size, System.Drawing">
-    <value>40, 17</value>
+    <value>118, 17</value>
   </data>
   <data name="tlnkAbout.Text" xml:space="preserve">
     <value>About</value>
@@ -471,7 +471,7 @@
     <value>40, 17</value>
   </data>
   <data name="tlnkExport.Text" xml:space="preserve">
-    <value>Export</value>
+    <value>Export selected rows...</value>
   </data>
   <data name="btnExportReport.Font" type="System.Drawing.Font, System.Drawing">
     <value>Segoe UI, 9pt, style=Underline</value>
@@ -489,10 +489,10 @@
     <value>Magenta</value>
   </data>
   <data name="btnExportReport.Size" type="System.Drawing.Size, System.Drawing">
-    <value>106, 20</value>
+    <value>105, 20</value>
   </data>
   <data name="btnExportReport.Text" xml:space="preserve">
-    <value>Conversion report</value>
+    <value>Export results</value>
   </data>
   <data name="btnExportReport.Visible" type="System.Boolean, mscorlib">
     <value>False</value>
