@@ -97,7 +97,9 @@ public sealed class ConversionJournalTests : IDisposable
 
         // Believed.
         Assert.Equal("Explicit", entry.DetectionMode);
-        Assert.Null(entry.DetectedEncoding);
+        Assert.Equal("shift_jis", entry.DetectedEncoding);
+        Assert.Equal(932, entry.DetectedCodePage);
+        Assert.False(entry.ExplicitSourceDiffersFromDetection);
         Assert.Equal(SourceInterpretation.ExplicitSource, entry.SourceInterpretation);
 
         // Decided.
@@ -135,14 +137,15 @@ public sealed class ConversionJournalTests : IDisposable
         string path = Write("ambiguous.txt", "Le café était déjà prêt", "windows-1252");
         string before = ConversionMetadataStore.ComputeSha256(path);
 
-        Assert.Equal(3, Convert());
+        Assert.Equal(5, Convert());
 
         JournalEntry entry = EntryFor("ambiguous.txt");
 
         Assert.Equal(PlannedAction.Refuse, entry.PlannedAction);
         Assert.Equal(ConversionStatus.Refused, entry.Status);
         Assert.Equal(SourceInterpretation.LegacyNeedsSourceChoice, entry.SourceInterpretation);
-        Assert.Contains("Automatic conversion of legacy text is disabled", entry.Reason);
+        Assert.Equal(ConversionReasonCodes.LegacySourceRequired, entry.ReasonCode);
+        Assert.Contains("EC converts automatically only from Unicode and ASCII", entry.Reason);
 
         // Nothing was written, so there is no "after" — and the file still is what the
         // "before" says it is.
@@ -170,6 +173,59 @@ public sealed class ConversionJournalTests : IDisposable
     }
 
     [Fact]
+    public void AnExplicitSourceDisagreementIsRecordedWithoutRefusingLegacyConversion()
+    {
+        // This short byte sequence is reported as UTF-8 by the sample detector, while
+        // full-file validation lets the user's explicit windows-1252 interpretation
+        // proceed. The journal must retain both claims and identify their disagreement.
+        Write("override.txt", "café", "windows-1252");
+
+        Assert.Equal(0, Convert("-From", "windows-1252"));
+
+        JournalEntry entry = EntryFor("override.txt");
+
+        Assert.Equal(ConversionStatus.Converted, entry.Status);
+        Assert.Equal("Explicit", entry.DetectionMode);
+        Assert.Equal("utf-8", entry.DetectedEncoding);
+        Assert.Equal(65001, entry.DetectedCodePage);
+        Assert.Equal("windows-1252", entry.SourceEncoding);
+        Assert.Equal(1252, entry.SourceCodePage);
+        Assert.True(entry.ExplicitSourceDiffersFromDetection);
+    }
+
+    [Fact]
+    public void CodecAliasesDoNotCreateAFalseExplicitSourceDisagreement()
+    {
+        string path = Write("alias.txt", "plain ascii", "ibm866");
+        string hash = ConversionMetadataStore.ComputeSha256(path);
+        var entry = new ConversionReportEntry
+        {
+            FilePath = path,
+            SourceEncoding = "ibm866",
+            SourceHasBom = false,
+            TargetEncoding = "utf-8",
+            TargetHasBom = false,
+            Result = ConversionRowResult.Unchanged,
+            SourceEncodingWasSpecified = true,
+            DetectedEncodingLabel = "cp866",
+            ResolvedSourceLabel = "ibm866",
+            JournalSourceSha256 = hash,
+            Action = PlannedAction.Unchanged,
+            SourceInterpretation = SourceInterpretation.ExplicitSource,
+        };
+
+        JournalEntry journalEntry = Assert.Single(
+            ConversionJournal.FromRun(
+                [entry], _root, "utf-8", targetHasBom: false,
+                backupEnabled: false, explicitSource: "ibm866",
+                surface: "Test", startedUtc: DateTime.UtcNow).Entries);
+
+        Assert.Equal(866, journalEntry.DetectedCodePage);
+        Assert.Equal(866, journalEntry.SourceCodePage);
+        Assert.False(journalEntry.ExplicitSourceDiffersFromDetection);
+    }
+
+    [Fact]
     public void EveryFileTheRunTouchedIsAccountedFor()
     {
         Write("jp.txt", "こんにちは世界。日本語のテキストです。", "shift_jis");
@@ -184,6 +240,19 @@ public sealed class ConversionJournalTests : IDisposable
         Assert.Equal(3, journal.Summary.Values.Sum());
         Assert.Equal(2, journal.Summary["Refused"]);
         Assert.Equal(1, journal.Summary["Unchanged"]);
+    }
+
+    [Fact]
+    public void RewritingAJournalInsideTheScanRootNeverScansTheJournal()
+    {
+        Write("jp.txt", "こんにちは世界。テキスト", "shift_jis");
+
+        Assert.Equal(0, Convert("-From", "shift_jis"));
+        Assert.Equal(0, Convert("-From", "utf-8"));
+
+        ConversionJournal journal = Load();
+        JournalEntry only = Assert.Single(journal.Entries);
+        Assert.Equal("jp.txt", only.RelativePath);
     }
 
     [Fact]

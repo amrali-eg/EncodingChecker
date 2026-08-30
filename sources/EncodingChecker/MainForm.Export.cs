@@ -29,13 +29,14 @@ public partial class MainForm
 
         try
         {
-            using var writer = new StreamWriter(saveFileDialog.FileName, false, Encoding.UTF8);
+            using var writer = new StreamWriter(
+                saveFileDialog.FileName, false, new UTF8Encoding(true));
 
             foreach (ListViewItem item in lstResults.CheckedItems)
             {
-                string charset = item.SubItems[RESULTS_COLUMN_CHARSET].Text;
-                string fileName = item.SubItems[RESULTS_COLUMN_FILE_NAME].Text;
-                string directory = item.SubItems[RESULTS_COLUMN_DIRECTORY].Text;
+                string charset = item.SubItems[ResultsColumnCharset].Text;
+                string fileName = item.SubItems[ResultsColumnFileName].Text;
+                string directory = item.SubItems[ResultsColumnDirectory].Text;
 
                 writer.WriteLine("{0}\t{1}\\{2}", charset, directory, fileName);
             }
@@ -48,8 +49,9 @@ public partial class MainForm
 
     private void OnExportResultsOpening(object? sender, EventArgs e)
     {
+        _exportText.Enabled = lstResults.CheckedItems.Count > 0;
         _exportCsv.Enabled = lstResults.Items.Count > 0;
-        _exportJournal.Enabled = _lastConversionStartedUtc.HasValue;
+        _exportJournal.Enabled = _lastConversionJournal is not null;
         _exportJournal.ToolTipText = _exportJournal.Enabled
             ? "Save the most recent conversion's decisions and outcomes as JSON."
             : "Available after a conversion has run.";
@@ -75,7 +77,7 @@ public partial class MainForm
 
         var saveFileDialog = new SaveFileDialog
         {
-            Title = @"Export CSV Report",
+            Title = @"Export Results as CSV",
             Filter = @"CSV files (*.csv)|*.csv",
             FileName = "EncodingChecker report.csv",
             RestoreDirectory = true,
@@ -86,7 +88,8 @@ public partial class MainForm
 
         try
         {
-            using var writer = new StreamWriter(saveFileDialog.FileName, false, Encoding.UTF8);
+            using var writer = new StreamWriter(
+                saveFileDialog.FileName, false, ConversionReport.CsvFileEncoding);
             ConversionReport.WriteCsv(ResultEntries(), writer);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -97,49 +100,21 @@ public partial class MainForm
 
     private void OnExportJournal(object? sender, EventArgs e)
     {
-        if (_lastConversionStartedUtc is null)
+        if (_lastConversionJournal is null)
             return;
 
         var saveFileDialog = new SaveFileDialog
         {
-            Title = @"Export Conversion History",
+            Title = @"Export Conversion Journal",
             Filter = @"JSON files (*.json)|*.json",
-            FileName = "EncodingChecker conversion history.json",
+            FileName = "EncodingChecker conversion journal.json",
             RestoreDirectory = true,
         };
 
-        if (saveFileDialog.ShowDialog(this) == DialogResult.OK)
-            ExportJournal(ResultEntries(), saveFileDialog.FileName);
-    }
-
-    private void ExportJournal(List<ConversionReportEntry> entries, string path)
-    {
-        if (_lastConversionStartedUtc is not { } startedUtc)
-        {
-            ShowWarning(
-                "There is no conversion to journal yet. Run Convert first; a journal "
-                + "records what a conversion did, which a detection scan has not.");
+        if (saveFileDialog.ShowDialog(this) != DialogResult.OK)
             return;
-        }
 
-        ScanEngine.ParseCharsetLabel(
-            (string)lstConvert.SelectedItem!,
-            out string targetCharset,
-            out bool targetWriteBom);
-
-        string? error = ConversionJournal.FromRun(
-                entries,
-                lstBaseDirectory.Text,
-                targetCharset,
-                targetWriteBom,
-                chkCreateBackup.Checked,
-                explicitSource: entries.Count > 0
-                                && entries.TrueForAll(e => e.SourceEncodingWasSpecified)
-                    ? entries[0].ResolvedSourceLabel
-                    : null,
-                surface: "Gui",
-                startedUtc)
-            .Save(path);
+        string? error = _lastConversionJournal.Save(saveFileDialog.FileName);
 
         if (error is not null)
             ShowWarning("Failed to export the journal: {0}", error);

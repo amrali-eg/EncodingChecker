@@ -68,7 +68,7 @@ public sealed class ConversionPolicyTests : IDisposable
             completed.Add,
             CancellationToken.None);
 
-        return completed.ToList();
+        return [.. completed];
     }
 
     [Fact]
@@ -83,9 +83,9 @@ public sealed class ConversionPolicyTests : IDisposable
         ConversionReportEntry entry = Assert.Single(ViewThenConvert());
 
         Assert.Equal(PlannedAction.Refuse, entry.Action);
-        Assert.Equal(ConversionRowResult.Error, entry.Result);
+        Assert.Equal(ConversionRowResult.Refused, entry.Result);
         Assert.Equal(SourceInterpretation.LegacyNeedsSourceChoice, entry.SourceInterpretation);
-        Assert.Contains("Automatic conversion of legacy text is disabled", entry.Diagnostic);
+        Assert.Contains("EC converts automatically only from Unicode and ASCII", entry.Diagnostic);
         Assert.Equal(original, File.ReadAllBytes(path));
     }
 
@@ -143,6 +143,7 @@ public sealed class ConversionPolicyTests : IDisposable
             "windows-1252", sourceHasBom: false,
             "utf-16le", targetHasBom: false,
             sourceWasSpecified: false, isUnicodeOrAscii: false,
+            explicitSourceConflictsWithReliableDetection: false,
             out SourceInterpretation interpretation, out string? reason);
 
         Assert.Equal(PlannedAction.Refuse, action);
@@ -159,6 +160,7 @@ public sealed class ConversionPolicyTests : IDisposable
             "utf-8", sourceHasBom: false,
             "utf-16le", targetHasBom: false,
             sourceWasSpecified: false, isUnicodeOrAscii: true,
+            explicitSourceConflictsWithReliableDetection: false,
             out SourceInterpretation automatic, out _));
         Assert.Equal(SourceInterpretation.AutomaticUnicodeOrAscii, automatic);
 
@@ -168,6 +170,7 @@ public sealed class ConversionPolicyTests : IDisposable
             "windows-1252", sourceHasBom: false,
             "utf-8", targetHasBom: false,
             sourceWasSpecified: true, isUnicodeOrAscii: false,
+            explicitSourceConflictsWithReliableDetection: false,
             out SourceInterpretation explicitSource, out _));
         Assert.Equal(SourceInterpretation.ExplicitSource, explicitSource);
     }
@@ -183,6 +186,7 @@ public sealed class ConversionPolicyTests : IDisposable
                 "utf-8", sourceHasBom: false,
                 "utf-8", targetHasBom: false,
                 sourceWasSpecified: false, isUnicodeOrAscii: true,
+                explicitSourceConflictsWithReliableDetection: false,
                 out SourceInterpretation interpretation, out _));
         Assert.Equal(SourceInterpretation.NotApplicable, interpretation);
     }
@@ -198,6 +202,7 @@ public sealed class ConversionPolicyTests : IDisposable
                 ScanEngine.UnknownCharset, sourceHasBom: false,
                 "utf-8", targetHasBom: false,
                 sourceWasSpecified: false, isUnicodeOrAscii: false,
+                explicitSourceConflictsWithReliableDetection: false,
                 out SourceInterpretation interpretation, out _));
         Assert.Equal(SourceInterpretation.NotApplicable, interpretation);
 
@@ -309,6 +314,7 @@ public sealed class ConversionPolicyTests : IDisposable
         File.WriteAllBytes(path, bytes);
 
         ConversionReportEntry entry = Assert.Single(ViewThenConvert());
+        Assert.NotNull(entry.DetectedEncodingLabel);
         ChooseSourceEncoding(entry, "koi8-r");
 
         var completed = new EntrySink();
@@ -318,7 +324,9 @@ public sealed class ConversionPolicyTests : IDisposable
             ScanEngine.DefaultMaxParallelism,
             whatIf: false, backup: false, completed.Add, CancellationToken.None);
 
-        Assert.Equal(ConversionRowResult.Converted, Assert.Single(completed).Result);
+        Assert.Equal(
+            ConversionRowResult.Converted,
+            Assert.Single(completed).Result);
 
         string text = Encoding.UTF8.GetString(File.ReadAllBytes(path));
 

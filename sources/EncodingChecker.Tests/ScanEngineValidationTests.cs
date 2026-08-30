@@ -178,6 +178,49 @@ public sealed class ScanEngineValidationTests : IDisposable
     }
 
     [Fact]
+    public void Validate_RejectsARecognizedUtf8FileWithATruncatedTail()
+    {
+        byte[] prefix = Encoding.UTF8.GetBytes(string.Concat(
+            Enumerable.Repeat("Hello 世界 ", 128)));
+        byte[] bytes = [.. prefix, 0xE2, 0x82];
+        File.WriteAllBytes(Path.Combine(_root, "invalid.txt"), bytes);
+        var entries = new EntrySink();
+
+        ScanEngine.ScanDirectory(
+            new ScanDirectoryOptions
+            {
+                BaseDirectory = _root,
+                Action = ScanAction.Validate,
+                ValidCharsets = ["utf-8"],
+            },
+            entries.Add,
+            CancellationToken.None);
+
+        ConversionReportEntry entry = Assert.Single(entries);
+        Assert.Equal(ConversionRowResult.Invalid, entry.Result);
+        Assert.Equal(ConversionReasonCodes.StrictValidationFailed, entry.ReasonCode);
+    }
+
+    [Fact]
+    public void Validate_AcceptsWellFormedUtf8()
+    {
+        File.WriteAllBytes(Path.Combine(_root, "valid.txt"), "Hello 世界"u8.ToArray());
+        var entries = new EntrySink();
+
+        ScanEngine.ScanDirectory(
+            new ScanDirectoryOptions
+            {
+                BaseDirectory = _root,
+                Action = ScanAction.Validate,
+                ValidCharsets = ["utf-8"],
+            },
+            entries.Add,
+            CancellationToken.None);
+
+        Assert.Equal(ConversionRowResult.Unchanged, Assert.Single(entries).Result);
+    }
+
+    [Fact]
     public void ConvertFiles_BinaryFile_IsSkipped_NotConvertedAndBytesUnchanged()
     {
         var random = new Random(5678);
@@ -329,7 +372,7 @@ public sealed class ScanEngineValidationTests : IDisposable
     }
 
     [Fact]
-    public void ConvertFiles_EntryWithUnresolvableSourceEncoding_ReportsErrorInsteadOfThrowing()
+    public void ConvertFiles_EntryWithUnresolvableSourceEncoding_RefusesInsteadOfThrowing()
     {
         string path = Path.Combine(_root, "stale.txt");
         File.WriteAllText(path, TestContent.Ascii, Encoding.ASCII);
@@ -356,6 +399,6 @@ public sealed class ScanEngineValidationTests : IDisposable
             CancellationToken.None);
 
         ConversionReportEntry result = Assert.Single(completed);
-        Assert.Equal(ConversionRowResult.Error, result.Result);
+        Assert.Equal(ConversionRowResult.Refused, result.Result);
     }
 }

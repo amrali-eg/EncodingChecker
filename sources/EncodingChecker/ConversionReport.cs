@@ -14,6 +14,9 @@ internal enum ConversionRowResult
     /// <summary>Encoding could not be determined, so no action was attempted.</summary>
     Skipped,
 
+    /// <summary>Conversion was refused because EC could not prove it was safe.</summary>
+    Refused,
+
     /// <summary>Successfully converted, or would be under a dry run.</summary>
     Converted,
 
@@ -29,9 +32,9 @@ internal sealed class ConversionReportEntry
 {
     internal required string FilePath { get; init; }
 
-    internal required string SourceEncoding { get; init; }
+    internal required string SourceEncoding { get; set; }
 
-    internal bool SourceHasBom { get; init; }
+    internal bool SourceHasBom { get; set; }
 
     internal required string TargetEncoding { get; set; }
 
@@ -58,10 +61,19 @@ internal sealed class ConversionReportEntry
     internal bool SourceEncodingWasSpecified { get; set; }
 
     /// <summary>
+    /// Whether automatic detection was confirmed by a complete strict Unicode decode.
+    /// Internal state; not in CSV.
+    /// </summary>
+    internal bool HasReliableUnicodeDetection { get; set; }
+
+    /// <summary>
     /// The SHA-256 this file must still have when installed, or <see langword="null"/>
     /// when no plan has committed to its contents. Internal state; not in CSV.
     /// </summary>
     internal string? ExpectedSourceSha256 { get; set; }
+
+    /// <summary>The size paired with <see cref="ExpectedSourceSha256"/>.</summary>
+    internal long? ExpectedSourceSize { get; set; }
 
     /// <summary>
     /// What <see cref="ConversionPolicy"/> decided, or <see langword="null"/> before a
@@ -115,13 +127,34 @@ internal sealed class ConversionReportEntry
     /// </summary>
     internal string? JournalSourceSha256 { get; set; }
 
-    /// <summary>Additional error detail; not in CSV.</summary>
+    /// <summary>Human-readable detail written to reports and journals.</summary>
     internal string? Diagnostic { get; set; }
+
+    /// <summary>Stable machine-readable reason for a non-success outcome.</summary>
+    internal string? ReasonCode { get; set; }
+}
+
+/// <summary>Stable reason codes written to reports and journals.</summary>
+internal static class ConversionReasonCodes
+{
+    internal const string UnknownEncoding = nameof(UnknownEncoding);
+    internal const string UnsupportedSourceEncoding = nameof(UnsupportedSourceEncoding);
+    internal const string LegacySourceRequired = nameof(LegacySourceRequired);
+    internal const string ExplicitSourceConflictsWithDetection =
+        nameof(ExplicitSourceConflictsWithDetection);
+    internal const string StrictValidationFailed = nameof(StrictValidationFailed);
+    internal const string SourceSnapshotFailed = nameof(SourceSnapshotFailed);
+    internal const string BackupFailed = nameof(BackupFailed);
+    internal const string ScanFailed = nameof(ScanFailed);
 }
 
 /// <summary>Writes the application's standard comma-delimited CSV report.</summary>
 internal static class ConversionReport
 {
+    /// <summary>UTF-8 with BOM so CSV reports open correctly in Excel.</summary>
+    internal static readonly Encoding CsvFileEncoding = new UTF8Encoding(
+        encoderShouldEmitUTF8Identifier: true);
+
     private const char Delimiter = ',';
 
     internal static void WriteCsv(
@@ -132,7 +165,8 @@ internal static class ConversionReport
         ArgumentNullException.ThrowIfNull(writer);
 
         // Keep header names unique so strict CSV readers can import the report.
-        writer.WriteLine("File,Encoding,BOM,Target,TargetBOM,Result");
+        writer.WriteLine(
+            "File,Encoding,BOM,Target,TargetBOM,Result,ReasonCode,Diagnostic");
 
         foreach (ConversionReportEntry entry in entries)
         {
@@ -151,7 +185,14 @@ internal static class ConversionReport
             WriteField(writer, entry.TargetHasBom ? "Yes" : "No");
             writer.Write(Delimiter);
 
-            writer.WriteLine(entry.Result);
+            writer.Write(entry.Result);
+            writer.Write(Delimiter);
+
+            WriteField(writer, entry.ReasonCode);
+            writer.Write(Delimiter);
+
+            WriteField(writer, entry.Diagnostic);
+            writer.WriteLine();
         }
     }
 

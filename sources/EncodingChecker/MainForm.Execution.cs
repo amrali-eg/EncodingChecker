@@ -54,7 +54,7 @@ public partial class MainForm
 
         // A new scan replaces the results table, so it cannot share the previous run's
         // conversion history.
-        _lastConversionStartedUtc = null;
+        _lastConversionJournal = null;
         _currentAction = action;
         _settings.AddRecentDirectory(directory);
 
@@ -153,7 +153,6 @@ public partial class MainForm
         };
 
         _convertArgs = args;
-        _lastConversionStartedUtc = _convertWasPreview ? null : DateTime.UtcNow;
         _actionWorker.RunWorkerAsync(args);
     }
 
@@ -364,6 +363,9 @@ public partial class MainForm
         bool wasPreview = _convertWasPreview;
         OrchestrationResult? outcome = _convertArgs?.Outcome;
 
+        if (!wasPreview && outcome?.Journal is not null)
+            _lastConversionJournal = outcome.Journal;
+
         _convertItemsByPath = null;
         _convertTargetLabel = null;
         _convertResults = null;
@@ -402,6 +404,7 @@ public partial class MainForm
 
         int convertedCount = 0;
         int unchangedCount = 0;
+        int refusedCount = 0;
         int errorCount = 0;
 
         // Update the UI only after all worker results are available.
@@ -427,6 +430,9 @@ public partial class MainForm
                 case ConversionRowResult.Error:
                     errorCount++;
                     break;
+                case ConversionRowResult.Refused:
+                    refusedCount++;
+                    break;
                 default:
                     unchangedCount++;
                     break;
@@ -446,14 +452,14 @@ public partial class MainForm
         string statusMessage = wasPreview
             ? (e.Cancelled
                 ? $"Preview cancelled: {convertedCount} file(s) would be converted, " +
-                  $"{unchangedCount} unchanged, {errorCount} failed"
+                  $"{unchangedCount} unchanged, {refusedCount} refused, {errorCount} failed"
                 : $"Preview complete: {convertedCount} file(s) would be converted, " +
-                  $"{unchangedCount} unchanged, {errorCount} failed")
+                  $"{unchangedCount} unchanged, {refusedCount} refused, {errorCount} failed")
             : (e.Cancelled
                 ? $"Conversion cancelled: {convertedCount} converted, " +
-                  $"{unchangedCount} unchanged, {errorCount} failed"
+                  $"{unchangedCount} unchanged, {refusedCount} refused, {errorCount} failed"
                 : $"Conversion complete: {convertedCount} converted, " +
-                  $"{unchangedCount} unchanged, {errorCount} failed");
+                  $"{unchangedCount} unchanged, {refusedCount} refused, {errorCount} failed");
 
         UpdateControlsOnActionDone(statusMessage);
     }
@@ -473,18 +479,18 @@ public partial class MainForm
             // Preview leaves the file unchanged, so only the icon changes.
             if (wasPreview)
             {
-                item.ImageIndex = RESULT_ICON_WOULD_CHANGE;
+                item.ImageIndex = ResultIconWouldChange;
                 return;
             }
 
             item.Checked = false;
-            item.ImageIndex = RESULT_ICON_SUCCESS;
-            item.SubItems[RESULTS_COLUMN_CHARSET].Text = targetLabel;
+            item.ImageIndex = ResultIconSuccess;
+            item.SubItems[ResultsColumnCharset].Text = targetLabel;
         }
-        else if (entry.Result == ConversionRowResult.Error)
+        else if (entry.Result is ConversionRowResult.Error or ConversionRowResult.Refused)
         {
             // Keep failed files selected so they can be retried.
-            item.ImageIndex = RESULT_ICON_FAILED;
+            item.ImageIndex = ResultIconFailed;
 
             Debug.WriteLine(
                 $"Conversion failed for {entry.FilePath}: {entry.Diagnostic}");

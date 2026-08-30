@@ -167,7 +167,7 @@ public sealed class ResultEntryReconciliationTests : IDisposable
     }
 
     [Fact]
-    public void CsvExportedFromTheRow_KeepsTheSixColumnSchemaAndEscaping()
+    public void CsvExportedFromTheRow_KeepsTheDetailedSchemaAndEscaping()
     {
         // Guards the export path this fix touches: schema and quoting are unaffected.
         var entry = new ConversionReportEntry
@@ -178,7 +178,8 @@ public sealed class ResultEntryReconciliationTests : IDisposable
             TargetEncoding = "utf-8",
             TargetHasBom = true,
             Result = ConversionRowResult.Error,
-            Diagnostic = "should never appear in the CSV",
+            ReasonCode = "SourceReadError",
+            Diagnostic = "detail should appear in the CSV",
         };
 
         ListViewItem item = Row(entry);
@@ -187,10 +188,11 @@ public sealed class ResultEntryReconciliationTests : IDisposable
         string csv = ConversionReport.ToCsvString([(ConversionReportEntry)item.Tag!]);
         string[] lines = csv.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries);
 
-        Assert.Equal("File,Encoding,BOM,Target,TargetBOM,Result", lines[0]);
+        Assert.Equal(
+            "File,Encoding,BOM,Target,TargetBOM,Result,ReasonCode,Diagnostic",
+            lines[0]);
         Assert.StartsWith("\"" + entry.FilePath + "\",", lines[1]);
-        Assert.EndsWith(",Error", lines[1]);
-        Assert.DoesNotContain("should never appear", csv);
+        Assert.EndsWith(",Error,SourceReadError,detail should appear in the CSV", lines[1]);
     }
 
     [Fact]

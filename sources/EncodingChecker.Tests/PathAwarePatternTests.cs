@@ -67,7 +67,7 @@ public sealed class PathAwarePatternTests : IDisposable
         HashSet<string> found = Scan("*.cs");
 
         Assert.Equal(
-            new HashSet<string> { "root.cs", "src/a.cs", "src/nested/b.cs", "other/c.cs" },
+            ["root.cs", "src/a.cs", "src/nested/b.cs", "other/c.cs"],
             found);
     }
 
@@ -97,7 +97,7 @@ public sealed class PathAwarePatternTests : IDisposable
         // there, per the documented "matches the filename at any depth" contract.
         HashSet<string> found = Scan("b.cs");
 
-        Assert.Equal(new HashSet<string> { "src/nested/b.cs" }, found);
+        Assert.Equal(["src/nested/b.cs"], found);
     }
 
     [Fact]

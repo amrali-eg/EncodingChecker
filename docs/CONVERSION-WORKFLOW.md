@@ -52,7 +52,9 @@ After reviewing it, apply that exact plan:
 EncodingChecker.exe -Apply plan.json
 ```
 
-The plan contains the files’ hashes and conversion settings. If a scheduled file changes after review, EC rejects the whole plan instead of applying an approval to different bytes.
+Detection and SHA-256 hashing use the same source snapshot when the plan is built. The plan contains those hashes and the complete conversion settings. If a scheduled file changes after review, EC rejects the whole plan instead of applying an approval to different bytes. `-Apply` cannot be combined with `-WhatIf`: the saved plan is already the preview, while applying it performs the reviewed writes.
+
+The GUI uses the same planned actions. Its **Export results** menu can save selected rows as text, all displayed results as a diagnostic CSV report, or the exact completed conversion journal as JSON.
 
 For a known legacy source, supply the encoding explicitly:
 

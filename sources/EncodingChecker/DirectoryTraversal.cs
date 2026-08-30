@@ -32,7 +32,8 @@ internal static class DirectoryTraversal
     private static readonly EnumerationOptions DirectoryWalkOptions = new()
     {
         // Never traverse symlinks, junctions, or other reparse points.
-        AttributesToSkip = FileAttributes.ReparsePoint,
+        AttributesToSkip = FileAttributes.Hidden | FileAttributes.System |
+            FileAttributes.ReparsePoint,
 
         // Keep access failures visible so callers can report skipped directories.
         IgnoreInaccessible = false,
@@ -71,7 +72,7 @@ internal static class DirectoryTraversal
         bool includeSubdirectories,
         List<Regex> includePatterns,
         List<Regex> excludePatterns,
-        string? excludedFullPath = null,
+        IReadOnlyCollection<string>? excludedFullPaths = null,
         Action<string>? onWarning = null)
     {
         var pending = new Stack<string>();
@@ -111,11 +112,10 @@ internal static class DirectoryTraversal
                     continue;
 
                 // Compare full paths because the scan root may itself be relative.
-                if (excludedFullPath is not null &&
-                    string.Equals(
+                if (excludedFullPaths is not null &&
+                    excludedFullPaths.Contains(
                         Path.GetFullPath(file),
-                        excludedFullPath,
-                        StringComparison.OrdinalIgnoreCase))
+                        StringComparer.OrdinalIgnoreCase))
                 {
                     continue;
                 }

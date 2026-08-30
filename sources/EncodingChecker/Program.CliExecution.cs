@@ -1,10 +1,8 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading;
 
 namespace EncodingChecker;
@@ -69,16 +67,14 @@ internal static partial class Program
                     Action = f.Action,
                     SourceInterpretation = f.SourceInterpretation,
                     SourceEncodingWasSpecified = f.SourceWasSpecified,
+                    ReasonCode = f.ReasonCode,
+                    Diagnostic = f.Reason,
 
                     // Rechecked at installation so a long conversion cannot install over
                     // bytes that changed after the initial stale-file check.
                     ExpectedSourceSha256 = f.Sha256,
                 })
         ];
-
-        // ConvertFiles invokes callbacks concurrently. A plain List can silently lose
-        // entries, which would make the report and journal incomplete after a real run.
-        var completedSink = new ConcurrentBag<ConversionReportEntry>();
 
         using var cancellation = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) =>
@@ -96,7 +92,7 @@ internal static partial class Program
                 options.MaxParallelism ?? ScanEngine.DefaultMaxParallelism,
                 whatIf: false,
                 backup: plan.BackupEnabled,
-                completedSink.Add,
+                _ => { },
                 cancellation.Token);
         }
         catch (OperationCanceledException)
@@ -107,7 +103,7 @@ internal static partial class Program
 
         List<ConversionReportEntry> completed =
         [
-            .. completedSink.OrderBy(e => e.FilePath, StringComparer.OrdinalIgnoreCase)
+            .. entries.OrderBy(e => e.FilePath, StringComparer.OrdinalIgnoreCase)
         ];
 
         foreach (ConversionReportEntry entry in completed
@@ -121,11 +117,8 @@ internal static partial class Program
 
         int Count(ConversionRowResult result) => byResult.GetValueOrDefault(result);
 
-        // A planned refusal is an expected safety outcome, not an apply failure. Other
-        // errors mean an approved conversion could not complete.
-        int failed = completed.Count(
-            entry => entry.Result == ConversionRowResult.Error &&
-                     entry.Action != PlannedAction.Refuse);
+        int failed = Count(ConversionRowResult.Error);
+        bool runFailed = failed > 0;
 
         // Account for every planned file in the journal, including ones left unchanged.
         if (!string.IsNullOrWhiteSpace(options.JournalPath))
@@ -147,18 +140,24 @@ internal static partial class Program
                 Console.Error.WriteLine(
                     "The conversion ran, but the journal could not be written: "
                     + journalError);
-                failed++;
+                runFailed = true;
             }
         }
 
-        Console.Out.WriteLine(
-            $"Applied plan: {Count(ConversionRowResult.Converted)} converted, "
-            + $"{Count(ConversionRowResult.Unchanged)} already in the target encoding, "
-            + $"{Count(ConversionRowResult.Skipped)} skipped, "
-            + $"{failed} failed, "
-            + $"{plan.Files.Count - entries.Count} not scheduled for conversion.");
+        if (!options.Quiet)
+        {
+            Console.Out.WriteLine(
+                $"Applied plan: {plan.Files.Count} selected, "
+                + $"{Count(ConversionRowResult.Converted)} converted, "
+                + $"{Count(ConversionRowResult.Unchanged)} unchanged, "
+                + $"{Count(ConversionRowResult.Skipped)} skipped, "
+                + $"{Count(ConversionRowResult.Refused)} refused, "
+                + $"{failed} failed.");
+        }
 
-        return failed > 0 ? 3 : 0;
+        return runFailed
+            ? 3
+            : completed.Any(e => e.Result == ConversionRowResult.Refused) ? 5 : 0;
     }
 
     // Internal so tests can pin the published CLI exit-code contract.
@@ -228,9 +227,7 @@ internal static partial class Program
             IncludeSubdirectories = true,
             IncludePatterns = options.Include,
             ExcludePatterns = options.Exclude,
-            ExcludedFullPath = string.IsNullOrEmpty(options.ReportPath)
-                ? null
-                : Path.GetFullPath(options.ReportPath),
+            ExcludedFullPaths = GetOutputExclusions(options),
             Action = action,
             MaxParallelism =
                 options.MaxParallelism ??
@@ -331,7 +328,8 @@ internal static partial class Program
         {
             try
             {
-                using var writer = new StreamWriter(options.ReportPath);
+                using var writer = new StreamWriter(
+                    options.ReportPath, false, ConversionReport.CsvFileEncoding);
                 ConversionReport.WriteCsv(entries, writer);
             }
             catch (Exception ex) when (
@@ -345,13 +343,23 @@ internal static partial class Program
 
         if (!string.IsNullOrWhiteSpace(options.PlanPath))
         {
-            ConversionPlan plan = ConversionPlan.FromEntries(
-                entries,
-                options.BasePath!,
-                targetCharset!,
-                targetWriteBom,
-                options.Backup,
-                options.From);
+            ConversionPlan plan;
+
+            try
+            {
+                plan = ConversionPlan.FromEntries(
+                    entries,
+                    options.BasePath!,
+                    targetCharset!,
+                    targetWriteBom,
+                    options.Backup,
+                    options.From);
+            }
+            catch (InvalidOperationException ex)
+            {
+                Console.Error.WriteLine($"Could not create conversion plan: {ex.Message}");
+                return 3;
+            }
 
             string? saveError = plan.Save(options.PlanPath!);
 
@@ -380,6 +388,9 @@ internal static partial class Program
         if (entries.Any(e => e.Result == ConversionRowResult.Error))
             return 3;
 
+        if (entries.Any(e => e.Result == ConversionRowResult.Refused))
+            return 5;
+
         if (options is { FailOnChanges: true, DetectOnly: false })
         {
             bool changesFound = action == ScanAction.Validate
@@ -391,5 +402,22 @@ internal static partial class Program
         }
 
         return 0;
+    }
+
+    private static IReadOnlyCollection<string> GetOutputExclusions(CliOptions options)
+    {
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        Add(options.ReportPath);
+        Add(options.PlanPath);
+        Add(options.JournalPath);
+
+        return paths;
+
+        void Add(string? path)
+        {
+            if (!string.IsNullOrWhiteSpace(path))
+                paths.Add(Path.GetFullPath(path));
+        }
     }
 }

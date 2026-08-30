@@ -1,6 +1,6 @@
 [![CI](https://github.com/amrali-eg/EncodingChecker/actions/workflows/ci.yml/badge.svg)](https://github.com/amrali-eg/EncodingChecker/actions/workflows/ci.yml)
 
-# EncodingChecker v3.8.0
+# EncodingChecker v3.9.0
 
 EncodingChecker is a Windows tool for finding, checking, and safely converting text-file encodings. Use the GUI for everyday work or the command line for repeatable jobs.
 
@@ -18,8 +18,8 @@ Requires the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download). R
 4. Read the review, then confirm the files that are safe to convert.
 
 Nothing is changed until the final confirmation. The GUI enables backups by default.
-After a conversion, choose **Export results → Conversion history (JSON)…** to keep a
-durable record of its decisions and outcomes.
+Use the single **Export results** menu to export selected rows as text, the displayed
+results as CSV, or the most recent completed conversion's immutable journal as JSON.
 
 > [!TIP]
 > **Safe workflow:** View → review → choose a legacy source encoding if needed → Convert → keep the resulting `.bak` and `.ecmeta.json` files.
@@ -56,7 +56,7 @@ The plan is tied to the selected files and their hashes. If a scheduled source f
 EncodingChecker.exe -BasePath "C:\Files" -Target utf-8 -From windows-1252 -Backup
 ```
 
-Choosing a source encoding does not bypass safety checks. The source must still decode strictly, the output must verify as the same text, and a backup failure stops the conversion.
+Choosing a source encoding does not bypass safety checks. EC also refuses a choice that conflicts with a fully validated UTF-8 or BOM-confirmed UTF-16/32 reading. The source must still decode strictly, the output must verify as the same text, and a backup failure stops the conversion.
 
 ## Common commands
 
@@ -88,13 +88,13 @@ EncodingChecker.exe -BasePath "D:\Share" -Target utf-8 -MaxParallelism 2
 | `-Target <encoding>` | Target encoding, such as `utf-8` or `utf-8-bom`. Required for conversion. |
 | `-From <encoding>` | Explicit original encoding for every selected file. Use for legacy conversion. |
 | `-Plan <path>` | Write a reviewable plan; do not modify files. |
-| `-Apply <path>` | Execute a saved plan. Do not add `-BasePath`, `-Target`, `-From`, or `-Backup`. |
+| `-Apply <path>` | Execute a saved plan. Its scope and settings are fixed. Only `-Journal`, `-Quiet`, and `-MaxParallelism` may be added; `-WhatIf` and conversion options are rejected. |
 | `-WhatIf` | One-time preview; do not write files. |
 | `-Backup` | Save every replaced original as `<file>.bak`. |
 | `-DetectOnly` | Report detected encodings; do not modify files. |
-| `-Validate <encodings>` | Check files against an allowed encoding list; do not modify files. |
+| `-Validate <encodings>` | Strictly validate complete files against an allowed encoding list; do not modify files. |
 | `-Include` / `-Exclude` | Comma-separated wildcard patterns; either option may be repeated. |
-| `-Report <path>` | Also write the CSV report to a file. |
+| `-Report <path>` | Also write the CSV report as UTF-8 with BOM (Excel-friendly). |
 | `-Journal <path>` | Write a JSON record of conversion decisions and results. |
 | `-Quiet` / `-Verbose` | Show only a summary, or include details and a result breakdown. |
 | `-MaxParallelism <N>` | Maximum simultaneous files; default is `min(CPU count, 4)`. |
@@ -102,7 +102,7 @@ EncodingChecker.exe -BasePath "D:\Share" -Target utf-8 -MaxParallelism 2
 
 Patterns without a path separator match filenames at any depth, such as `*.txt`. Patterns containing `/` or `\` match paths relative to `-BasePath`, such as `src/*.cs`. Build and metadata folders including `.git`, `bin`, `obj`, and `node_modules` are skipped automatically.
 
-Run `EncodingChecker.exe -?` for the same reference from the executable. The help aliases are `-?`, `/?`, `-h`, `/h`, and `--help`. Exit codes: `0` completed, `1` invalid command, `2` `-FailOnChanges`, `3` processing/plan/report failure, `4` cancelled.
+Run `EncodingChecker.exe -?` for the same reference from the executable. The help aliases are `-?`, `/?`, `-h`, `/h`, and `--help`. Exit codes: `0` completed, `1` invalid command, `2` `-FailOnChanges`, `3` processing/plan/report failure, `4` cancelled, `5` conversion safely refused.
 
 ## Safety and transparency
 
@@ -112,7 +112,7 @@ For the complete safety model, conversion-plan guarantees, recovery metadata, kn
 
 ## Known limits
 
-File bytes alone cannot always identify the original legacy encoding uniquely. EC therefore leaves detected legacy text unchanged until you choose or confirm its source encoding. Keep each `.bak` file with its matching `.ecmeta.json` record for deterministic recovery.
+File bytes alone cannot always identify the original legacy encoding uniquely. EC therefore leaves detected legacy text unchanged until you choose or confirm its source encoding. Keep each `.bak` file with its matching `.ecmeta.json` record: together they provide independently verifiable recovery information, although EC does not currently include a restore command.
 
 ## Supported charsets
 

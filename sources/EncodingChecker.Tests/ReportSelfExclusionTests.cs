@@ -40,7 +40,7 @@ public sealed class ReportSelfExclusionTests : IDisposable
         {
             BaseDirectory = _root,
             IncludePatterns = ["*"],
-            ExcludedFullPath = reportPath,
+            ExcludedFullPaths = [reportPath],
             Action = ScanAction.Detect,
         };
 
@@ -80,7 +80,7 @@ public sealed class ReportSelfExclusionTests : IDisposable
             {
                 BaseDirectory = ".",
                 IncludePatterns = ["*"],
-                ExcludedFullPath = Path.GetFullPath(reportPath),
+                ExcludedFullPaths = [Path.GetFullPath(reportPath)],
                 Action = ScanAction.Detect,
             };
 
@@ -115,7 +115,7 @@ public sealed class ReportSelfExclusionTests : IDisposable
         {
             BaseDirectory = _root,
             IncludePatterns = ["*"],
-            ExcludedFullPath = Path.Combine(_root, "report.csv"), // never created
+            ExcludedFullPaths = [Path.Combine(_root, "report.csv")], // never created
             Action = ScanAction.Detect,
         };
 

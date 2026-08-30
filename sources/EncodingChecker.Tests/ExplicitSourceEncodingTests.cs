@@ -5,13 +5,14 @@ using System.Text.Json;
 namespace EncodingChecker.Tests;
 
 /// <summary>
-/// The contract for <c>-From</c>, and the escape from an ambiguity refusal.
+/// The contract for <c>-From</c> and the explicit source choice required for detected legacy text.
 ///
 /// The refusal message tells a user to specify the source encoding, so specifying it has
 /// to work — otherwise the safety feature issues advice its own interface cannot take.
 ///
-/// But it replaces detection and nothing else. Every guarantee from the conversion engine
-/// still holds: the bytes must strictly decode as the named encoding, the output must
+/// It replaces automatic source selection, not the safety evidence. Every guarantee from
+/// the conversion engine still holds: EC keeps the automatic result as provenance, the
+/// bytes must strictly decode as the named encoding, the output must
 /// re-decode to exactly the same text, and a failed backup still aborts. <c>-From</c>
 /// answers "which encoding is this?", not "convert it regardless".
 /// </summary>
@@ -58,26 +59,25 @@ public sealed class ExplicitSourceEncodingTests : IDisposable
             results.Add,
             CancellationToken.None);
 
-        return results.ToList();
+        return [.. results];
     }
 
     [Fact]
-    public void AmbiguousAutoDetection_IsRefused()
+    public void DetectedLegacyText_IsRefusedUntilSourceIsSpecified()
     {
         Write("ambiguous.txt",
             Encoding.GetEncoding("windows-1252").GetBytes("Le café était déjà prêt"));
 
         ConversionReportEntry entry = Assert.Single(Scan(from: null));
 
-        Assert.Equal(ConversionRowResult.Error, entry.Result);
-        Assert.Contains("Automatic conversion of legacy text is disabled", entry.Diagnostic);
+        Assert.Equal(ConversionRowResult.Refused, entry.Result);
+        Assert.Contains("EC converts automatically only from Unicode and ASCII", entry.Diagnostic);
     }
 
     [Fact]
-    public void SameTextAlternativeCodecs_AreAllowed()
+    public void AsciiAutoDetection_IsAllowed()
     {
-        // Every candidate agrees on the content, so the label is undetermined and the
-        // text is not. There is nothing to protect the user from.
+        // ASCII is byte-identical in UTF-8, so automatic conversion is safe.
         Write("ascii.txt", "plain ascii, no high bytes"u8.ToArray());
 
         ConversionReportEntry entry = Assert.Single(Scan(from: null));
@@ -115,6 +115,46 @@ public sealed class ExplicitSourceEncodingTests : IDisposable
 
         Assert.NotEqual("café", asKoi8);
         Assert.Equal(Encoding.GetEncoding("koi8-r").GetString(bytes), asKoi8);
+    }
+
+    [Fact]
+    public void ExplicitLegacySource_CannotOverrideReliableUtf8Detection()
+    {
+        byte[] original = "Hello 世界"u8.ToArray();
+        string path = Write("utf8.txt", original);
+
+        ConversionReportEntry entry = Assert.Single(Scan(from: "windows-1252"));
+
+        Assert.Equal(ConversionRowResult.Refused, entry.Result);
+        Assert.Equal(ConversionReasonCodes.ExplicitSourceConflictsWithDetection, entry.ReasonCode);
+        Assert.Equal("utf-8", entry.DetectedEncodingLabel);
+        Assert.Equal(original, File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void ExplicitLegacySource_CannotOverrideBomConfirmedUtf16()
+    {
+        var utf16 = new UnicodeEncoding(false, byteOrderMark: true);
+        byte[] original = [.. utf16.GetPreamble(), .. utf16.GetBytes("Hello 世界")];
+        string path = Write("utf16.txt", original);
+
+        ConversionReportEntry entry = Assert.Single(Scan(from: "koi8-r"));
+
+        Assert.Equal(ConversionRowResult.Refused, entry.Result);
+        Assert.Equal(ConversionReasonCodes.ExplicitSourceConflictsWithDetection, entry.ReasonCode);
+        Assert.Equal(original, File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void ExplicitShiftJisSource_StillConvertsShiftJisText()
+    {
+        const string text = "こんにちは世界。日本語のテキストです。";
+        string path = Write("shiftjis.txt", Encoding.GetEncoding("shift_jis").GetBytes(text));
+
+        ConversionReportEntry entry = Assert.Single(Scan(from: "shift_jis"));
+
+        Assert.Equal(ConversionRowResult.Converted, entry.Result);
+        Assert.Equal(text, Encoding.UTF8.GetString(File.ReadAllBytes(path)));
     }
 
     [Fact]
@@ -192,7 +232,7 @@ public sealed class ExplicitSourceEncodingTests : IDisposable
 
         Assert.Equal(1252, metadata.SourceEncodingId);
         Assert.Equal(SourceEncodingMode.Explicit, metadata.SourceEncodingMode);
-        Assert.Null(metadata.DetectedEncodingId);
+        Assert.Equal(65001, metadata.DetectedEncodingId);
     }
 
     [Fact]

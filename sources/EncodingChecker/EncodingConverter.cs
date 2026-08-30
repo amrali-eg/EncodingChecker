@@ -26,6 +26,7 @@ internal enum ConversionErrorCode
     BomMismatch,
     TemporaryFileError,
     ReplacementError,
+    RecoveryRecordError,
     MetadataRestoreFailed,
     CodePageProviderNotRegistered,
     ReparsePointRejected,
@@ -461,7 +462,7 @@ internal static partial class EncodingConverter
                     return new ConversionResult
                     {
                         Success = false,
-                        ErrorCode = ConversionErrorCode.TargetWriteError,
+                        ErrorCode = ConversionErrorCode.RecoveryRecordError,
                         ErrorMessage =
                             "Conversion and verification succeeded, but the record needed to "
                             + $"reverse it could not be written: {recordError} The original "
@@ -658,22 +659,15 @@ internal static partial class EncodingConverter
     #region Strict Encoding Configuration
 
     /// <summary>Creates a decoder with strict fallback.</summary>
-    /// <remarks>
-    /// Explicitly assigns exception fallback so invalid input cannot be silently substituted.
-    /// </remarks>
     private static Decoder MakeStrictDecoder(Encoding encoding)
     {
-        Decoder decoder = TextEncoding.Strict(encoding).GetDecoder();
-        decoder.Fallback = DecoderFallback.ExceptionFallback;
-        return decoder;
+        return TextEncoding.Strict(encoding).GetDecoder();
     }
 
     /// <summary>Creates an encoder with strict fallback.</summary>
     private static Encoder MakeStrictEncoder(Encoding encoding)
     {
-        Encoder encoder = TextEncoding.Strict(encoding).GetEncoder();
-        encoder.Fallback = EncoderFallback.ExceptionFallback;
-        return encoder;
+        return TextEncoding.Strict(encoding).GetEncoder();
     }
 
     #endregion

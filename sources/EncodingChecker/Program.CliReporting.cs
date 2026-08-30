@@ -1,11 +1,6 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
-using System.IO;
 using System.Linq;
-using System.Text;
-using System.Threading;
 
 namespace EncodingChecker;
 
@@ -34,6 +29,7 @@ internal static partial class Program
             $"Total: {entries.Count}  " +
             $"Unchanged: {byResult.GetValueOrDefault(ConversionRowResult.Unchanged)}  " +
             $"Skipped: {byResult.GetValueOrDefault(ConversionRowResult.Skipped)}  " +
+            $"Refused: {byResult.GetValueOrDefault(ConversionRowResult.Refused)}  " +
             $"Converted: {byResult.GetValueOrDefault(ConversionRowResult.Converted)}  " +
             $"Invalid: {byResult.GetValueOrDefault(ConversionRowResult.Invalid)}  " +
             $"Error: {byResult.GetValueOrDefault(ConversionRowResult.Error)}");

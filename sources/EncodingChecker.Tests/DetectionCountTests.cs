@@ -3,17 +3,19 @@
 namespace EncodingChecker.Tests;
 
 /// <summary>
-/// EC works out a file's encoding exactly once, and never again between the moment a
-/// decision is approved and the moment it is carried out.
+/// EC works out a file's encoding exactly once for each approved plan, and never again
+/// between the moment that plan is approved and the moment it is carried out.
 ///
 /// That property is what makes a preview a promise rather than a demonstration. A second
 /// pass over the same bytes can answer differently — detection is a heuristic — and it
-/// was the first answer the user agreed to. Every surface is built not to do it. But
+/// The View result is informational; planning deliberately refreshes selected files while
+/// binding detection to their hashes. Every surface is built not to detect after approval.
+/// But
 /// "built not to" is an architectural claim, and this project has already been caught by
-/// one of those: the GUI was built to apply the ambiguity refusal too, and did not.
+/// one of those: the GUI was built to apply the legacy-source rule too, and did not.
 ///
-/// So it is counted. Two counts, because they are separate questions that fail the same
-/// way: <em>which encoding is this</em>, and <em>do the bytes settle it</em>.
+/// So it is counted. The two counts distinguish separate work: identifying the source
+/// encoding and applying the conversion policy.
 /// </summary>
 public sealed class DetectionCountTests : IDisposable
 {
@@ -67,7 +69,7 @@ public sealed class DetectionCountTests : IDisposable
             scanned.Add,
             CancellationToken.None);
 
-        return scanned.ToList();
+        return [.. scanned];
     }
 
     [Fact]
@@ -110,14 +112,13 @@ public sealed class DetectionCountTests : IDisposable
 
         Assert.Equal(1, confirmations);
 
-        // Classified once each by the deciding pass; detected not at all, because View
-        // already answered that and the entries carry the answer.
+        // Planning refreshes the selected files once, then classifies that exact snapshot.
         Assert.Equal(3, atConfirmation.Classifications);
-        Assert.Equal(0, atConfirmation.Detections);
+        Assert.Equal(3, atConfirmation.Detections);
 
         // And the pass that actually writes adds nothing to either count.
         Assert.Equal(3, convert.Classifications);
-        Assert.Equal(0, convert.Detections);
+        Assert.Equal(3, convert.Detections);
     }
 
     [Fact]
@@ -152,7 +153,7 @@ public sealed class DetectionCountTests : IDisposable
         // Two on the first pass, then one more for the file whose source the user chose.
         // The other entry keeps its existing decision.
         Assert.Equal(3, convert.Classifications);
-        Assert.Equal(0, convert.Detections);
+        Assert.Equal(2, convert.Detections);
     }
 
     [Fact]
@@ -171,7 +172,7 @@ public sealed class DetectionCountTests : IDisposable
 
         // The whole point of a plan. Applying it re-asserts what was recorded; it does
         // not go back to the bytes to ask again.
-        var apply = Measure(() => Assert.Equal(0, Cli("-Apply", planPath)));
+        var apply = Measure(() => Assert.Equal(5, Cli("-Apply", planPath)));
 
         Assert.Equal(0, apply.Detections);
         Assert.Equal(0, apply.Classifications);
@@ -182,7 +183,7 @@ public sealed class DetectionCountTests : IDisposable
     {
         WriteThreeFiles();
 
-        var run = Measure(() => Assert.Equal(3, Cli(
+        var run = Measure(() => Assert.Equal(5, Cli(
             "-BasePath", _root, "-Target", "utf-8", "-Quiet")));
 
         Assert.Equal(3, run.Detections);

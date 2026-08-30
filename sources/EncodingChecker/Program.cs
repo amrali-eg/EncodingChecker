@@ -1,9 +1,6 @@
 ﻿using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.IO;
-using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -113,7 +110,7 @@ internal static partial class Program
     }
 
     private const string UsageText = """
-        EncodingChecker v3.8.0
+        EncodingChecker v3.9.0
 
         Common commands:
 
@@ -152,7 +149,8 @@ internal static partial class Program
                                       choices, target/BOM policy, backup setting, and action.
           -Apply <path>                 Execute a saved plan. It needs no other conversion
                                       options. If any scheduled file changed, nothing runs.
-                                      -BasePath, -Target, -From, and -Backup are rejected.
+                                      Only -Journal, -Quiet, and -MaxParallelism may be
+                                      added; -WhatIf and conversion options are rejected.
 
         Read-only modes:
 
@@ -169,7 +167,7 @@ internal static partial class Program
 
         Output and advanced options:
 
-          -Report <path>                Also write the CSV report to a file.
+          -Report <path>                Also write the UTF-8-with-BOM CSV report to a file.
           -Journal <path>               Write a JSON record of the conversion decision and
                                       result for every file. Convert mode only.
           -Quiet                        Print only the final summary on standard output.
@@ -198,11 +196,9 @@ internal static partial class Program
         Help: -?, /?, -h, /h, or --help.
 
         Exit codes: 0 = completed; 1 = invalid command; 2 = -FailOnChanges;
-        3 = processing, plan, or report failure; 4 = cancelled (Ctrl+C).
+        3 = processing, plan, or report failure; 4 = cancelled (Ctrl+C);
+        5 = conversion safely refused.
         """;
 
-    /// <summary>
-    /// Applies a plan after confirming it still describes the files on disk.
-    /// </summary>
     #endregion
 }

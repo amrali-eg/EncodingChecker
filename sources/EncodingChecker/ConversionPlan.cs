@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -38,11 +37,11 @@ internal sealed record ConversionSemantics
     /// <summary>
     /// Changes only when the meaning of an existing plan's decisions changes.
     /// </summary>
-    internal const int Current = 3;
+    internal const int Current = 4;
 
     /// <summary>The guarantees of <see cref="Current"/> shown to the reader.</summary>
     internal const string Describes =
-        "strict codecs, verified output, atomic install, explicit source required for legacy text";
+        "source-bound detection, strict codecs, verified output, atomic install, explicit source required for legacy text";
 
     /// <summary>Malformed input is rejected rather than replaced.</summary>
     public bool StrictDecoding { get; init; } = true;
@@ -98,6 +97,9 @@ internal sealed record PlannedFile
 
     /// <summary>Why this action was chosen, when it is not a plain conversion.</summary>
     public string? Reason { get; init; }
+
+    /// <summary>Stable machine-readable form of <see cref="Reason"/>.</summary>
+    public string? ReasonCode { get; init; }
 
     /// <summary>Whether automatic conversion needs the user to name the source codec.</summary>
     public bool NeedsSourceChoice =>
@@ -177,8 +179,13 @@ internal sealed record ConversionPlan
 
             try
             {
-                hash = ConversionMetadataStore.ComputeSha256(entry.FilePath);
-                size = new FileInfo(entry.FilePath).Length;
+                // A conversion scan captures detection, BOM state, size, and hash from
+                // one read-only snapshot. Preserve that binding in the plan instead of
+                // pairing an earlier detection with bytes read later.
+                hash = entry.ExpectedSourceSha256
+                       ?? ConversionMetadataStore.ComputeSha256(entry.FilePath);
+                size = entry.ExpectedSourceSize
+                       ?? new FileInfo(entry.FilePath).Length;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -220,6 +227,7 @@ internal sealed record ConversionPlan
                         $"'{entry.FilePath}' reached a conversion plan without being "
                         + "decided."),
                 Reason = string.IsNullOrEmpty(entry.Diagnostic) ? null : entry.Diagnostic,
+                ReasonCode = entry.ReasonCode,
             });
         }
 

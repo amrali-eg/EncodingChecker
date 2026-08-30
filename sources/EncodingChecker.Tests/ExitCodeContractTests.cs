@@ -4,8 +4,8 @@ namespace EncodingChecker.Tests;
 
 /// <summary>
 /// EncodingChecker's exit codes are a published CLI contract - documented in the
-/// README and printed by -? - and codes 0-4 are deliberately shared with
-/// LineEndingNormalizer so a script driving both tools can use one mapping.
+/// README and printed by -?. Codes 0-4 are deliberately shared with
+/// LineEndingNormalizer; EC reserves 5 for a safe conversion refusal.
 ///
 /// These pin the numbers themselves rather than just "non-zero". Renumbering them
 /// would silently change the meaning of results already relied on by CI gates
@@ -21,6 +21,7 @@ public sealed class ExitCodeContractTests : IDisposable
     private const int ExpectedUsageError = 1;
     private const int ExpectedChangesNeeded = 2;
     private const int ExpectedProcessingErrors = 3;
+    private const int ExpectedSafeRefusal = 5;
 
     private readonly string _root =
         Directory.CreateTempSubdirectory("ec_exitcodes_").FullName;
@@ -109,6 +110,20 @@ public sealed class ExitCodeContractTests : IDisposable
         Assert.Equal(ExpectedUsageError, Run("-BasePath", _root, "-Include", "*.txt"));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void UnsupportedUtf7ConversionCodec_ExitsOneWithoutCrashing(bool useAsSource)
+    {
+        string[] args = useAsSource
+            ? ["-BasePath", _root, "-Include", "*.txt", "-From", "utf-7", "-Target", "utf-8"]
+            : ["-BasePath", _root, "-Include", "*.txt", "-Target", "utf-7"];
+
+        Assert.Equal(
+            ExpectedUsageError,
+            Run(args));
+    }
+
     [Fact]
     public void FailOnChanges_WithFilesNeedingConversion_ExitsTwo()
     {
@@ -176,10 +191,27 @@ public sealed class ExitCodeContractTests : IDisposable
     }
 
     [Fact]
+    public void RefusalOnlyRun_ExitsFive()
+    {
+        string path = Path.Combine(_root, "legacy.txt");
+        File.WriteAllBytes(
+            path,
+            Encoding.GetEncoding("windows-1252").GetBytes("Le café était prêt"));
+
+        Assert.Equal(
+            ExpectedSafeRefusal,
+            Run(
+                "-BasePath", _root,
+                "-Include", "legacy.txt",
+                "-Target", "utf-8"));
+    }
+
+    [Fact]
     public void ProcessingFailure_IsNotReportedAsAUsageError()
     {
         // These must stay distinct: a CI gate has to tell "you invoked me wrong" from
         // "the run started and some files failed".
         Assert.NotEqual(ExpectedUsageError, ExpectedProcessingErrors);
+        Assert.NotEqual(ExpectedSafeRefusal, ExpectedProcessingErrors);
     }
 }

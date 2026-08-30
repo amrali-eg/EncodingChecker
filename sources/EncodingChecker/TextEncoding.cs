@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Text;
 using System.Buffers;
 using System.IO;
@@ -227,12 +228,9 @@ internal static class TextEncoding
     #region Helpers
 
     /// <summary>
-    /// Every charset EC can name or convert to.
+    /// Charset names EC knows how to ask the current runtime for.
     /// </summary>
-    /// <remarks>
-    /// Used by the explicit-source picker and command-line validation.
-    /// </remarks>
-    internal static readonly string[] SupportedCharsets =
+    private static readonly string[] CharsetNames =
     [
         "ascii", "utf-8", "utf-16le", "utf-16be",
         "utf-32le", "utf-32be",
@@ -255,6 +253,43 @@ internal static class TextEncoding
         "X-ISO-10646-UCS-4-3412",
         "X-ISO-10646-UCS-4-2143"
     ];
+
+
+    /// <summary>
+    /// Encodings from <see cref="CharsetNames"/> that the current .NET runtime can
+    /// actually construct, with aliases reduced to one canonical code-page identity.
+    /// </summary>
+    /// <remarks>
+    /// Both GUI encoding pickers use this resolved list. This prevents either picker
+    /// from offering a name that conversion would subsequently reject as unavailable.
+    /// </remarks>
+    internal static IReadOnlyList<Encoding> SupportedEncodings { get; } =
+        ResolveSupportedEncodings();
+
+
+    private static IReadOnlyList<Encoding> ResolveSupportedEncodings()
+    {
+        var encodings = new List<Encoding>();
+        var codePages = new HashSet<int>();
+
+        foreach (string name in CharsetNames)
+        {
+            try
+            {
+                Encoding encoding = Encoding.GetEncoding(name);
+
+                if (codePages.Add(encoding.CodePage))
+                    encodings.Add(encoding);
+            }
+            catch (Exception ex) when (
+                ex is ArgumentException or NotSupportedException)
+            {
+                // This runtime does not provide the named encoding.
+            }
+        }
+
+        return encodings.AsReadOnly();
+    }
 
 
     /// <summary>
@@ -288,7 +323,7 @@ internal static class TextEncoding
             // replacement fallback. A caller that cannot obtain strict semantics must
             // refuse conversion instead.
             throw new NotSupportedException(
-                $"EC could not construct a strict codec for code page {encoding.CodePage}.",
+                $"Could not construct a strict codec for code page {encoding.CodePage}.",
                 ex);
         }
     }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -46,10 +47,8 @@ internal sealed class ScanDirectoryOptions
     /// <summary>Exclude masks applied after include masks.</summary>
     internal IReadOnlyList<string>? ExcludePatterns { get; init; }
 
-    /// <summary>
-    /// Full path of a file to exclude regardless of pattern matches.
-    /// </summary>
-    internal string? ExcludedFullPath { get; init; }
+    /// <summary>Full paths to exclude regardless of pattern matches.</summary>
+    internal IReadOnlyCollection<string>? ExcludedFullPaths { get; init; }
 
     internal ScanAction Action { get; init; }
 
@@ -128,7 +127,7 @@ internal static class ScanEngine
             options.IncludeSubdirectories,
             includePatterns,
             excludePatterns,
-            options.ExcludedFullPath,
+            options.ExcludedFullPaths,
             onWarning);
 
         RunParallel(
@@ -234,6 +233,17 @@ internal static class ScanEngine
             getPath: entry => entry.FilePath,
             processItem: entry =>
             {
+                // A failed planning snapshot is already a terminal refusal. Do not let a
+                // later pass reinterpret it as an ordinary unknown-encoding skip.
+                if (entry is
+                    {
+                        Action: PlannedAction.Refuse,
+                        ReasonCode: ConversionReasonCodes.SourceSnapshotFailed
+                    })
+                {
+                    return entry;
+                }
+
                 // Use the label that describes the file as it exists now.
                 ParseCharsetLabel(
                     entry.EffectiveSourceLabel,
@@ -250,16 +260,20 @@ internal static class ScanEngine
                 }
 
                 Encoding sourceEncoding;
+                Encoding? automaticallyDetected = null;
 
                 try
                 {
                     sourceEncoding = Encoding.GetEncoding(sourceCharset);
+                    if (!string.IsNullOrWhiteSpace(entry.DetectedEncodingLabel))
+                        automaticallyDetected = Encoding.GetEncoding(entry.DetectedEncodingLabel);
                 }
                 catch (ArgumentException)
                 {
                     entry.Action = PlannedAction.Refuse;
                     entry.SourceInterpretation = SourceInterpretation.NotApplicable;
-                    entry.Result = ConversionRowResult.Error;
+                    entry.Result = ConversionRowResult.Refused;
+                    entry.ReasonCode = ConversionReasonCodes.UnsupportedSourceEncoding;
                     entry.Diagnostic = $"The source encoding '{sourceCharset}' is not available.";
                     return entry;
                 }
@@ -268,6 +282,7 @@ internal static class ScanEngine
                     entry,
                     entry.FilePath,
                     sourceEncoding,
+                    automaticallyDetected,
                     sourceCharset,
                     sourceHasBom,
                     targetCharset,
@@ -280,7 +295,75 @@ internal static class ScanEngine
                 return entry;
             },
             onEntry: onEntry,
-            cancellationToken: cancellationToken);
+        cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Re-detects selected automatic-source entries and binds every entry to the exact
+    /// bytes used to prepare its conversion plan.
+    /// </summary>
+    internal static void RefreshSourceSnapshots(
+        IReadOnlyList<ConversionReportEntry> entries,
+        int maxParallelism,
+        CancellationToken cancellationToken)
+    {
+        RunParallel(
+            entries,
+            maxParallelism,
+            getPath: entry => entry.FilePath,
+            processItem: entry =>
+            {
+                try
+                {
+                    SourceSnapshot snapshot = CaptureSourceSnapshot(
+                        entry.FilePath,
+                        entry.SourceEncodingWasSpecified
+                            ? entry.EffectiveSourceLabel
+                            : null);
+
+                    entry.SourceEncoding = snapshot.SourceEncoding?.WebName ?? UnknownCharset;
+                    entry.SourceHasBom = snapshot.HasBom;
+                    entry.TargetEncoding = entry.SourceEncoding;
+                    entry.TargetHasBom = snapshot.HasBom;
+                    entry.CurrentCharsetLabel = entry.SourceEncodingWasSpecified
+                        ? FormatCharsetLabel(entry.SourceEncoding, snapshot.HasBom)
+                        : null;
+                    entry.DetectedEncodingLabel = snapshot.DetectedEncoding?.WebName;
+                    entry.HasReliableUnicodeDetection = snapshot.HasReliableUnicodeDetection;
+                    entry.ExpectedSourceSha256 = snapshot.Sha256;
+                    entry.ExpectedSourceSize = snapshot.Size;
+                    entry.Action = snapshot.SourceEncoding is null
+                        ? PlannedAction.Skip
+                        : null;
+                    entry.SourceInterpretation = snapshot.SourceEncoding is null
+                        ? SourceInterpretation.NotApplicable
+                        : null;
+                    entry.Result = snapshot.SourceEncoding is null
+                        ? ConversionRowResult.Skipped
+                        : ConversionRowResult.Unchanged;
+                    entry.ReasonCode = snapshot.SourceEncoding is null
+                        ? ConversionReasonCodes.UnknownEncoding
+                        : null;
+                    entry.Diagnostic = snapshot.SourceEncoding is null
+                        ? "The file's encoding could not be identified from its contents."
+                        : null;
+                }
+                catch (Exception ex) when (
+                    ex is IOException or UnauthorizedAccessException or
+                    ArgumentException or NotSupportedException)
+                {
+                    entry.Action = PlannedAction.Refuse;
+                    entry.SourceInterpretation = SourceInterpretation.NotApplicable;
+                    entry.Result = ConversionRowResult.Refused;
+                    entry.ReasonCode = ConversionReasonCodes.SourceSnapshotFailed;
+                    entry.Diagnostic =
+                        $"The source could not be read consistently for planning: {ex.Message}";
+                }
+
+                return entry;
+            },
+            onEntry: _ => { },
+            cancellationToken);
     }
 
     /// <summary>
@@ -328,8 +411,26 @@ internal static class ScanEngine
         bool sourceWasSpecified = !string.IsNullOrWhiteSpace(options.SourceCharset);
 
         Encoding? detected;
+        Encoding? automaticallyDetected = null;
+        bool hasReliableUnicodeDetection = false;
+        bool hasBom;
+        string? sourceSha256 = null;
+        long? sourceSize = null;
 
-        if (sourceWasSpecified)
+        if (options.Action == ScanAction.Convert)
+        {
+            SourceSnapshot snapshot = CaptureSourceSnapshot(
+                path,
+                sourceWasSpecified ? options.SourceCharset : null);
+
+            detected = snapshot.SourceEncoding;
+            automaticallyDetected = snapshot.DetectedEncoding;
+            hasReliableUnicodeDetection = snapshot.HasReliableUnicodeDetection;
+            hasBom = snapshot.HasBom;
+            sourceSha256 = snapshot.Sha256;
+            sourceSize = snapshot.Size;
+        }
+        else if (sourceWasSpecified)
         {
             try
             {
@@ -339,6 +440,8 @@ internal static class ScanEngine
             {
                 detected = null;
             }
+
+            hasBom = detected != null && HasPreamble(path, detected);
         }
         else
         {
@@ -347,11 +450,8 @@ internal static class ScanEngine
             // still prove that View, conversion, and -Apply never re-detect a file.
             DetectionCounters.RecordDetection();
             detected = TextEncoding.DetectFromFile(path);
+            hasBom = detected != null && HasPreamble(path, detected);
         }
-
-        // A codec having a preamble does not mean this particular file has one.
-        // Preserve the bytes' actual BOM state in plans and reports.
-        bool hasBom = detected != null && HasPreamble(path, detected);
 
         string sourceCharset =
             detected?.WebName ?? UnknownCharset;
@@ -366,18 +466,28 @@ internal static class ScanEngine
             Result = ConversionRowResult.Unchanged,
             // Preserve whether the source was detected or explicitly supplied.
             SourceEncodingWasSpecified = sourceWasSpecified,
-            CaptureSourceHash = options.CaptureSourceHashes
+            CaptureSourceHash = options.CaptureSourceHashes,
+            ExpectedSourceSha256 = sourceSha256,
+            ExpectedSourceSize = sourceSize,
+            HasReliableUnicodeDetection = options.Action == ScanAction.Convert &&
+                hasReliableUnicodeDetection,
         };
 
-        // Record detection only when detection actually ran.
-        if (!sourceWasSpecified && detected is not null)
+        if (options.Action == ScanAction.Convert)
+            entry.DetectedEncodingLabel = automaticallyDetected?.WebName;
+        else if (!sourceWasSpecified && detected is not null)
             entry.DetectedEncodingLabel = detected.WebName;
 
         switch (options.Action)
         {
             case ScanAction.Detect:
                 if (sourceCharset == UnknownCharset)
+                {
                     entry.Result = ConversionRowResult.Skipped;
+                    entry.ReasonCode = ConversionReasonCodes.UnknownEncoding;
+                    entry.Diagnostic =
+                        "The file's encoding could not be identified from its contents.";
+                }
 
                 break;
 
@@ -392,10 +502,19 @@ internal static class ScanEngine
                         label,
                         StringComparer.OrdinalIgnoreCase);
 
+                string? validationDiagnostic = null;
+
                 entry.Result =
-                    isValid
+                    isValid && StrictFileValidation.TryValidateFile(
+                        path, detected!, out validationDiagnostic)
                         ? ConversionRowResult.Unchanged
                         : ConversionRowResult.Invalid;
+
+                if (isValid && entry.Result == ConversionRowResult.Invalid)
+                {
+                    entry.ReasonCode = ConversionReasonCodes.StrictValidationFailed;
+                    entry.Diagnostic = validationDiagnostic;
+                }
 
                 break;
 
@@ -407,6 +526,7 @@ internal static class ScanEngine
                         entry,
                         path,
                         detected,
+                        automaticallyDetected,
                         sourceCharset,
                         hasBom,
                         options.TargetCharset!,
@@ -418,13 +538,88 @@ internal static class ScanEngine
                 }
                 else
                 {
+                    entry.Action = PlannedAction.Skip;
+                    entry.SourceInterpretation = SourceInterpretation.NotApplicable;
                     entry.Result = ConversionRowResult.Skipped;
+                    entry.ReasonCode = ConversionReasonCodes.UnknownEncoding;
+                    entry.Diagnostic =
+                        "The file's encoding could not be identified from its contents.";
                 }
 
                 break;
         }
 
         return entry;
+    }
+
+    private sealed record SourceSnapshot(
+        Encoding? DetectedEncoding,
+        Encoding? SourceEncoding,
+        bool HasReliableUnicodeDetection,
+        bool HasBom,
+        string Sha256,
+        long Size);
+
+    /// <summary>
+    /// Detects and hashes through one read-only handle so the encoding decision and hash
+    /// necessarily describe the same bytes.
+    /// </summary>
+    private static SourceSnapshot CaptureSourceSnapshot(
+        string path,
+        string? explicitSourceLabel)
+    {
+        using FileStream stream = new(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            64 * 1024,
+            FileOptions.SequentialScan);
+
+        DetectionCounters.RecordDetection();
+        Encoding? detectedEncoding = TextEncoding.DetectFromStream(stream);
+        Encoding? sourceEncoding = detectedEncoding;
+
+        if (!string.IsNullOrWhiteSpace(explicitSourceLabel))
+        {
+            ParseCharsetLabel(
+                explicitSourceLabel,
+                out string sourceCharset,
+                out _);
+            sourceEncoding = Encoding.GetEncoding(sourceCharset);
+        }
+
+        bool hasBom = sourceEncoding != null && HasPreamble(stream, sourceEncoding);
+        bool detectedHasBom = detectedEncoding != null && HasPreamble(stream, detectedEncoding);
+        bool hasReliableUnicodeDetection = IsReliablyDetectedUnicode(
+            stream, detectedEncoding, detectedHasBom);
+
+        stream.Position = 0;
+        string hash = Convert.ToHexStringLower(SHA256.HashData(stream));
+
+        return new SourceSnapshot(
+            detectedEncoding, sourceEncoding, hasReliableUnicodeDetection,
+            hasBom, hash, stream.Length);
+    }
+
+    private static bool IsReliablyDetectedUnicode(
+        Stream stream, Encoding? encoding, bool hasBom)
+    {
+        if (encoding is null)
+            return false;
+
+        return encoding.CodePage switch
+        {
+            // UTF-8 is self-validating only after the whole file succeeds strictly.
+            65001 => StrictFileValidation.TryValidateStream(stream, encoding, out _),
+
+            // Byte-order markers make UTF-16/32 identity explicit. Do not elevate a
+            // BOM-less heuristic to the same safety level for an explicit-source veto.
+            1200 or 1201 or 12000 or 12001 => hasBom &&
+                StrictFileValidation.TryValidateStream(stream, encoding, out _),
+
+            _ => false,
+        };
     }
 
     /// <summary>
@@ -457,6 +652,28 @@ internal static class ScanEngine
         return prefix.SequenceEqual(preamble);
     }
 
+    private static bool HasPreamble(Stream stream, Encoding encoding)
+    {
+        byte[] preamble = encoding.GetPreamble();
+
+        if (preamble.Length == 0 || stream.Length < preamble.Length)
+            return false;
+
+        long originalPosition = stream.Position;
+
+        try
+        {
+            stream.Position = 0;
+            Span<byte> prefix = stackalloc byte[preamble.Length];
+            stream.ReadExactly(prefix);
+            return prefix.SequenceEqual(preamble);
+        }
+        finally
+        {
+            stream.Position = originalPosition;
+        }
+    }
+
     /// <summary>
     /// Converts when the source does not already match the target.
     /// </summary>
@@ -464,6 +681,7 @@ internal static class ScanEngine
         ConversionReportEntry entry,
         string path,
         Encoding sourceEncoding,
+        Encoding? automaticallyDetected,
         string sourceCharset,
         bool sourceHasBom,
         string targetCharset,
@@ -503,11 +721,24 @@ internal static class ScanEngine
             targetWriteBom,
             entry.SourceEncodingWasSpecified,
             TextEncoding.IsUnicodeOrAscii(sourceEncoding),
+            entry.SourceEncodingWasSpecified && entry.HasReliableUnicodeDetection &&
+            automaticallyDetected is not null &&
+            automaticallyDetected.CodePage != sourceEncoding.CodePage,
             out SourceInterpretation sourceInterpretation,
             out string? policyReason);
 
         entry.Action = action;
         entry.SourceInterpretation = sourceInterpretation;
+        entry.ReasonCode = action switch
+        {
+            PlannedAction.Skip => ConversionReasonCodes.UnknownEncoding,
+            PlannedAction.Refuse => entry.SourceEncodingWasSpecified &&
+                entry.HasReliableUnicodeDetection && automaticallyDetected is not null &&
+                automaticallyDetected.CodePage != sourceEncoding.CodePage
+                ? ConversionReasonCodes.ExplicitSourceConflictsWithDetection
+                : ConversionReasonCodes.LegacySourceRequired,
+            _ => null,
+        };
 
         if (action != PlannedAction.Convert)
         {
@@ -532,6 +763,7 @@ internal static class ScanEngine
                 ex is IOException or UnauthorizedAccessException)
             {
                 entry.Result = ConversionRowResult.Error;
+                entry.ReasonCode = ConversionReasonCodes.BackupFailed;
                 entry.Diagnostic = $"Backup failed: {ex.Message}";
                 return;
             }
@@ -586,6 +818,7 @@ internal static class ScanEngine
             result.Success
                 ? null
                 : $"{result.ErrorCode}: {result.ErrorMessage}";
+        entry.ReasonCode = result.Success ? null : result.ErrorCode.ToString();
     }
 
     /// <summary>
@@ -614,13 +847,13 @@ internal static class ScanEngine
             return $"the backup at '{backupPath}' could not be read: {ex.Message}";
         }
 
-        // Reject stale backups; only the current source is a valid restore point.
-        if (!string.IsNullOrEmpty(record.SourceSha256) &&
-            !backupHash.Equals(record.SourceSha256, StringComparison.OrdinalIgnoreCase))
-        {
-            return $"the backup at '{backupPath}' does not match the file being "
-                   + "converted, so it is not a valid restore point.";
-        }
+        // A readable backup is not enough: prove it is the exact source this conversion
+        // used. Missing either hash is a refusal, not permission to skip the comparison.
+        string? hashError = ConversionMetadataStore.ValidateRecoveryHashes(
+            record.SourceSha256, backupHash, backupPath);
+
+        if (hashError is not null)
+            return hashError;
 
         return ConversionMetadataStore.Write(path, new ConversionMetadata
         {
@@ -773,6 +1006,7 @@ internal static class ScanEngine
                         SourceEncoding = "(Error)",
                         TargetEncoding = "(Error)",
                         Result = ConversionRowResult.Error,
+                        ReasonCode = ConversionReasonCodes.ScanFailed,
                         Diagnostic = ex.Message,
                     };
                 }
