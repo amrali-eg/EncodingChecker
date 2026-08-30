@@ -54,6 +54,7 @@ python tools/gui-smoke-test.py verify A
 | C | A chosen legacy source encoding applies only to the ticked files; unselected legacy files stay unchanged. |
 
 The script verifies hashes and decoded output; status messages alone never count as evidence.
+Its `tools/smoke-state-*.json` files are local generated state and must not be committed.
 
 ### Accessibility spot check
 

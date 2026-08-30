@@ -9,7 +9,6 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
-using System.Xml.Serialization;
 
 namespace EncodingChecker;
 
@@ -48,8 +47,9 @@ public partial class MainForm : Form
 
     private readonly ListViewColumnSorter _lvwColumnSorter;
     private readonly BackgroundWorker _actionWorker;
-    private readonly ToolStripMenuItem _exportCsv = new("CSV report...");
-    private readonly ToolStripMenuItem _exportJournal = new("Conversion history (JSON)...");
+    private readonly ToolStripMenuItem _exportText = new("Export selected rows as text...");
+    private readonly ToolStripMenuItem _exportCsv = new("Export all results as CSV...");
+    private readonly ToolStripMenuItem _exportJournal = new("Export conversion journal as JSON...");
 
     private CurrentAction _currentAction;
     private Settings _settings = new();
@@ -66,22 +66,22 @@ public partial class MainForm : Form
     // Set by OnConvert and read by ConvertWorkerCompleted to distinguish conversion from preview.
     private bool _convertWasPreview;
 
-    // Start time for the last conversion, used when exporting its journal.
-    private DateTime? _lastConversionStartedUtc;
+    // Exact immutable record returned by the most recent completed conversion.
+    private ConversionJournal? _lastConversionJournal;
 
     // Shared with the completion handler so it can report how the run ended.
     private ConvertWorkerArgs? _convertArgs;
 
     // Indices into imgsResults (see SetKeyName calls in MainForm.Designer.cs).
     // Reuses the existing Failed and Warning icons; Warning marks preview rows.
-    private const int RESULT_ICON_SUCCESS = 0;
-    private const int RESULT_ICON_FAILED = 1;
-    private const int RESULT_ICON_WOULD_CHANGE = 2;
+    private const int ResultIconSuccess = 0;
+    private const int ResultIconFailed = 1;
+    private const int ResultIconWouldChange = 2;
 
-    private const int RESULTS_COLUMN_CHARSET = 0;
-    private const int RESULTS_COLUMN_FILE_NAME = 1;
-    private const int RESULTS_COLUMN_FILE_EXT = 2;
-    private const int RESULTS_COLUMN_DIRECTORY = 3;
+    private const int ResultsColumnCharset = 0;
+    private const int ResultsColumnFileName = 1;
+    private const int ResultsColumnFileExt = 2;
+    private const int ResultsColumnDirectory = 3;
 
     public MainForm()
     {
@@ -91,7 +91,7 @@ public partial class MainForm : Form
         // Keep result ordering deterministic despite parallel processing.
         _lvwColumnSorter = new ListViewColumnSorter
         {
-            SortColumn = RESULTS_COLUMN_FILE_NAME,
+            SortColumn = ResultsColumnFileName,
             Order = SortOrder.Ascending,
         };
         lstResults.ListViewItemSorter = _lvwColumnSorter;
@@ -109,10 +109,11 @@ public partial class MainForm : Form
 
     private void ConfigureExportMenu()
     {
+        _exportText.Click += OnExport;
         _exportCsv.Click += OnExportCsvReport;
         _exportJournal.Click += OnExportJournal;
 
-        btnExportReport.DropDownItems.AddRange([_exportCsv, _exportJournal]);
+        btnExportReport.DropDownItems.AddRange(_exportText, _exportCsv, _exportJournal);
         btnExportReport.DropDownOpening += OnExportResultsOpening;
     }
 
@@ -122,33 +123,24 @@ public partial class MainForm : Form
     {
         lstConvert.BeginUpdate();
 
-        IEnumerable<string> validCharsets = GetSupportedCharsets();
-
-        foreach (string validCharset in validCharsets)
+        foreach (Encoding encoding in TextEncoding.SupportedEncodings)
         {
-            try
-            {
-                // Show only charsets supported by .NET.
-                var encoding = Encoding.GetEncoding(validCharset);
+            lstValidCharsets.Items.Add(encoding.WebName);
+            lstConvert.Items.Add(encoding.WebName);
 
-                lstValidCharsets.Items.Add(encoding.WebName);
-                lstConvert.Items.Add(encoding.WebName);
-
-                // Add BOM variants for encodings where BOM is meaningful.
-                if (ScanEngine.IsBomCapable(encoding.WebName))
-                {
-                    lstValidCharsets.Items.Add(encoding.WebName + "-bom");
-                    lstConvert.Items.Add(encoding.WebName + "-bom");
-                }
-            }
-            catch (Exception ex) when (
-                ex is ArgumentException or NotSupportedException)
+            // Add BOM variants for encodings where BOM is meaningful.
+            if (ScanEngine.IsBomCapable(encoding.WebName))
             {
-                // Ignore charsets unavailable in the current runtime.
+                lstValidCharsets.Items.Add(encoding.WebName + "-bom");
+                lstConvert.Items.Add(encoding.WebName + "-bom");
             }
         }
 
-        if (lstConvert.Items.Count > 0)
+        int utf8Index = lstConvert.FindStringExact("utf-8");
+
+        if (utf8Index >= 0)
+            lstConvert.SelectedIndex = utf8Index;
+        else if (lstConvert.Items.Count > 0)
             lstConvert.SelectedIndex = 0;
 
         lstConvert.EndUpdate();
@@ -163,19 +155,19 @@ public partial class MainForm : Form
         lstResults.SetSortIcon(_lvwColumnSorter.SortColumn, _lvwColumnSorter.Order);
 
         // Size columns for the initial window.
-        lstResults.Columns[RESULTS_COLUMN_CHARSET]
+        lstResults.Columns[ResultsColumnCharset]
             .AutoResize(ColumnHeaderAutoResizeStyle.HeaderSize);
 
         int remainingWidth =
-            lstResults.Width - lstResults.Columns[RESULTS_COLUMN_CHARSET].Width;
+            lstResults.Width - lstResults.Columns[ResultsColumnCharset].Width;
 
-        lstResults.Columns[RESULTS_COLUMN_FILE_NAME].Width =
+        lstResults.Columns[ResultsColumnFileName].Width =
             30 * remainingWidth / 100;
 
-        lstResults.Columns[RESULTS_COLUMN_FILE_EXT]
+        lstResults.Columns[ResultsColumnFileExt]
             .AutoResize(ColumnHeaderAutoResizeStyle.HeaderSize);
 
-        lstResults.Columns[RESULTS_COLUMN_DIRECTORY]
+        lstResults.Columns[ResultsColumnDirectory]
             .AutoResize(ColumnHeaderAutoResizeStyle.HeaderSize);
     }
 
@@ -413,6 +405,8 @@ public partial class MainForm : Form
 
         btnCancel.Visible = false;
 
+        btnExportReport.Visible = lstResults.Items.Count > 0;
+
         actionProgress.Visible = false;
         actionProgress.Style =
             ProgressBarStyle.Continuous;
@@ -424,9 +418,6 @@ public partial class MainForm : Form
     // Matches encodings reported by UtfUnknown.Core.CodepageName.
     // UTF-7 is intentionally excluded because .NET disables it by default (SYSLIB0001)
     // and Encoding.GetEncoding throws NotSupportedException.
-
-    private static string[] GetSupportedCharsets() =>
-        TextEncoding.SupportedCharsets;
 
     private void ShowWarning(
         string message,

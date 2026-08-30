@@ -26,7 +26,7 @@ public sealed class DirectoryTraversalWarningTests
             includeSubdirectories: true,
             matchAll,
             [],
-            excludedFullPath: null,
+            excludedFullPaths: null,
             onWarning: warnings.Add).ToList();
 
         Assert.Empty(found);
@@ -84,7 +84,7 @@ public sealed class DirectoryTraversalWarningTests
                     includeSubdirectories: true,
                     matchAll,
                     [],
-                    excludedFullPath: null,
+                    excludedFullPaths: null,
                     onWarning: warnings.Add).ToList();
 
                 if (warnings.Count == 0 && found.Count == 2)
@@ -131,7 +131,7 @@ public sealed class DirectoryTraversalWarningTests
                 includeSubdirectories: true,
                 matchAll,
                 [],
-                excludedFullPath: null,
+                excludedFullPaths: null,
                 onWarning: warnings.Add).ToList();
 
             Assert.Single(found);
@@ -139,6 +139,35 @@ public sealed class DirectoryTraversalWarningTests
         }
         finally
         {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void HiddenFilesAreNotScanned()
+    {
+        string root = Directory.CreateTempSubdirectory("ec_traversal_hidden_").FullName;
+        string hidden = Path.Combine(root, "hidden.txt");
+
+        try
+        {
+            File.WriteAllText(hidden, "hidden");
+            File.SetAttributes(hidden, File.GetAttributes(hidden) | FileAttributes.Hidden);
+
+            List<Regex> matchAll = DirectoryTraversal.CompilePatterns(["*"], defaultToMatchAll: true);
+            List<string> found =
+            [
+                .. DirectoryTraversal.EnumerateFiles(
+                    root, includeSubdirectories: true, matchAll, [],
+                    excludedFullPaths: null)
+            ];
+
+            Assert.Empty(found);
+        }
+        finally
+        {
+            if (File.Exists(hidden))
+                File.SetAttributes(hidden, FileAttributes.Normal);
             Directory.Delete(root, recursive: true);
         }
     }

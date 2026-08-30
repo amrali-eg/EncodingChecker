@@ -22,7 +22,6 @@ internal static class TextValidation
     //
     private const double MinPrintableFraction = 0.9;
 
-
     /// <summary>
     /// Strictly decodes the buffer using the specified encoding and checks
     /// whether the decoded content looks like text.
@@ -94,7 +93,6 @@ internal static class TextValidation
             // A validator treats an unavailable strict codec as invalid; conversion will
             // later report the same condition as a fatal safety failure.
             Decoder decoder = TextEncoding.Strict(encoding).GetDecoder();
-            decoder.Fallback = DecoderFallback.ExceptionFallback;
 
             // Do not flush: the sample may end in the middle of a valid sequence.
             charsWritten = decoder.GetChars(

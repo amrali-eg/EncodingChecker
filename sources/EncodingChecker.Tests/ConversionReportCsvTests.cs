@@ -3,6 +3,12 @@ namespace EncodingChecker.Tests;
 /// <summary>ConversionReport.WriteCsv/ToCsvString — header shape, field quoting, and escaping.</summary>
 public sealed class ConversionReportCsvTests
 {
+    [Fact]
+    public void CsvFileEncoding_IsExplicitUtf8WithBom()
+    {
+        Assert.Equal([0xEF, 0xBB, 0xBF], ConversionReport.CsvFileEncoding.GetPreamble());
+    }
+
     private static ConversionReportEntry Entry(
         string filePath = "file.txt",
         string sourceEncoding = "utf-8",
@@ -39,10 +45,11 @@ public sealed class ConversionReportCsvTests
 
         string[] headers = lines[0].Split(',');
 
-        Assert.Equal(6, headers.Length);
+        Assert.Equal(8, headers.Length);
         Assert.Equal(headers.Length, headers.Distinct(StringComparer.Ordinal).Count());
         Assert.Equal(
-            ["File", "Encoding", "BOM", "Target", "TargetBOM", "Result"],
+            ["File", "Encoding", "BOM", "Target", "TargetBOM", "Result",
+             "ReasonCode", "Diagnostic"],
             headers);
 
         // Every column still carries its expected value, positionally.
@@ -61,7 +68,9 @@ public sealed class ConversionReportCsvTests
         string csv = ConversionReport.ToCsvString([]);
 
         string firstLine = csv.Split(["\r\n", "\n"], StringSplitOptions.None)[0];
-        Assert.Equal("File,Encoding,BOM,Target,TargetBOM,Result", firstLine);
+        Assert.Equal(
+            "File,Encoding,BOM,Target,TargetBOM,Result,ReasonCode,Diagnostic",
+            firstLine);
     }
 
     [Fact]
@@ -69,7 +78,10 @@ public sealed class ConversionReportCsvTests
     {
         string csv = ConversionReport.ToCsvString([]);
 
-        Assert.Equal("File,Encoding,BOM,Target,TargetBOM,Result" + Environment.NewLine, csv);
+        Assert.Equal(
+            "File,Encoding,BOM,Target,TargetBOM,Result,ReasonCode,Diagnostic"
+            + Environment.NewLine,
+            csv);
     }
 
     [Fact]
@@ -86,7 +98,7 @@ public sealed class ConversionReportCsvTests
         string csv = ConversionReport.ToCsvString([entry]);
 
         string dataLine = csv.Split(["\r\n", "\n"], StringSplitOptions.None)[1];
-        Assert.Equal(@"C:\Source\file.txt,utf-8,No,utf-8-bom,Yes,Converted", dataLine);
+        Assert.Equal(@"C:\Source\file.txt,utf-8,No,utf-8-bom,Yes,Converted,,", dataLine);
     }
 
     [Fact]
@@ -165,6 +177,7 @@ public sealed class ConversionReportCsvTests
     [InlineData("Unchanged")]
     [InlineData("Converted")]
     [InlineData("Invalid")]
+    [InlineData("Refused")]
     [InlineData("Error")]
     public void WriteCsv_ResultColumn_UsesTheEnumNameVerbatim(string resultName)
     {
@@ -176,18 +189,19 @@ public sealed class ConversionReportCsvTests
         string csv = ConversionReport.ToCsvString([entry]);
 
         string dataLine = csv.Split(["\r\n", "\n"], StringSplitOptions.None)[1];
-        Assert.EndsWith("," + resultName, dataLine);
+        Assert.Equal(resultName, dataLine.Split(',')[5]);
     }
 
     [Fact]
-    public void WriteCsv_Diagnostic_IsNeverIncludedInTheOutput()
+    public void WriteCsv_ReasonCodeAndDiagnostic_AreIncludedAndEscaped()
     {
         ConversionReportEntry entry = Entry(result: ConversionRowResult.Error);
-        entry.Diagnostic = "Access to the path is denied.";
+        entry.ReasonCode = "SourceReadError";
+        entry.Diagnostic = "Access denied, retry later.";
 
         string csv = ConversionReport.ToCsvString([entry]);
 
-        Assert.DoesNotContain("Access to the path is denied.", csv);
+        Assert.Contains(",Error,SourceReadError,\"Access denied, retry later.\"", csv);
     }
 
     [Fact]

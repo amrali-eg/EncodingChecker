@@ -128,6 +128,7 @@ public sealed class ConversionSafetyInvariantTests : IDisposable
             SourceHasBom = false,
             TargetEncoding = "windows-1252",
             TargetHasBom = false,
+            SourceEncodingWasSpecified = true,
         };
 
         var completed = new EntrySink();
@@ -139,6 +140,29 @@ public sealed class ConversionSafetyInvariantTests : IDisposable
         ConversionReportEntry result = Assert.Single(completed);
 
         Assert.Equal(ConversionRowResult.Error, result.Result);
+        Assert.Equal(original, File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void RecoveryRecordFailure_RefusesAndLeavesTheSourceUnchanged()
+    {
+        string path = Path.Combine(_root, "recordfail.txt");
+        byte[] original = Encoding.UTF8.GetBytes("café — 日本語");
+        File.WriteAllBytes(path, original);
+
+        ConversionResult result = EncodingConverter.Convert(
+            path,
+            path,
+            Encoding.UTF8,
+            new UnicodeEncoding(false, false),
+            new ConversionOptions
+            {
+                RecordConversion = _ => "the source file could not be hashed",
+            });
+
+        Assert.False(result.Success);
+        Assert.Equal(ConversionErrorCode.RecoveryRecordError, result.ErrorCode);
+        Assert.False(result.ReplacementCommitted);
         Assert.Equal(original, File.ReadAllBytes(path));
     }
 
@@ -278,6 +302,7 @@ public sealed class ConversionSafetyInvariantTests : IDisposable
             SourceHasBom = false,
             TargetEncoding = source,
             TargetHasBom = false,
+            SourceEncodingWasSpecified = true,
         };
 
         var completed = new EntrySink();

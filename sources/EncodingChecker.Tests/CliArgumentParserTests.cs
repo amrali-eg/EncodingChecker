@@ -285,6 +285,31 @@ public sealed class CliArgumentParserTests
         }
     }
 
+    [Theory]
+    [InlineData("-From")]
+    [InlineData("-Target")]
+    public void TryValidateOptions_Utf7ConversionCodec_IsReportedAsUnsupported(string option)
+    {
+        string tempDir = Directory.CreateTempSubdirectory().FullName;
+        try
+        {
+            string[] args = option == "-From"
+                ? ["-BasePath", tempDir, "-From", "utf-7", "-Target", "utf-8"]
+                : ["-BasePath", tempDir, "-Target", "utf-7"];
+            Program.CliOptions options = ParsedOptions(args);
+
+            bool result = Program.TryValidateOptions(options, out string? error);
+
+            Assert.False(result);
+            Assert.Contains("utf-7", error);
+            Assert.Contains("not supported", error);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
     [Fact]
     public void TryValidateOptions_ConvertModeWithBomSuffixedTarget_ValidatesTheBaseCharsetOnly()
     {
@@ -330,6 +355,26 @@ public sealed class CliArgumentParserTests
         try
         {
             Program.CliOptions options = ParsedOptions("-BasePath", tempDir, "-Validate", "utf-8,utf-8-bom");
+
+            bool result = Program.TryValidateOptions(options, out string? error);
+
+            Assert.True(result);
+            Assert.Null(error);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TryValidateOptions_ValidateUtf7_DoesNotConstructTheUnsupportedCodec()
+    {
+        string tempDir = Directory.CreateTempSubdirectory().FullName;
+        try
+        {
+            Program.CliOptions options =
+                ParsedOptions("-BasePath", tempDir, "-Validate", "utf-7");
 
             bool result = Program.TryValidateOptions(options, out string? error);
 

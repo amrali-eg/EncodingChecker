@@ -39,7 +39,7 @@ public sealed class ConversionIdempotencyTests : IDisposable
 
         var entries = new EntrySink();
         ScanEngine.ScanDirectory(options, entries.Add, CancellationToken.None);
-        return entries.ToList();
+        return [.. entries];
     }
 
     [Theory]

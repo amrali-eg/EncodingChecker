@@ -48,7 +48,6 @@ partial class MainForm
         statusBar = new System.Windows.Forms.StatusStrip();
         tlnkHelp = new System.Windows.Forms.ToolStripStatusLabel();
         tlnkAbout = new System.Windows.Forms.ToolStripStatusLabel();
-        tlnkExport = new System.Windows.Forms.ToolStripStatusLabel();
         btnExportReport = new System.Windows.Forms.ToolStripDropDownButton();
         actionProgress = new System.Windows.Forms.ToolStripProgressBar();
         actionStatus = new System.Windows.Forms.ToolStripStatusLabel();
@@ -164,7 +163,7 @@ partial class MainForm
         // 
         // statusBar
         // 
-        statusBar.Items.AddRange(new System.Windows.Forms.ToolStripItem[] { tlnkHelp, tlnkAbout, tlnkExport, btnExportReport, actionProgress, actionStatus });
+        statusBar.Items.AddRange(new System.Windows.Forms.ToolStripItem[] { tlnkHelp, tlnkAbout, btnExportReport, actionProgress, actionStatus });
         resources.ApplyResources(statusBar, "statusBar");
         statusBar.Name = "statusBar";
         // 
@@ -182,15 +181,6 @@ partial class MainForm
         tlnkAbout.Name = "tlnkAbout";
         resources.ApplyResources(tlnkAbout, "tlnkAbout");
         tlnkAbout.Click += OnAbout;
-        // 
-        // tlnkExport
-        // 
-        tlnkExport.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text;
-        tlnkExport.IsLink = true;
-        tlnkExport.Name = "tlnkExport";
-        resources.ApplyResources(tlnkExport, "tlnkExport");
-        tlnkExport.AutoSize = true;
-        tlnkExport.Click += OnExport;
         // 
         // btnExportReport
         // 
@@ -328,7 +318,6 @@ partial class MainForm
     private System.Windows.Forms.ComboBox lstConvert;
     private System.Windows.Forms.Button btnConvert;
     private System.Windows.Forms.CheckBox chkSelectDeselectAll;
-    private System.Windows.Forms.ToolStripStatusLabel tlnkExport;
     private System.Windows.Forms.ToolStripStatusLabel tlnkAbout;
     private System.Windows.Forms.Button btnCancel;
     private System.Windows.Forms.ImageList imgsResults;

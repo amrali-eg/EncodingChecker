@@ -139,6 +139,32 @@ internal static class ConversionMetadataStore
     }
 
     /// <summary>
+    /// Proves that the recovery copy is the exact source used by the conversion.
+    /// </summary>
+    internal static string? ValidateRecoveryHashes(
+        string sourceSha256,
+        string backupSha256,
+        string backupPath)
+    {
+        if (string.IsNullOrWhiteSpace(sourceSha256))
+        {
+            return "the source file could not be hashed, so the backup cannot be "
+                   + "verified against the exact bytes used by the conversion.";
+        }
+
+        if (string.IsNullOrWhiteSpace(backupSha256))
+            return $"the backup at '{backupPath}' could not be hashed.";
+
+        if (!backupSha256.Equals(sourceSha256, StringComparison.OrdinalIgnoreCase))
+        {
+            return $"the backup at '{backupPath}' does not match the file being "
+                   + "converted, so it is not a valid restore point.";
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Writes the sidecar and verifies that it can be read back.
     /// </summary>
     /// <remarks>

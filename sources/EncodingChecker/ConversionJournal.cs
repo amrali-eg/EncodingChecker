@@ -63,16 +63,22 @@ internal sealed record JournalEntry
     /// <summary>
     /// What detection concluded, or <see langword="null"/> when detection did not run.
     /// </summary>
-    /// <remarks>
-    /// Null under <c>-From</c>, which supplies the source encoding instead of running
-    /// detection.
-    /// </remarks>
     public string? DetectedEncoding { get; init; }
+
+    /// <summary>The canonical code page detection concluded, when resolvable.</summary>
+    public int? DetectedCodePage { get; init; }
 
     /// <summary>The encoding the conversion actually read the file as.</summary>
     public required string SourceEncoding { get; init; }
 
     public required int SourceCodePage { get; init; }
+
+    /// <summary>
+    /// Whether an explicit source choice differs from detection by canonical code page.
+    /// This records provenance only; a legacy disagreement does not bypass or fail the
+    /// conversion safety checks.
+    /// </summary>
+    public required bool ExplicitSourceDiffersFromDetection { get; init; }
 
     public required bool SourceHasBom { get; init; }
 
@@ -88,6 +94,9 @@ internal sealed record JournalEntry
 
     /// <summary>Why the outcome was not a plain conversion.</summary>
     public string? Reason { get; init; }
+
+    /// <summary>Stable machine-readable form of <see cref="Reason"/>.</summary>
+    public string? ReasonCode { get; init; }
 
     /// <summary>Where the original was kept, when it was.</summary>
     public string? BackupPath { get; init; }
@@ -106,7 +115,7 @@ internal sealed record JournalEntry
 /// </remarks>
 internal sealed record ConversionJournal
 {
-    internal const int CurrentJournalVersion = 2;
+    internal const int CurrentJournalVersion = 3;
 
     public int JournalVersion { get; init; } = CurrentJournalVersion;
 
@@ -195,6 +204,7 @@ internal sealed record ConversionJournal
                 ConversionRowResult.Converted => ConversionStatus.Converted,
                 ConversionRowResult.Unchanged => ConversionStatus.Unchanged,
                 ConversionRowResult.Skipped => ConversionStatus.Skipped,
+                ConversionRowResult.Refused => ConversionStatus.Refused,
                 ConversionRowResult.Error when entry.Action == PlannedAction.Refuse
                     => ConversionStatus.Refused,
                 ConversionRowResult.Error => ConversionStatus.Failed,
@@ -218,6 +228,8 @@ internal sealed record ConversionJournal
                 // Zero means EC could not resolve a code page for the recorded label.
             }
 
+            int? detectedCodePage = ResolveCodePage(entry.DetectedEncodingLabel);
+
             string backupPath = entry.FilePath + ".bak";
 
             lines.Add(new JournalEntry
@@ -235,14 +247,21 @@ internal sealed record ConversionJournal
 
                 DetectionMode = entry.SourceEncodingWasSpecified ? "Explicit" : "Detected",
                 DetectedEncoding = entry.DetectedEncodingLabel,
+                DetectedCodePage = detectedCodePage,
                 SourceEncoding = sourceCharset,
                 SourceCodePage = codePage,
+                ExplicitSourceDiffersFromDetection =
+                    entry.SourceEncodingWasSpecified
+                    && detectedCodePage.HasValue
+                    && codePage != 0
+                    && detectedCodePage.Value != codePage,
                 SourceHasBom = sourceHasBom,
                 SourceInterpretation = entry.SourceInterpretation
                     ?? SourceInterpretation.NotApplicable,
                 PlannedAction = entry.Action ?? PlannedAction.Skip,
                 Status = status,
                 Reason = string.IsNullOrEmpty(entry.Diagnostic) ? null : entry.Diagnostic,
+                ReasonCode = entry.ReasonCode,
                 BackupPath =
                     status == ConversionStatus.Converted
                     && backupEnabled
@@ -268,6 +287,22 @@ internal sealed record ConversionJournal
             Preview = preview,
             Entries = [.. lines.OrderBy(l => l.RelativePath, StringComparer.OrdinalIgnoreCase)],
         };
+    }
+
+    /// <summary>The canonical code page for a label, or null when unresolved.</summary>
+    private static int? ResolveCodePage(string? label)
+    {
+        if (string.IsNullOrWhiteSpace(label))
+            return null;
+
+        try
+        {
+            return Encoding.GetEncoding(label).CodePage;
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
     }
 
     /// <summary>A file's SHA-256, or empty when it cannot be read.</summary>

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
+using System.Text;
 using System.Windows.Forms;
 
 namespace EncodingChecker;
@@ -207,9 +208,9 @@ internal sealed class ConversionConfirmationForm : Form
         _sourceChoice.Width = 235;
         _sourceChoice.Items.Add("Choose or confirm source encoding…");
 
-        // Match the classifier's supported set.
-        foreach (string charset in TextEncoding.SupportedCharsets)
-            _sourceChoice.Items.Add(charset);
+        // Offer only codecs the current runtime can actually use.
+        foreach (Encoding encoding in TextEncoding.SupportedEncodings)
+            _sourceChoice.Items.Add(encoding.WebName);
 
         _sourceChoice.SelectedIndex = 0;
         _sourceChoice.SelectedIndexChanged += (_, _) => UpdateScopeLabel();

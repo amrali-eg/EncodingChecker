@@ -54,6 +54,28 @@ public sealed class ConversionPlanTests : IDisposable
         }
     }
 
+    private static (int ExitCode, string Output, string Error) RunCaptured(
+        params string[] args)
+    {
+        TextWriter originalOut = Console.Out;
+        TextWriter originalError = Console.Error;
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        try
+        {
+            Console.SetOut(output);
+            Console.SetError(error);
+            int exitCode = Program.RunConsoleMode(args);
+            return (exitCode, output.ToString(), error.ToString());
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+            Console.SetError(originalError);
+        }
+    }
+
     private string Write(string name, string text, string charset)
     {
         string path = Path.Combine(_root, name);
@@ -115,6 +137,21 @@ public sealed class ConversionPlanTests : IDisposable
             Assert.Equal(content, File.ReadAllBytes(path));
 
         Assert.True(File.Exists(PlanPath));
+    }
+
+    [Fact]
+    public void PlanningAnUnidentifiedFileRecordsASkipInsteadOfCrashing()
+    {
+        byte[] binary = new byte[4096];
+        new Random(418).NextBytes(binary);
+        File.WriteAllBytes(Path.Combine(_root, "only.bin"), binary);
+
+        Assert.Equal(0, Plan());
+
+        PlannedFile file = PlannedFor("only.bin");
+        Assert.Equal(PlannedAction.Skip, file.Action);
+        Assert.Equal(SourceInterpretation.NotApplicable, file.SourceInterpretation);
+        Assert.Equal(ConversionReasonCodes.UnknownEncoding, file.ReasonCode);
     }
 
     [Fact]
@@ -200,9 +237,9 @@ public sealed class ConversionPlanTests : IDisposable
 
         Assert.Equal(PlannedAction.Refuse, planned.Action);
         Assert.True(planned.NeedsSourceChoice);
-        Assert.Contains("Automatic conversion of legacy text is disabled", planned.Reason);
+        Assert.Contains("EC converts automatically only from Unicode and ASCII", planned.Reason);
 
-        Assert.Equal(0, Run("-Apply", PlanPath));
+        Assert.Equal(5, Run("-Apply", PlanPath));
         Assert.Equal(original, File.ReadAllBytes(path));
     }
 
@@ -284,6 +321,59 @@ public sealed class ConversionPlanTests : IDisposable
         Assert.Equal(0, Plan());
 
         Assert.Equal(1, Run(["-Apply", PlanPath, .. flag]));
+    }
+
+    [Fact]
+    public void ApplyWithWhatIfIsRejectedAndWritesNothing()
+    {
+        string path = Write("plain.txt", "plain ASCII", "ascii");
+        string before = ConversionMetadataStore.ComputeSha256(path);
+
+        Assert.Equal(0, Run(
+            "-BasePath", _root,
+            "-Target", "utf-16",
+            "-Plan", PlanPath,
+            "-Quiet"));
+
+        Assert.Equal(1, Run("-Apply", PlanPath, "-WhatIf"));
+        Assert.Equal(before, ConversionMetadataStore.ComputeSha256(path));
+        Assert.False(File.Exists(path + ".bak"));
+        Assert.False(File.Exists(ConversionMetadataStore.MetadataPathFor(path)));
+    }
+
+    [Fact]
+    public void RewritingAPlanInsideTheScanRootNeverPlansThePlanFile()
+    {
+        Write("plain.txt", "plain ASCII", "ascii");
+
+        Assert.Equal(0, Plan());
+        Assert.Equal(0, Plan());
+
+        ConversionPlan plan = LoadPlan();
+        Assert.DoesNotContain(
+            plan.Files,
+            file => file.RelativePath.Equals(
+                "plan.json", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(0, Run("-Apply", PlanPath));
+    }
+
+    [Fact]
+    public void ApplySummaryAccountsForEverySelectedFileExactlyOnce()
+    {
+        Write("plain.txt", "plain ASCII", "ascii");
+        Write("legacy.txt", "Le café était déjà prêt", "windows-1252");
+
+        Assert.Equal(0, Run(
+            "-BasePath", _root, "-Target", "utf-16", "-Plan", PlanPath,
+            "-Quiet"));
+
+        (int exitCode, string output, _) = RunCaptured("-Apply", PlanPath);
+
+        Assert.Equal(5, exitCode);
+        Assert.Contains(
+            "Applied plan: 2 selected, 1 converted, 0 unchanged, 0 skipped, "
+            + "1 refused, 0 failed.",
+            output);
     }
 
     [Fact]

@@ -173,7 +173,7 @@ public sealed class BackupIntegrityTests : IDisposable
             includeSubdirectories: false,
             matchAll,
             [],
-            excludedFullPath: null,
+            excludedFullPaths: null,
             onWarning: null).ToList();
 
         bool isCandidate = found.Any(f => Path.GetFileName(f) == fileName);

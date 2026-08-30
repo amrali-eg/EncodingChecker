@@ -16,7 +16,8 @@ public sealed class GuiWorkerCancellationTests
         Action<DoWorkEventArgs> doWork,
         Action<RunWorkerCompletedEventArgs> completed)
     {
-        using var worker = new BackgroundWorker { WorkerSupportsCancellation = true };
+        using var worker = new BackgroundWorker();
+        worker.WorkerSupportsCancellation = true;
         using var finished = new ManualResetEventSlim(false);
 
         worker.DoWork += (_, e) => doWork(e);

@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.Json;
 
 namespace EncodingChecker.Tests;
@@ -43,8 +43,8 @@ public sealed class ConversionMetadataTests : IDisposable
             TargetHasBom = false,
 
             // These name the source encoding rather than having it detected, which is
-            // what -From means. Without saying so, the ambiguity gate correctly refuses
-            // single-byte content whose encoding its bytes do not identify.
+            // what -From means. Without saying so, the legacy safety rule correctly
+            // refuses detected legacy content until its source is specified.
             SourceEncodingWasSpecified = true,
         };
 
@@ -142,44 +142,27 @@ public sealed class ConversionMetadataTests : IDisposable
     }
 
     [Fact]
-    public void AStaleBackupFromAnEarlierRunStopsTheConversion()
+    public void RecoveryHashesRefuseAnUnavailableSourceHash()
     {
-        // A ".bak" left by a previous conversion holds different content. Recording it
-        // would produce metadata that restores the wrong file, so the conversion must
-        // refuse instead.
-        string path = Path.Combine(_root, "stale.txt");
-        byte[] original = Encoding.GetEncoding("windows-1252").GetBytes("café");
-        File.WriteAllBytes(path, original);
-        File.WriteAllBytes(path + ".bak", Encoding.UTF8.GetBytes("something else entirely"));
-        File.SetAttributes(path + ".bak", FileAttributes.ReadOnly);
+        string? error = ConversionMetadataStore.ValidateRecoveryHashes(
+            sourceSha256: string.Empty,
+            backupSha256: new string('a', 64),
+            backupPath: "example.txt.bak");
 
-        try
-        {
-            var entry = new ConversionReportEntry
-            {
-                FilePath = path,
-                SourceEncoding = "windows-1252",
-                SourceHasBom = false,
-                TargetEncoding = "windows-1252",
-                TargetHasBom = false,
-            };
-
-            var completed = new EntrySink();
-            ScanEngine.ConvertFiles(
-                [entry], "utf-8", targetWriteBom: false,
-                ScanEngine.DefaultMaxParallelism,
-                whatIf: false, backup: true, completed.Add, CancellationToken.None);
-
-            ConversionReportEntry result = Assert.Single(completed);
-
-            Assert.Equal(ConversionRowResult.Error, result.Result);
-            Assert.Equal(original, File.ReadAllBytes(path));
-            Assert.False(File.Exists(ConversionMetadataStore.MetadataPathFor(path)));
-        }
-        finally
-        {
-            if (File.Exists(path + ".bak"))
-                File.SetAttributes(path + ".bak", FileAttributes.Normal);
-        }
+        Assert.NotNull(error);
+        Assert.Contains("source file could not be hashed", error);
     }
+
+    [Fact]
+    public void RecoveryHashesAcceptOnlyAnExactBackup()
+    {
+        string hash = new('a', 64);
+
+        Assert.Null(ConversionMetadataStore.ValidateRecoveryHashes(
+            hash, hash.ToUpperInvariant(), "example.txt.bak"));
+
+        Assert.Contains("does not match", ConversionMetadataStore.ValidateRecoveryHashes(
+            hash, new string('b', 64), "example.txt.bak"));
+    }
+
 }

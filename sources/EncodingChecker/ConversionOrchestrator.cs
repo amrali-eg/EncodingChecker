@@ -63,6 +63,9 @@ internal sealed record OrchestrationResult
 
     /// <summary>What to tell the user when nothing ran.</summary>
     internal string? Message { get; init; }
+
+    /// <summary>The immutable journal captured from the exact completed run.</summary>
+    internal ConversionJournal? Journal { get; init; }
 }
 
 /// <summary>
@@ -117,13 +120,28 @@ internal sealed class ConversionOrchestrator
     {
         ArgumentNullException.ThrowIfNull(entries);
 
+        DateTime startedUtc = DateTime.UtcNow;
+
+        // View is informational. Re-detect the selected automatic-source files while
+        // hashing the same locked bytes, so the plan never combines stale detection with
+        // a newer source hash. Explicit choices are hashed but not detected.
+        ScanEngine.RefreshSourceSnapshots(
+            entries,
+            maxParallelism,
+            cancellationToken);
+
         // Decide without writing; the resulting actions stay on the entries.
         RunPass(
             entries, targetCharset, targetWriteBom,
-            backup, whatIf: true, maxParallelism, onEntry, cancellationToken);
+            backup, whatIf: true, maxParallelism, _ => { }, cancellationToken);
 
         if (preview)
+        {
+            foreach (ConversionReportEntry entry in entries)
+                onEntry(entry);
+
             return new OrchestrationResult { Outcome = OrchestrationOutcome.Previewed };
+        }
 
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -176,7 +194,7 @@ internal sealed class ConversionOrchestrator
 
                 RunPass(
                     entries, targetCharset, targetWriteBom,
-                    backup, whatIf: true, maxParallelism, onEntry, cancellationToken);
+                    backup, whatIf: true, maxParallelism, _ => { }, cancellationToken);
 
                 continue;
             }
@@ -206,10 +224,24 @@ internal sealed class ConversionOrchestrator
                 entries, targetCharset, targetWriteBom,
                 backup, whatIf: false, maxParallelism, onEntry, cancellationToken);
 
+            string? explicitSource = entries.All(e => e.SourceEncodingWasSpecified)
+                                     && entries.Count > 0
+                ? entries[0].ResolvedSourceLabel ?? entries[0].EffectiveSourceLabel
+                : null;
+
             return new OrchestrationResult
             {
                 Outcome = OrchestrationOutcome.Converted,
                 Plan = plan,
+                Journal = ConversionJournal.FromRun(
+                    entries,
+                    baseDirectory,
+                    targetCharset,
+                    targetWriteBom,
+                    backup,
+                    explicitSource,
+                    surface: "Gui",
+                    startedUtc),
             };
         }
     }

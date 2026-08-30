@@ -15,7 +15,7 @@ internal sealed record ConversionPlanSummary
 
     internal static ConversionPlanSummary From(IEnumerable<PlannedFile> files)
     {
-        PlannedFile[] entries = files.ToArray();
+        PlannedFile[] entries = [.. files];
 
         int needsSourceChoice = entries.Count(file => file.NeedsSourceChoice);
         int refusals = entries.Count(file => file.Action == PlannedAction.Refuse);

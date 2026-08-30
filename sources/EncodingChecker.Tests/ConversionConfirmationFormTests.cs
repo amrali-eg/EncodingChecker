@@ -134,8 +134,8 @@ public sealed class ConversionConfirmationFormTests : IDisposable
     [Fact]
     public void ItNamesTheDetectedLegacyEncodingAndOffersAnExplicitChoice()
     {
-        // "Could not be determined" on its own gives a user nothing to act on. The
-        // alternatives and the way out are what make the refusal actionable.
+        // A detected legacy label alone is not permission to rewrite the file. The
+        // review must name it and offer an explicit source choice.
         Write("ambiguous.txt", "Le café était déjà prêt", "windows-1252");
 
         ConversionPlan plan = Plan();
@@ -163,6 +163,41 @@ public sealed class ConversionConfirmationFormTests : IDisposable
             Assert.True(chooser.Items.Count > 1);
             Assert.Contains("windows-1252", chooser.Items.Cast<string>());
             Assert.True(chooser.Width >= 235, "the full source-encoding prompt must be visible");
+        });
+    }
+
+    [Fact]
+    public void SourcePickerOffersOnlyRuntimeSupportedCanonicalEncodings()
+    {
+        Write("ambiguous.txt", "Le café était déjà prêt", "windows-1252");
+
+        ConversionPlan plan = Plan();
+
+        UiTest.OnStaThread(() =>
+        {
+            using var form = new ConversionConfirmationForm(plan);
+            ComboBox chooser = Assert.Single(Descendants(form).OfType<ComboBox>());
+
+            string[] offered =
+            [
+                .. chooser.Items.Cast<string>().Skip(1)
+            ];
+            string[] expected =
+            [
+                .. TextEncoding.SupportedEncodings.Select(encoding => encoding.WebName)
+            ];
+
+            Assert.Equal(expected, offered);
+            Assert.Equal(offered.Length, offered.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+            Assert.All(offered, name => Assert.NotNull(Encoding.GetEncoding(name)));
+
+            int[] offeredCodePages =
+            [
+                .. offered.Select(name => Encoding.GetEncoding(name).CodePage)
+            ];
+
+            Assert.Equal(offeredCodePages.Length, offeredCodePages.Distinct().Count());
+            Assert.Contains(949, offeredCodePages);
         });
     }
 
@@ -248,20 +283,22 @@ public sealed class ConversionConfirmationFormTests : IDisposable
     {
         // A large batch used to show the true total in the explanation but silently
         // truncated the selectable list at 200 files.
-        PlannedFile[] files = Enumerable.Range(1, 310)
-            .Select(i => new PlannedFile
-            {
-                RelativePath = $"legacy-{i:D3}.txt",
-                Size = 1,
-                Sha256 = new string('0', 64),
-                Action = PlannedAction.Refuse,
-                SourceEncoding = "windows-1252",
-                SourceCodePage = 1252,
-                SourceHasBom = false,
-                SourceWasSpecified = false,
-                SourceInterpretation = SourceInterpretation.LegacyNeedsSourceChoice,
-            })
-            .ToArray();
+        PlannedFile[] files =
+        [
+            .. Enumerable.Range(1, 310)
+                .Select(i => new PlannedFile
+                {
+                    RelativePath = $"legacy-{i:D3}.txt",
+                    Size = 1,
+                    Sha256 = new string('0', 64),
+                    Action = PlannedAction.Refuse,
+                    SourceEncoding = "windows-1252",
+                    SourceCodePage = 1252,
+                    SourceHasBom = false,
+                    SourceWasSpecified = false,
+                    SourceInterpretation = SourceInterpretation.LegacyNeedsSourceChoice,
+                })
+        ];
 
         var plan = new ConversionPlan
         {

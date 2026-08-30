@@ -1,11 +1,8 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
-using System.Linq;
 using System.Text;
-using System.Threading;
 
 namespace EncodingChecker;
 
@@ -249,27 +246,16 @@ internal static partial class Program
                 return false;
             }
 
-            if (options.DetectOnly || !string.IsNullOrWhiteSpace(options.ValidateCharsets))
-            {
-                error = "-Apply performs a conversion; it cannot be combined with "
-                        + "-DetectOnly or -Validate.";
-                return false;
-            }
-
-            // A plan already contains these values, so accepting them would silently
-            // ignore options that appear to change the conversion.
-            string? overridden =
-                options.BasePath != null ? "-BasePath"
-                : options.Target != null ? "-Target"
-                : options.From != null ? "-From"
-                : options.Backup ? "-Backup"
-                : null;
+            string? overridden = ApplyConflict(options);
 
             if (overridden != null)
             {
-                error = $"{overridden} has no effect with -Apply: a plan already records "
-                        + "the files, the source and target encodings, and whether "
-                        + "originals are backed up. Re-run -Plan to change any of them.";
+                error = overridden == "-WhatIf"
+                    ? "-WhatIf cannot be combined with -Apply. The saved plan is the "
+                      + "preview; applying it performs the reviewed writes."
+                    : $"{overridden} cannot be combined with -Apply. A plan already "
+                      + "records its scope and conversion settings; re-run -Plan to "
+                      + "change them.";
                 return false;
             }
         }
@@ -303,9 +289,11 @@ internal static partial class Program
             {
                 Encoding.GetEncoding(options.From!);
             }
-            catch (ArgumentException)
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
             {
-                error = $"'{options.From}' is not a recognized encoding.";
+                error = ex is NotSupportedException
+                    ? $"'{options.From}' is recognized but is not supported by this .NET runtime."
+                    : $"'{options.From}' is not a recognized encoding.";
                 return false;
             }
         }
@@ -396,10 +384,11 @@ internal static partial class Program
             {
                 Encoding.GetEncoding(baseCharset);
             }
-            catch (ArgumentException)
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
             {
-                error =
-                    $"'{options.Target}' is not a recognized encoding.";
+                error = ex is NotSupportedException
+                    ? $"'{options.Target}' is recognized but is not supported by this .NET runtime."
+                    : $"'{options.Target}' is not a recognized encoding.";
                 return false;
             }
         }
@@ -407,4 +396,23 @@ internal static partial class Program
         error = null;
         return true;
     }
+
+    /// <summary>
+    /// Returns the first option that an applied plan cannot honor. Journal output,
+    /// parallelism, and quiet output remain valid apply-time controls.
+    /// </summary>
+    private static string? ApplyConflict(CliOptions options) =>
+        options.BasePath != null ? "-BasePath"
+        : options.Include.Count > 0 ? "-Include"
+        : options.Exclude.Count > 0 ? "-Exclude"
+        : options.Target != null ? "-Target"
+        : options.From != null ? "-From"
+        : options.Backup ? "-Backup"
+        : options.WhatIf ? "-WhatIf"
+        : options.DetectOnly ? "-DetectOnly"
+        : options.ValidateCharsets != null ? "-Validate"
+        : options.ReportPath != null ? "-Report"
+        : options.FailOnChanges ? "-FailOnChanges"
+        : options.Verbose ? "-Verbose"
+        : null;
 }

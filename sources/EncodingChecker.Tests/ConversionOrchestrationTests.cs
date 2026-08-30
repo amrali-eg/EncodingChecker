@@ -1,4 +1,4 @@
-﻿using System.Text;
+﻿﻿using System.Text;
 
 namespace EncodingChecker.Tests;
 
@@ -58,7 +58,7 @@ public sealed class ConversionOrchestrationTests : IDisposable
             scanned.Add,
             CancellationToken.None);
 
-        return scanned.ToList();
+        return [.. scanned];
     }
 
     /// <summary>Everything the GUI's Convert button does, with a scripted user.</summary>
@@ -89,6 +89,77 @@ public sealed class ConversionOrchestrationTests : IDisposable
 
     private static ConfirmationResponse Proceed(ConversionPlan _) =>
         ConfirmationResponse.Proceed;
+
+    [Fact]
+    public void ACompletedRunEmitsExactlyOneTerminalResultPerSelectedFile()
+    {
+        Write("one.txt", "plain ASCII", "ascii");
+        Write("two.txt", "more plain ASCII", "ascii");
+
+        List<ConversionReportEntry> entries = View();
+        var terminal =
+            new System.Collections.Concurrent.ConcurrentBag<ConversionReportEntry>();
+
+        OrchestrationResult result = new ConversionOrchestrator(Proceed).Run(
+            entries, _root, "utf-16", targetWriteBom: false,
+            backup: false, preview: false,
+            ScanEngine.DefaultMaxParallelism,
+            terminal.Add,
+            CancellationToken.None);
+
+        Assert.Equal(OrchestrationOutcome.Converted, result.Outcome);
+        Assert.Equal(entries.Count, terminal.Count);
+        Assert.Equal(
+            entries.Select(entry => entry.FilePath).OrderBy(path => path),
+            terminal.Select(entry => entry.FilePath).Distinct().OrderBy(path => path));
+    }
+
+    [Fact]
+    public void DetectionAndHashAreRefreshedTogetherBeforeThePlanIsShown()
+    {
+        const string text = "Hello 世界";
+        string path = Path.Combine(_root, "moving.txt");
+        File.WriteAllBytes(path, new UnicodeEncoding(false, false).GetBytes(text));
+
+        List<ConversionReportEntry> entries = View();
+
+        // Replace the bytes after View but before conversion planning. The plan must use
+        // the new big-endian interpretation and its matching hash, not View's old label.
+        File.WriteAllBytes(path, new UnicodeEncoding(true, false).GetBytes(text));
+        string replacementHash = ConversionMetadataStore.ComputeSha256(path);
+
+        ConversionPlan? shown = null;
+        OrchestrationResult result = Convert(entries, plan =>
+        {
+            shown = plan;
+            return ConfirmationResponse.Proceed;
+        });
+
+        Assert.NotNull(shown);
+        PlannedFile file = Assert.Single(shown.Files);
+        Assert.Equal(1201, file.SourceCodePage);
+        Assert.Equal(replacementHash, file.Sha256);
+        Assert.Equal(OrchestrationOutcome.Converted, result.Outcome);
+        Assert.Equal(text, Encoding.UTF8.GetString(File.ReadAllBytes(path)));
+    }
+
+    [Fact]
+    public void CompletedRunCarriesAnImmutableJournalOfWhatActuallyRan()
+    {
+        Write("journal.txt", "plain ASCII", "ascii");
+        List<ConversionReportEntry> entries = View();
+
+        OrchestrationResult result = Convert(entries, Proceed, target: "utf-16");
+        Assert.NotNull(result.Journal);
+        ConversionJournal journal = result.Journal;
+
+        // Later UI changes cannot rewrite the record returned by the orchestrator.
+        entries[0].TargetEncoding = "windows-1252";
+
+        Assert.Equal("utf-16", journal.TargetEncoding);
+        Assert.Equal("us-ascii", Assert.Single(journal.Entries).SourceEncoding);
+        Assert.Equal(ConversionStatus.Converted, Assert.Single(journal.Entries).Status);
+    }
 
     // ----------------------------------------------------------- the three states
 
@@ -132,7 +203,7 @@ public sealed class ConversionOrchestrationTests : IDisposable
     }
 
     [Fact]
-    public void UnambiguousEncoding_IsConverted()
+    public void AsciiEncoding_IsConverted()
     {
         const string text = "plain ASCII text";
         string path = Write("ascii.txt", text, "ascii");

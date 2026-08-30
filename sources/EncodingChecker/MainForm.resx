@@ -467,12 +467,6 @@
   <data name="tlnkAbout.Text" xml:space="preserve">
     <value>About</value>
   </data>
-  <data name="tlnkExport.Size" type="System.Drawing.Size, System.Drawing">
-    <value>40, 17</value>
-  </data>
-  <data name="tlnkExport.Text" xml:space="preserve">
-    <value>Export selected rows...</value>
-  </data>
   <data name="btnExportReport.Font" type="System.Drawing.Font, System.Drawing">
     <value>Segoe UI, 9pt, style=Underline</value>
   </data>
@@ -2676,12 +2670,6 @@
     <value>tlnkAbout</value>
   </data>
   <data name="&gt;&gt;tlnkAbout.Type" xml:space="preserve">
-    <value>System.Windows.Forms.ToolStripStatusLabel, System.Windows.Forms, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
-  </data>
-  <data name="&gt;&gt;tlnkExport.Name" xml:space="preserve">
-    <value>tlnkExport</value>
-  </data>
-  <data name="&gt;&gt;tlnkExport.Type" xml:space="preserve">
     <value>System.Windows.Forms.ToolStripStatusLabel, System.Windows.Forms, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </data>
   <data name="&gt;&gt;btnExportReport.Name" xml:space="preserve">

@@ -1,4 +1,4 @@
-using Xunit;
+
 
 // DetectionCountTests measures process-global counters to assert that EC never works out
 // a file's encoding twice. Those counts are only meaningful if nothing else is detecting
