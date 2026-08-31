@@ -37,6 +37,23 @@ internal static partial class EncodingConverter
     }
 
     /// <summary>
+    /// Tests whether the next bytes are another encoding preamble without consuming them.
+    /// </summary>
+    private static bool HasPreambleAtCurrentPosition(FileStream stream, Encoding encoding)
+    {
+        long position = stream.Position;
+
+        try
+        {
+            return ConsumePreambleIfPresent(stream, encoding) > 0;
+        }
+        finally
+        {
+            stream.Position = position;
+        }
+    }
+
+    /// <summary>
     /// Opens a file for shared reads while blocking writes and deletion.
     /// </summary>
     private static FileStream OpenReadShared(string path, int bufferSize)

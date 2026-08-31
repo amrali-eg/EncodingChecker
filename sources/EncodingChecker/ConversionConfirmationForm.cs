@@ -169,9 +169,7 @@ internal sealed class ConversionConfirmationForm : Form
         list.Columns.Add("File", 365);
         list.Columns.Add("Detected encoding", 165);
 
-        // The choice must cover every file the heading counts. Truncating this list made
-        // a large review say, for example, 310 files while the button could affect only
-        // the first 200.
+        // Show every refused file so the stated scope and the user's selection agree.
         foreach (PlannedFile file in refused)
         {
             list.Items.Add(new ListViewItem(

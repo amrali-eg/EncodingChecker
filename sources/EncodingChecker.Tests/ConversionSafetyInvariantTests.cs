@@ -195,6 +195,43 @@ public sealed class ConversionSafetyInvariantTests : IDisposable
     }
 
     [Fact]
+    public void Utf8BomSource_ConvertsToUtf8WithoutBom()
+    {
+        const string text = "café — 日本語\r\n";
+        string path = Path.Combine(_root, "utf8-bom.txt");
+        File.WriteAllBytes(path, [.. Encoding.UTF8.Preamble, .. Encoding.UTF8.GetBytes(text)]);
+
+        ConversionResult result = EncodingConverter.Convert(
+            path, path, Encoding.UTF8, new UTF8Encoding(false), new ConversionOptions());
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.True(result.BomVerificationPassed);
+        Assert.False(File.ReadAllBytes(path).AsSpan().StartsWith(Encoding.UTF8.Preamble));
+        Assert.Equal(text, Encoding.UTF8.GetString(File.ReadAllBytes(path)));
+    }
+
+    [Fact]
+    public void MultipleLeadingUtf8Boms_RefusesAndLeavesTheSourceUnchanged()
+    {
+        string path = Path.Combine(_root, "double-bom.txt");
+        byte[] original =
+        [
+            .. Encoding.UTF8.Preamble,
+            .. Encoding.UTF8.Preamble,
+            .. Encoding.UTF8.GetBytes("text\r\n"),
+        ];
+        File.WriteAllBytes(path, original);
+
+        ConversionResult result = EncodingConverter.Convert(
+            path, path, Encoding.UTF8, new UTF8Encoding(false), new ConversionOptions());
+
+        Assert.False(result.Success);
+        Assert.Equal(ConversionErrorCode.MultipleLeadingByteOrderMarks, result.ErrorCode);
+        Assert.Contains("multiple", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(original, File.ReadAllBytes(path));
+    }
+
+    [Fact]
     public void ASuccessfulConversionStillProvesPreservation()
     {
         // The invariant must not be satisfied by refusing everything. A file

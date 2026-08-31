@@ -179,7 +179,12 @@ internal static class ScanEngine
                         nameof(options));
                 }
 
-                return Encoding.GetEncoding(options.TargetCharset);
+                if (TextEncoding.TryResolve(options.TargetCharset, out Encoding? target))
+                    return target;
+
+                throw new ArgumentException(
+                    $"Target encoding '{options.TargetCharset}' is not available.",
+                    nameof(options));
 
             case ScanAction.Validate:
                 if (options.ValidCharsets is null ||
@@ -225,7 +230,14 @@ internal static class ScanEngine
         ArgumentNullException.ThrowIfNull(onEntry);
 
         // Resolve the target once, matching ScanDirectory.
-        Encoding targetEncoding = Encoding.GetEncoding(targetCharset);
+        if (!TextEncoding.TryResolve(targetCharset, out Encoding? resolvedTarget))
+        {
+            throw new ArgumentException(
+                $"Target encoding '{targetCharset}' is not available.",
+                nameof(targetCharset));
+        }
+
+        Encoding targetEncoding = resolvedTarget!;
 
         RunParallel(
             entries,
@@ -262,13 +274,7 @@ internal static class ScanEngine
                 Encoding sourceEncoding;
                 Encoding? automaticallyDetected = null;
 
-                try
-                {
-                    sourceEncoding = Encoding.GetEncoding(sourceCharset);
-                    if (!string.IsNullOrWhiteSpace(entry.DetectedEncodingLabel))
-                        automaticallyDetected = Encoding.GetEncoding(entry.DetectedEncodingLabel);
-                }
-                catch (ArgumentException)
+                if (!TextEncoding.TryResolve(sourceCharset, out Encoding? resolvedSource))
                 {
                     entry.Action = PlannedAction.Refuse;
                     entry.SourceInterpretation = SourceInterpretation.NotApplicable;
@@ -277,6 +283,11 @@ internal static class ScanEngine
                     entry.Diagnostic = $"The source encoding '{sourceCharset}' is not available.";
                     return entry;
                 }
+
+                sourceEncoding = resolvedSource!;
+
+                if (!string.IsNullOrWhiteSpace(entry.DetectedEncodingLabel))
+                    TextEncoding.TryResolve(entry.DetectedEncodingLabel, out automaticallyDetected);
 
                 ApplyConversion(
                     entry,
@@ -432,14 +443,7 @@ internal static class ScanEngine
         }
         else if (sourceWasSpecified)
         {
-            try
-            {
-                detected = Encoding.GetEncoding(options.SourceCharset!);
-            }
-            catch (ArgumentException)
-            {
-                detected = null;
-            }
+            TextEncoding.TryResolve(options.SourceCharset, out detected);
 
             hasBom = detected != null && HasPreamble(path, detected);
         }
@@ -586,7 +590,11 @@ internal static class ScanEngine
                 explicitSourceLabel,
                 out string sourceCharset,
                 out _);
-            sourceEncoding = Encoding.GetEncoding(sourceCharset);
+            if (!TextEncoding.TryResolve(sourceCharset, out sourceEncoding))
+            {
+                throw new NotSupportedException(
+                    $"The source encoding '{sourceCharset}' is not available.");
+            }
         }
 
         bool hasBom = sourceEncoding != null && HasPreamble(stream, sourceEncoding);
@@ -747,6 +755,17 @@ internal static class ScanEngine
             return;
         }
 
+        if (HasMultipleLeadingPreambles(path, sourceEncoding))
+        {
+            entry.Action = PlannedAction.Refuse;
+            entry.Result = ConversionRowResult.Refused;
+            entry.ReasonCode = ConversionReasonCodes.MultipleLeadingByteOrderMarks;
+            entry.Diagnostic =
+                "The source starts with more than one byte-order mark. "
+                + "Remove the extra mark before converting; no files were changed.";
+            return;
+        }
+
         if (whatIf)
         {
             entry.Result = ConversionRowResult.Converted; // "would be converted"
@@ -758,6 +777,7 @@ internal static class ScanEngine
             try
             {
                 CreateBackup(path);
+                entry.BackupPath = path + ".bak";
             }
             catch (Exception ex) when (
                 ex is IOException or UnauthorizedAccessException)
@@ -775,7 +795,15 @@ internal static class ScanEngine
 
             // Without a backup there is nothing to restore from.
             RecordConversion = backup
-                ? record => WriteConversionMetadata(path, record, entry)
+                ? record =>
+                {
+                    string? error = WriteConversionMetadata(path, record, entry);
+
+                    if (error is null)
+                        entry.RecoveryMetadataPath = ConversionMetadataStore.MetadataPathFor(path);
+
+                    return error;
+                }
                 : null,
 
             // Present only when an approved plan pinned the original bytes.
@@ -822,10 +850,7 @@ internal static class ScanEngine
     }
 
     /// <summary>
-    /// Writes "<paramref name="path"/>.bak" through a temporary file before replacement.
-    /// </summary>
-    /// <summary>
-    /// Writes the sidecar describing how to undo this conversion, next to the backup.
+    /// Writes recovery metadata only after output verification and before installation.
     /// </summary>
     /// <remarks>
     /// Called after output verification and before installation so metadata failure leaves
@@ -847,8 +872,7 @@ internal static class ScanEngine
             return $"the backup at '{backupPath}' could not be read: {ex.Message}";
         }
 
-        // A readable backup is not enough: prove it is the exact source this conversion
-        // used. Missing either hash is a refusal, not permission to skip the comparison.
+        // A backup is useful only if it is the exact source this conversion read.
         string? hashError = ConversionMetadataStore.ValidateRecoveryHashes(
             record.SourceSha256, backupHash, backupPath);
 
@@ -891,19 +915,42 @@ internal static class ScanEngine
     /// <summary>The code page for a charset label, or null when it cannot be resolved.</summary>
     private static int? ResolveCodePage(string? label)
     {
-        if (string.IsNullOrEmpty(label))
-            return null;
+        return TextEncoding.TryResolve(label, out Encoding? encoding)
+            ? encoding!.CodePage
+            : null;
+    }
+
+    /// <summary>Detects a repeated leading BOM before a backup is created.</summary>
+    private static bool HasMultipleLeadingPreambles(string path, Encoding encoding)
+    {
+        byte[] preamble = encoding.GetPreamble();
+
+        if (preamble.Length == 0)
+            return false;
+
+        byte[] prefix = new byte[preamble.Length * 2];
 
         try
         {
-            return Encoding.GetEncoding(label).CodePage;
+            using FileStream stream = new(
+                path, FileMode.Open, FileAccess.Read, FileShare.Read,
+                prefix.Length, FileOptions.SequentialScan);
+
+            int read = stream.Read(prefix, 0, prefix.Length);
+
+            return read == prefix.Length
+                   && prefix.AsSpan(0, preamble.Length).SequenceEqual(preamble)
+                   && prefix.AsSpan(preamble.Length, preamble.Length).SequenceEqual(preamble);
         }
-        catch (ArgumentException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return null;
+            // This is an early diagnostic only; the normal conversion path reports the
+            // actual read or backup failure on the original entry.
+            return false;
         }
     }
 
+    /// <summary>Creates a durable backup before conversion can replace the source.</summary>
     private static void CreateBackup(string path)
     {
         string? directory = Path.GetDirectoryName(path);
@@ -1006,6 +1053,8 @@ internal static class ScanEngine
                         SourceEncoding = "(Error)",
                         TargetEncoding = "(Error)",
                         Result = ConversionRowResult.Error,
+                        Action = PlannedAction.Refuse,
+                        SourceInterpretation = SourceInterpretation.NotApplicable,
                         ReasonCode = ConversionReasonCodes.ScanFailed,
                         Diagnostic = ex.Message,
                     };

@@ -110,7 +110,7 @@ internal static partial class Program
     }
 
     private const string UsageText = """
-        EncodingChecker v3.9.0
+        EncodingChecker v3.9.1
 
         Common commands:
 

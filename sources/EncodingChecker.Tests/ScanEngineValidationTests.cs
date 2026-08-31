@@ -340,6 +340,8 @@ public sealed class ScanEngineValidationTests : IDisposable
         ConversionReportEntry lockedEntry = entries.Single(
             e => string.Equals(e.FilePath, lockedPath, StringComparison.OrdinalIgnoreCase));
         Assert.Equal(ConversionRowResult.Error, lockedEntry.Result);
+        Assert.Equal(PlannedAction.Refuse, lockedEntry.Action);
+        Assert.Equal(SourceInterpretation.NotApplicable, lockedEntry.SourceInterpretation);
         Assert.NotNull(lockedEntry.Diagnostic);
 
         Assert.Contains(entries, e => e.FilePath.EndsWith("good1.txt") && e.Result != ConversionRowResult.Error);

@@ -4,20 +4,18 @@ using System.Collections.Concurrent;
 namespace EncodingChecker.Tests;
 
 /// <summary>
-/// Collects the entries a scan or conversion reports, safely.
+/// Collects concurrently reported entries safely and exposes them in a fixed order.
 /// </summary>
 /// <remarks>
 /// <see cref="ScanEngine.ScanDirectory"/> and <see cref="ScanEngine.ConvertFiles"/> invoke
-/// their callback concurrently from worker threads and say so; the caller has to
-/// synchronise. Both production callers use a <see cref="ConcurrentBag{T}"/>. The tests
-/// passed <c>List&lt;T&gt;.Add</c>, which is not thread-safe, and lost entries — measured
-/// at 3 runs in 40 over 200 files, dropping one or two each time.
+/// their callback concurrently. The collector must therefore synchronize internally;
+/// tests must never rely on each test author remembering that contract.
 /// <para>
-/// That is worse in a test than in the product. A dropped entry does not throw; it
-/// silently removes a file from what the test then asserts about, so the test still
-/// passes and asserts less than it claims. It surfaced as a CI failure where a file
-/// modified after planning was not caught as stale — because the file had never made it
-/// into the plan.
+/// Incident this prevents: tests previously passed <c>List&lt;T&gt;.Add</c>, which is not
+/// thread-safe, and lost one or two entries in 3 of 40 runs over 200 files. A dropped
+/// entry does not throw. It silently removes a file from the test's assertions, allowing
+/// the test to pass while proving less than it claims. One stale-plan test failed this
+/// way because its changed file had never reached the plan.
 /// </para>
 /// <para>
 /// Enumerates in path order so a test reading two entries gets them in a fixed order.

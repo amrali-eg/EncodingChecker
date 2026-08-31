@@ -170,10 +170,9 @@ public sealed class ConversionPlanTests : IDisposable
     [Fact]
     public void AFileChangedAfterPlanningInvalidatesTheWholePlan()
     {
-        // All-or-nothing on purpose. Converting the files that still match would apply a
-        // plan the user reviewed as a whole to a directory that is no longer the one they
-        // reviewed - and the files most likely to have changed are the ones something
-        // else is actively writing.
+        // A plan covers the whole reviewed set. If any source changes, converting only
+        // the files that still match would carry out a partial plan the user never
+        // approved; it would also race most often with files another process is writing.
         string stable = Write("stable.txt", "こんにちは世界。テキスト", "shift_jis");
         string moved = Write("moved.txt", "さようなら世界。テキスト", "shift_jis");
 
@@ -295,6 +294,28 @@ public sealed class ConversionPlanTests : IDisposable
         Rewrite(fields => fields["PlanVersion"] = JsonSerializer.SerializeToElement(99));
 
         Assert.Equal(1, Run("-Apply", PlanPath));
+    }
+
+    [Fact]
+    public void APlanWithAnIncompleteFileEntryIsRejectedBeforeExecution()
+    {
+        string path = Write("jp.txt", "こんにちは世界。テキスト", "shift_jis");
+        byte[] original = File.ReadAllBytes(path);
+        Assert.Equal(0, Plan("-From", "shift_jis"));
+
+        Rewrite(fields =>
+        {
+            List<Dictionary<string, JsonElement>> files = fields["Files"]
+                .EnumerateArray()
+                .Select(file => file.EnumerateObject()
+                    .ToDictionary(p => p.Name, p => p.Value.Clone()))
+                .ToList();
+            files[0]["SourceEncoding"] = JsonSerializer.SerializeToElement("");
+            fields["Files"] = JsonSerializer.SerializeToElement(files);
+        });
+
+        Assert.Equal(1, Run("-Apply", PlanPath));
+        Assert.Equal(original, File.ReadAllBytes(path));
     }
 
     [Fact]
@@ -538,6 +559,37 @@ public sealed class ConversionPlanTests : IDisposable
         {
             File.Delete(outside);
         }
+    }
+
+    [Fact]
+    public void ARefusedEntryReachingOutsideThePlanInvalidatesTheWholeRun()
+    {
+        // Every row belongs to the reviewed plan, including rows EC intends to leave
+        // alone. A malformed non-convert row must not be ignored while another row is
+        // converted and the journal later discovers the invalid path.
+        string valid = Path.Combine(_root, "utf8-bom.txt");
+        File.WriteAllText(valid, "hello world", new UTF8Encoding(true));
+        byte[] validBefore = File.ReadAllBytes(valid);
+        Write("legacy.txt", "Le café était déjà prêt", "windows-1252");
+
+        Assert.Equal(0, Plan());
+
+        Rewrite(fields =>
+        {
+            List<Dictionary<string, JsonElement>> files = fields["Files"]
+                .EnumerateArray()
+                .Select(file => file.EnumerateObject()
+                    .ToDictionary(p => p.Name, p => p.Value.Clone()))
+                .ToList();
+
+            Dictionary<string, JsonElement> refused = Assert.Single(
+                files, file => file["Action"].GetString() == nameof(PlannedAction.Refuse));
+            refused["RelativePath"] = JsonSerializer.SerializeToElement("..\\outside.txt");
+            fields["Files"] = JsonSerializer.SerializeToElement(files);
+        });
+
+        Assert.Equal(3, Run("-Apply", PlanPath));
+        Assert.Equal(validBefore, File.ReadAllBytes(valid));
     }
 
     [Fact]

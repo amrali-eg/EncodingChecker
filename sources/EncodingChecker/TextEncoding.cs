@@ -230,6 +230,10 @@ internal static class TextEncoding
     /// <summary>
     /// Charset names EC knows how to ask the current runtime for.
     /// </summary>
+    /// <remarks>
+    /// UTF-7 is deliberately not listed: current .NET versions disable it by default.
+    /// Other unavailable names are filtered when <see cref="SupportedEncodings"/> is built.
+    /// </remarks>
     private static readonly string[] CharsetNames =
     [
         "ascii", "utf-8", "utf-16le", "utf-16be",
@@ -267,6 +271,27 @@ internal static class TextEncoding
         ResolveSupportedEncodings();
 
 
+    /// <summary>Resolves a codec without allowing an unsupported name to escape.</summary>
+    internal static bool TryResolve(string? name, out Encoding? encoding)
+    {
+        encoding = null;
+
+        if (string.IsNullOrWhiteSpace(name))
+            return false;
+
+        try
+        {
+            encoding = Encoding.GetEncoding(name);
+            return true;
+        }
+        catch (Exception ex) when (
+            ex is ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+
     private static IReadOnlyList<Encoding> ResolveSupportedEncodings()
     {
         var encodings = new List<Encoding>();
@@ -274,17 +299,10 @@ internal static class TextEncoding
 
         foreach (string name in CharsetNames)
         {
-            try
+            if (TryResolve(name, out Encoding? encoding) &&
+                codePages.Add(encoding!.CodePage))
             {
-                Encoding encoding = Encoding.GetEncoding(name);
-
-                if (codePages.Add(encoding.CodePage))
-                    encodings.Add(encoding);
-            }
-            catch (Exception ex) when (
-                ex is ArgumentException or NotSupportedException)
-            {
-                // This runtime does not provide the named encoding.
+                encodings.Add(encoding);
             }
         }
 
