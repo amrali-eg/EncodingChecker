@@ -3,19 +3,16 @@
 namespace EncodingChecker.Tests;
 
 /// <summary>
-/// EC works out a file's encoding exactly once for each approved plan, and never again
-/// between the moment that plan is approved and the moment it is carried out.
+/// A conversion plan must identify each selected file once, then carry out that approved
+/// interpretation without detecting the file again.
 ///
-/// That property is what makes a preview a promise rather than a demonstration. A second
-/// pass over the same bytes can answer differently — detection is a heuristic — and it
-/// The View result is informational; planning deliberately refreshes selected files while
-/// binding detection to their hashes. Every surface is built not to detect after approval.
-/// But
-/// "built not to" is an architectural claim, and this project has already been caught by
-/// one of those: the GUI was built to apply the legacy-source rule too, and did not.
+/// View is informational. Planning deliberately takes one fresh, hash-bound snapshot of
+/// each selected automatic-source file because detection is a heuristic and the file may
+/// have changed since View. Once the user approves that plan, another detection pass could
+/// produce a different answer from the one the user reviewed.
 ///
-/// So it is counted. The two counts distinguish separate work: identifying the source
-/// encoding and applying the conversion policy.
+/// These tests count detection and policy classification separately. Counting makes the
+/// no-second-pass rule an observable contract instead of an assumption about the design.
 /// </summary>
 public sealed class DetectionCountTests : IDisposable
 {
@@ -79,8 +76,8 @@ public sealed class DetectionCountTests : IDisposable
 
         List<ConversionReportEntry> entries = [];
 
-        // View: three files, three detections, and nothing classified yet - which is
-        // precisely why the classification cannot live in the scan.
+        // Scenario: View identifies three files but makes no conversion decision.
+        // A decision belongs to planning because it depends on the requested target.
         var view = Measure(() => entries = View());
 
         Assert.Equal(3, view.Detections);
@@ -94,9 +91,8 @@ public sealed class DetectionCountTests : IDisposable
                 {
                     confirmations++;
 
-                    // Building and reading the plan must cost nothing. A confirmation
-                    // that re-derives anything is a confirmation that can disagree with
-                    // what it is confirming.
+                    // Risk: a confirmation that re-derives data can disagree with the
+                    // plan it presents. Reading this plan must not inspect any file again.
                     atConfirmation = (
                         DetectionCounters.Detections,
                         DetectionCounters.Classifications);
@@ -112,11 +108,12 @@ public sealed class DetectionCountTests : IDisposable
 
         Assert.Equal(1, confirmations);
 
-        // Planning refreshes the selected files once, then classifies that exact snapshot.
+        // Protection: planning refreshes each selected file once, then classifies that
+        // exact snapshot.
         Assert.Equal(3, atConfirmation.Classifications);
         Assert.Equal(3, atConfirmation.Detections);
 
-        // And the pass that actually writes adds nothing to either count.
+        // Carrying out the approved plan must add neither detection nor classification.
         Assert.Equal(3, convert.Classifications);
         Assert.Equal(3, convert.Detections);
     }
@@ -124,7 +121,8 @@ public sealed class DetectionCountTests : IDisposable
     [Fact]
     public void AnsweringARefusalClassifiesOnlyTheFilesItWasAskedAbout()
     {
-        // Re-planning after an explicit choice must not re-examine the whole batch.
+        // An explicit source choice changes only the files the user selected; it must not
+        // re-examine the rest of the batch.
         Write("jp.txt", "こんにちは世界。日本語のテキストです。", "shift_jis");
         Write("ambiguous.txt", "Le café était déjà prêt", "windows-1252");
 
@@ -150,8 +148,8 @@ public sealed class DetectionCountTests : IDisposable
                     _ => { },
                     CancellationToken.None));
 
-        // Two on the first pass, then one more for the file whose source the user chose.
-        // The other entry keeps its existing decision.
+        // First pass: two detections. Re-plan: one classification for the file whose
+        // source was chosen. The other entry retains its existing decision.
         Assert.Equal(3, convert.Classifications);
         Assert.Equal(2, convert.Detections);
     }
@@ -170,8 +168,8 @@ public sealed class DetectionCountTests : IDisposable
         Assert.Equal(3, plan.Detections);
         Assert.Equal(3, plan.Classifications);
 
-        // The whole point of a plan. Applying it re-asserts what was recorded; it does
-        // not go back to the bytes to ask again.
+        // Applying a plan checks that the recorded source is still present; it does not
+        // return to the bytes to derive a new encoding decision.
         var apply = Measure(() => Assert.Equal(5, Cli("-Apply", planPath)));
 
         Assert.Equal(0, apply.Detections);
@@ -193,8 +191,8 @@ public sealed class DetectionCountTests : IDisposable
     [Fact]
     public void ReadingAPlanCostsNothing()
     {
-        // Isolated from the surrounding sequence: constructing and inspecting a plan must
-        // never reach the bytes. This is the property the confirmation dialog rests on.
+        // Constructing and inspecting a plan must not reach the source bytes. The
+        // confirmation dialog relies on this to show the already-approved decision.
         WriteThreeFiles();
 
         string planPath = Path.Combine(_root, "plan.json");

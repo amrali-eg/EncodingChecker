@@ -352,8 +352,8 @@ public sealed class ConversionConfirmationFormTests : IDisposable
     [Fact]
     public void ItReportsThePlanItWasGivenRatherThanRecountingTheDirectory()
     {
-        // The dialog must describe the decisions that will execute. Recomputing here is
-        // how a confirmation ends up describing something other than what happens.
+        // The dialog must display the supplied plan. Rescanning or recounting here could
+        // make the confirmation describe a different decision from the one that executes.
         Write("jp.txt", "こんにちは世界。日本語のテキストです。", "shift_jis");
         Write("ambiguous.txt", "Le café était déjà prêt", "windows-1252");
 
@@ -361,7 +361,8 @@ public sealed class ConversionConfirmationFormTests : IDisposable
 
         int convert = plan.Files.Count(f => f.Action == PlannedAction.Convert);
 
-        // Change the directory after planning. The dialog must not notice.
+        // Change the directory after planning. The dialog must still show the existing
+        // plan, not the current directory contents.
         File.Delete(Path.Combine(_root, "jp.txt"));
         Write("late-arrival.txt", "added after the plan", "ascii");
 

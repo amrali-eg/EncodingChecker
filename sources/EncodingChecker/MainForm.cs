@@ -415,10 +415,6 @@ public partial class MainForm : Form
         actionStatus.Text = statusMessage;
     }
 
-    // Matches encodings reported by UtfUnknown.Core.CodepageName.
-    // UTF-7 is intentionally excluded because .NET disables it by default (SYSLIB0001)
-    // and Encoding.GetEncoding throws NotSupportedException.
-
     private void ShowWarning(
         string message,
         params object[] args)

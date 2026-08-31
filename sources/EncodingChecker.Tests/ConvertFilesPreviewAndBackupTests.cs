@@ -4,13 +4,14 @@ using System.Text;
 namespace EncodingChecker.Tests;
 
 /// <summary>
-/// ScanEngine.ConvertFiles's whatIf/backup parameters are what wire MainForm's
-/// chkPreviewChanges/chkCreateBackup checkboxes into the conversion pipeline
-/// (see MainForm.OnConvert: WhatIf = chkPreviewChanges.Checked, Backup =
-/// chkCreateBackup.Checked). These mirror WhatIfSafetyTests/BackupIntegrityTests,
-/// which exercise the same two ApplyConversion parameters through ScanDirectory
-/// (the CLI/View-then-Convert path), for ConvertFiles - the GUI's own entry point
-/// for converting an already-scanned selection.
+/// Covers the lower-level conversion pass used after a caller has already selected and
+/// classified files. The GUI orchestration is covered separately by
+/// <see cref="ConversionOrchestrationTests"/>; these tests pin the two safety switches
+/// passed into <see cref="ScanEngine.ConvertFiles"/> itself:
+/// <list type="bullet">
+/// <item><description>Preview reports what would happen without writing a file or backup.</description></item>
+/// <item><description>Backup preserves the original before a real conversion can replace it.</description></item>
+/// </list>
 /// </summary>
 public sealed class ConvertFilesPreviewAndBackupTests : IDisposable
 {
@@ -87,6 +88,41 @@ public sealed class ConvertFilesPreviewAndBackupTests : IDisposable
     }
 
     [Fact]
+    public void RepeatedLeadingBom_IsRefusedBeforeBackupOrMetadataIsCreated()
+    {
+        string path = Path.Combine(_root, "double-bom.txt");
+        byte[] bom = Encoding.UTF8.GetPreamble();
+        byte[] text = Encoding.UTF8.GetBytes("plain text");
+        File.WriteAllBytes(path, [.. bom, .. bom, .. text]);
+        byte[] original = File.ReadAllBytes(path);
+
+        var entry = new ConversionReportEntry
+        {
+            FilePath = path,
+            SourceEncoding = "utf-8",
+            SourceHasBom = true,
+            TargetEncoding = "utf-8",
+        };
+
+        var completed = new EntrySink();
+        ScanEngine.ConvertFiles(
+            [entry], "utf-8", targetWriteBom: false,
+            ScanEngine.DefaultMaxParallelism,
+            whatIf: false, backup: true,
+            completed.Add, CancellationToken.None);
+
+        ConversionReportEntry result = Assert.Single(completed);
+        Assert.Equal(ConversionRowResult.Refused, result.Result);
+        Assert.Equal(
+            ConversionReasonCodes.MultipleLeadingByteOrderMarks,
+            result.ReasonCode);
+        Assert.Contains("more than one byte-order mark", result.Diagnostic);
+        Assert.Equal(original, File.ReadAllBytes(path));
+        Assert.False(File.Exists(path + ".bak"));
+        Assert.False(File.Exists(ConversionMetadataStore.MetadataPathFor(path)));
+    }
+
+    [Fact]
     public void Preview_LeavesBytesUnchanged_CreatesNoBackupEvenIfRequested_ReportsWouldConvert()
     {
         string path = Path.Combine(_root, "f.txt");
@@ -101,13 +137,13 @@ public sealed class ConvertFilesPreviewAndBackupTests : IDisposable
             targetWriteBom: true,
             ScanEngine.DefaultMaxParallelism,
             whatIf: true,
-            backup: true, // Both checkboxes checked - Preview must still win (see ApplyConversion).
+            // Preview takes precedence: it must not create a backup or write output.
+            backup: true,
             completed.Add,
             CancellationToken.None);
 
-        // "Converted" is this codebase's existing convention for "would be converted"
-        // under a dry run (see ConversionRowResult.Converted's own doc comment) - the
-        // same value WhatIfSafetyTests asserts for the ScanDirectory path.
+        // In a preview, Converted means "would convert". The source bytes, timestamp,
+        // and backup state prove that this result describes a plan rather than a write.
         Assert.Equal(ConversionRowResult.Converted, Assert.Single(completed).Result);
         Assert.Equal(originalBytes, File.ReadAllBytes(path));
         Assert.Equal(originalWriteTime, File.GetLastWriteTimeUtc(path));
@@ -147,8 +183,8 @@ public sealed class ConvertFilesPreviewAndBackupTests : IDisposable
     [Fact]
     public void PreviewAndBackupTogether_NeverModifiesSource_NeverCreatesBackup_ReportsCorrectResults()
     {
-        // Mirrors the exact combination MainForm can produce: both checkboxes checked,
-        // over a mixed selection like OnConvert builds from lstResults.CheckedItems.
+        // Scenario: preview and backup are both requested for a mixed selection.
+        // Protection: preview wins for every row, including rows that would convert.
         string needsConversion = Path.Combine(_root, "a.txt");
         File.WriteAllText(needsConversion, TestContent.Ascii, Encoding.ASCII);
 
@@ -197,10 +233,9 @@ public sealed class ConvertFilesPreviewAndBackupTests : IDisposable
     [Fact]
     public void ExplicitFalseFalse_BehavesExactlyAsBeforeThisFeature()
     {
-        // Regression guard for every pre-existing caller (MainForm's non-preview/non-
-        // backup path, and every existing test): whatIf: false, backup: false is a real
-        // conversion with no backup, exactly as ConvertFiles behaved before it gained
-        // these two parameters.
+        // Scenario: neither optional safety switch is requested.
+        // Expected behavior: ConvertFiles performs its normal conversion without creating
+        // a backup. This keeps the lower-level API explicit for callers that opt out.
         string path = Path.Combine(_root, "f.txt");
         File.WriteAllText(path, TestContent.Ascii, Encoding.ASCII);
         byte[] originalBytes = File.ReadAllBytes(path);

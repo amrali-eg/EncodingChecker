@@ -24,6 +24,7 @@ internal enum ConversionErrorCode
     VerificationFailed,
     UnicodeMismatch,
     BomMismatch,
+    MultipleLeadingByteOrderMarks,
     TemporaryFileError,
     ReplacementError,
     RecoveryRecordError,
@@ -288,7 +289,7 @@ internal static partial class EncodingConverter
                     "Failed to create the temporary output file",
                     () => CreateTempStream(path, effectiveBufferSize));
 
-                // Remove a compatible source BOM from the data stream.
+                // Consume one source BOM as metadata; an additional one is ambiguous text.
                 int sourcePreambleLength = RunIoStage(
                     ConversionErrorCode.SourceReadError,
                     "Failed to read the source file's leading bytes",
@@ -296,6 +297,21 @@ internal static partial class EncodingConverter
 
                 sourceBytesProcessed += sourcePreambleLength;
                 sourceHadBom = sourcePreambleLength > 0;
+
+                // A second marker would be decoded as U+FEFF text.  Do not discard it
+                // automatically: it could be intentional content, and a no-BOM target
+                // cannot represent that distinction reliably at the start of a file.
+                if (sourceHadBom && HasPreambleAtCurrentPosition(sourceStream, sourceEncoding))
+                {
+                    return Failure(
+                        ConversionErrorCode.MultipleLeadingByteOrderMarks,
+                        $"The source begins with multiple {sourceEncoding.WebName} " +
+                        "byte-order marks. No conversion was performed because an " +
+                        "additional marker may be intentional text. Remove the duplicate " +
+                        "marker manually, then try again.",
+                        sourceEncoding,
+                        targetEncoding);
+                }
 
                 if (options.WriteBom)
                 {

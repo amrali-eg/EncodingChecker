@@ -111,6 +111,7 @@ public sealed class ConversionJournalTests : IDisposable
         Assert.Equal(ConversionMetadataStore.ComputeSha256(path), entry.Sha256After);
         Assert.NotEqual(entry.Sha256Before, entry.Sha256After);
         Assert.Equal("jp.txt.bak", entry.BackupPath);
+        Assert.Equal("jp.txt.ecmeta.json", entry.RecoveryMetadataPath);
     }
 
     [Fact]
@@ -307,14 +308,43 @@ public sealed class ConversionJournalTests : IDisposable
 
         Assert.Equal(3, Cli(
             "-BasePath", _root, "-Target", "windows-1252",
-            "-Journal", JournalPath, "-Quiet"));
+            "-Backup", "-Journal", JournalPath, "-Quiet"));
 
         JournalEntry entry = EntryFor("unencodable.txt");
 
         Assert.Equal(ConversionStatus.Failed, entry.Status);
         Assert.Equal(PlannedAction.Convert, entry.PlannedAction);
         Assert.Null(entry.Sha256After);
+        Assert.Equal("unencodable.txt.bak", entry.BackupPath);
+        Assert.Null(entry.RecoveryMetadataPath);
+        Assert.Equal(original, File.ReadAllBytes(path + ".bak"));
         Assert.Equal(original, File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void AnUnsupportedRecordedCodecCannotCrashJournalCreation()
+    {
+        string path = Write("unsupported.txt", "plain ascii", "ascii");
+        var entry = new ConversionReportEntry
+        {
+            FilePath = path,
+            SourceEncoding = "utf-7",
+            TargetEncoding = "utf-8",
+            Result = ConversionRowResult.Error,
+            Action = PlannedAction.Refuse,
+            SourceInterpretation = SourceInterpretation.NotApplicable,
+            ResolvedSourceLabel = "utf-7",
+            ReasonCode = ConversionReasonCodes.UnsupportedSourceEncoding,
+        };
+
+        JournalEntry recorded = Assert.Single(
+            ConversionJournal.FromRun(
+                [entry], _root, "utf-8", targetHasBom: false,
+                backupEnabled: false, explicitSource: null,
+                surface: "Test", startedUtc: DateTime.UtcNow).Entries);
+
+        Assert.Equal(0, recorded.SourceCodePage);
+        Assert.Equal(ConversionStatus.Refused, recorded.Status);
     }
 
     [Fact]

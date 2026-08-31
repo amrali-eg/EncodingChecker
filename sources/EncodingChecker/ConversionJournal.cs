@@ -100,6 +100,9 @@ internal sealed record JournalEntry
 
     /// <summary>Where the original was kept, when it was.</summary>
     public string? BackupPath { get; init; }
+
+    /// <summary>Where independently verifiable recovery metadata was written.</summary>
+    public string? RecoveryMetadataPath { get; init; }
 }
 
 /// <summary>
@@ -115,7 +118,7 @@ internal sealed record JournalEntry
 /// </remarks>
 internal sealed record ConversionJournal
 {
-    internal const int CurrentJournalVersion = 3;
+    internal const int CurrentJournalVersion = 4;
 
     public int JournalVersion { get; init; } = CurrentJournalVersion;
 
@@ -212,29 +215,19 @@ internal sealed record ConversionJournal
             };
 
             // Record the encoding actually used to read the source file.
-            ScanEngine.ParseCharsetLabel(
-                entry.ResolvedSourceLabel ?? entry.EffectiveSourceLabel,
-                out string sourceCharset,
-                out bool sourceHasBom);
+            string sourceLabel = entry.ResolvedSourceLabel ?? entry.EffectiveSourceLabel;
+            ScanEngine.ParseCharsetLabel(sourceLabel, out string sourceCharset, out bool sourceHasBom);
 
             int codePage = 0;
 
-            try
-            {
-                codePage = Encoding.GetEncoding(sourceCharset).CodePage;
-            }
-            catch (ArgumentException)
-            {
-                // Zero means EC could not resolve a code page for the recorded label.
-            }
+            if (TextEncoding.TryResolve(sourceCharset, out Encoding? sourceEncoding))
+                codePage = sourceEncoding!.CodePage;
 
             int? detectedCodePage = ResolveCodePage(entry.DetectedEncodingLabel);
 
-            string backupPath = entry.FilePath + ".bak";
-
             lines.Add(new JournalEntry
             {
-                RelativePath = Path.GetRelativePath(root, entry.FilePath),
+                RelativePath = SafeRelativePath(root, entry.FilePath),
                 // Reuse the plan's hash when available; avoid rereading the source.
                 Sha256Before = entry.JournalSourceSha256
                                ?? entry.ExpectedSourceSha256
@@ -263,11 +256,13 @@ internal sealed record ConversionJournal
                 Reason = string.IsNullOrEmpty(entry.Diagnostic) ? null : entry.Diagnostic,
                 ReasonCode = entry.ReasonCode,
                 BackupPath =
-                    status == ConversionStatus.Converted
-                    && backupEnabled
-                    && File.Exists(backupPath)
-                        ? Path.GetRelativePath(root, backupPath)
-                        : null,
+                    entry.BackupPath is null
+                        ? null
+                        : SafeRelativePath(root, entry.BackupPath),
+                RecoveryMetadataPath =
+                    entry.RecoveryMetadataPath is null
+                        ? null
+                        : SafeRelativePath(root, entry.RecoveryMetadataPath),
             });
         }
 
@@ -292,16 +287,24 @@ internal sealed record ConversionJournal
     /// <summary>The canonical code page for a label, or null when unresolved.</summary>
     private static int? ResolveCodePage(string? label)
     {
-        if (string.IsNullOrWhiteSpace(label))
-            return null;
+        return TextEncoding.TryResolve(label, out Encoding? encoding)
+            ? encoding!.CodePage
+            : null;
+    }
+
+    /// <summary>Returns a journal-safe path even when an entry is malformed.</summary>
+    private static string SafeRelativePath(string root, string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return "(unavailable)";
 
         try
         {
-            return Encoding.GetEncoding(label).CodePage;
+            return Path.GetRelativePath(root, path);
         }
-        catch (ArgumentException)
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
         {
-            return null;
+            return path;
         }
     }
 

@@ -132,6 +132,12 @@ internal sealed class ConversionReportEntry
 
     /// <summary>Stable machine-readable reason for a non-success outcome.</summary>
     internal string? ReasonCode { get; set; }
+
+    /// <summary>The backup created by this run, even if conversion later failed.</summary>
+    internal string? BackupPath { get; set; }
+
+    /// <summary>The recovery sidecar created by this run, when conversion completed.</summary>
+    internal string? RecoveryMetadataPath { get; set; }
 }
 
 /// <summary>Stable reason codes written to reports and journals.</summary>
@@ -145,6 +151,7 @@ internal static class ConversionReasonCodes
     internal const string StrictValidationFailed = nameof(StrictValidationFailed);
     internal const string SourceSnapshotFailed = nameof(SourceSnapshotFailed);
     internal const string BackupFailed = nameof(BackupFailed);
+    internal const string MultipleLeadingByteOrderMarks = nameof(MultipleLeadingByteOrderMarks);
     internal const string ScanFailed = nameof(ScanFailed);
 }
 

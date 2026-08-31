@@ -179,9 +179,7 @@ internal sealed record ConversionPlan
 
             try
             {
-                // A conversion scan captures detection, BOM state, size, and hash from
-                // one read-only snapshot. Preserve that binding in the plan instead of
-                // pairing an earlier detection with bytes read later.
+                // Keep detection and its hash bound to the same source snapshot.
                 hash = entry.ExpectedSourceSha256
                        ?? ConversionMetadataStore.ComputeSha256(entry.FilePath);
                 size = entry.ExpectedSourceSize
@@ -203,14 +201,8 @@ internal sealed record ConversionPlan
 
             int codePage = 0;
 
-            try
-            {
-                codePage = Encoding.GetEncoding(sourceCharset).CodePage;
-            }
-            catch (ArgumentException)
-            {
-                // Zero indicates that no code page could be resolved.
-            }
+            if (TextEncoding.TryResolve(sourceCharset, out Encoding? encoding))
+                codePage = encoding!.CodePage;
 
             files.Add(new PlannedFile
             {
@@ -292,6 +284,26 @@ internal sealed record ConversionPlan
                 return null;
             }
 
+            if (string.IsNullOrWhiteSpace(plan.BaseDirectory) ||
+                string.IsNullOrWhiteSpace(plan.TargetEncoding) ||
+                plan.Files is null)
+            {
+                error = "The plan is missing required conversion information.";
+                return null;
+            }
+
+            foreach (PlannedFile? file in plan.Files)
+            {
+                if (file is null ||
+                    string.IsNullOrWhiteSpace(file.RelativePath) ||
+                    string.IsNullOrWhiteSpace(file.Sha256) ||
+                    string.IsNullOrWhiteSpace(file.SourceEncoding))
+                {
+                    error = "The plan contains an incomplete file entry.";
+                    return null;
+                }
+            }
+
             error = null;
             return plan;
         }
@@ -342,16 +354,40 @@ internal sealed record ConversionPlan
     {
         var stale = new List<string>();
 
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (!TextEncoding.TryResolve(TargetEncoding, out _))
+            stale.Add($"Target encoding '{TargetEncoding}' is not available.");
+
         foreach (PlannedFile file in Files)
         {
-            if (file.Action != PlannedAction.Convert)
-                continue;
-
             string? path = ResolvePath(file);
 
             if (path is null)
             {
                 stale.Add($"{file.RelativePath} (resolves outside the plan's directory)");
+                continue;
+            }
+
+            if (!paths.Add(path))
+            {
+                stale.Add($"{path} (appears more than once in the plan)");
+                continue;
+            }
+
+            Encoding? sourceEncoding = null;
+
+            if (file.Action == PlannedAction.Convert &&
+                !TextEncoding.TryResolve(file.SourceEncoding, out sourceEncoding))
+            {
+                stale.Add($"{path} (source encoding '{file.SourceEncoding}' is not available)");
+                continue;
+            }
+
+            if (file.Action == PlannedAction.Convert &&
+                sourceEncoding!.CodePage != file.SourceCodePage)
+            {
+                stale.Add($"{path} (source codec identity does not match the plan)");
                 continue;
             }
 

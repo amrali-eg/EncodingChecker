@@ -1,6 +1,6 @@
 [![CI](https://github.com/amrali-eg/EncodingChecker/actions/workflows/ci.yml/badge.svg)](https://github.com/amrali-eg/EncodingChecker/actions/workflows/ci.yml)
 
-# EncodingChecker v3.9.0
+# EncodingChecker v3.9.1
 
 EncodingChecker is a Windows tool for finding, checking, and safely converting text-file encodings. Use the GUI for everyday work or the command line for repeatable jobs.
 

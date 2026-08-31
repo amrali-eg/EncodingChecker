@@ -205,7 +205,7 @@ public sealed class EncodingConverterRobustnessTests : IDisposable
         string path = WriteFile("noBomTarget.txt", TestContent.Ascii, Encoding.ASCII);
         byte[] originalBytes = File.ReadAllBytes(path);
 
-        // UTF-7 (and plain ASCII) have no byte-order mark to write.
+        // ASCII has no byte-order mark, so this request is impossible before any I/O.
         ConversionResult result = EncodingConverter.Convert(
             path, path, Encoding.ASCII, Encoding.ASCII, new ConversionOptions { WriteBom = true });
 

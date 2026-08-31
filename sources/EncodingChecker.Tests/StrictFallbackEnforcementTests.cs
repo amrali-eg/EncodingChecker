@@ -3,21 +3,21 @@
 namespace EncodingChecker.Tests;
 
 /// <summary>
-/// Pins the strict-fallback contract at the point where it is easy to lose.
+/// Pins the strict-fallback contract at the point where a seemingly correct change can
+/// silently reintroduce data loss.
 ///
-/// Assigning <see cref="Decoder.Fallback"/> or <see cref="Encoder.Fallback"/> after
-/// <see cref="Encoding.GetDecoder"/>/<see cref="Encoding.GetEncoder"/> compiles, reads as
-/// correct, and does nothing for the encodings that come from
-/// <see cref="CodePagesEncodingProvider"/>: those codecs capture their fallbacks from the
-/// parent <see cref="Encoding"/> when they are created. A build that regressed to that
-/// pattern would silently substitute characters for input its own codec cannot represent,
-/// and the conversion would still be reported as a success - the content digest compares
-/// decoded source against decoded target, so both sides pass through the same lossy
-/// decoder and agree.
+/// Former defect: assigning <see cref="Decoder.Fallback"/> or
+/// <see cref="Encoder.Fallback"/> after <see cref="Encoding.GetDecoder"/> or
+/// <see cref="Encoding.GetEncoder"/> appears correct but does not affect codecs from
+/// <see cref="CodePagesEncodingProvider"/>. Those codecs capture fallback behavior when
+/// their parent <see cref="Encoding"/> is created.
 ///
-/// The first two tests document the platform behaviour the fix exists for, so a future
-/// reader can see that the indirection in MakeStrictEncoding is load-bearing rather than
-/// ceremonial. The rest pin EC's own observable behaviour.
+/// Risk: the old pattern silently substituted characters the codec could not represent.
+/// EC could then report success because its content digest compared a lossy source decode
+/// with an output decoded from that same lossy text.
+///
+/// Protection: the first tests demonstrate the platform behavior; the remaining tests
+/// prove EC constructs strict codecs before it reads or writes data.
 /// </summary>
 public sealed class StrictFallbackEnforcementTests : IDisposable
 {
