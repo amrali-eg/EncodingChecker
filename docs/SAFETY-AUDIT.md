@@ -114,13 +114,9 @@ sha256sum sources/EncodingChecker/bin/Release/net10.0-windows/EncodingChecker.dl
 
 then, in CorpusTesters, `CORPUS_ROOT=<corpora> ./run-all.sh release`. Every run records `ECGitCommit`, `ECGitTreeDirty` and `ECAssemblySha256` in its `run.json`; this was the first run of these corpora with a clean worktree, and three separate builds produced identical counts.
 
-### v3.9.1 and v3.9.2 — patches, not re-audited
+### v3.9.1 — `8ffd79bb9d463fbe345e93efc2821250cb6f50c0`, not re-audited
 
-Both are defect-fix releases. **Neither was measured against the four corpora.** The figures above describe the v3.9.0 build and are not evidence about either patch. The conversion engine — strict decoding, strict encoding, exact text verification, atomic installation, and the legacy-source policy — is unchanged across both, so v3.9.0's corpus evidence continues to describe that path. It says nothing about the plan, journal, recovery-metadata, or scan-coverage paths these patches changed, which are covered by regression tests rather than by corpus measurement.
-
-Neither section quotes an assembly hash. No audited build exists for either, and a locally compiled hash would not identify what users download; the published artifacts' digests are on their GitHub release pages.
-
-#### v3.9.1 — `8ffd79bb9d463fbe345e93efc2821250cb6f50c0`
+A defect-fix release. **It was not measured against the four corpora**, and no audited build of it exists, so no assembly hash is quoted; the published artifacts' digests are on its GitHub release page. The v3.9.0 figures above are not evidence about this patch.
 
 Four defects, each verified to no longer reproduce against a build of the tagged commit, with the full suite passing 459/459:
 
@@ -135,7 +131,39 @@ The first two shared a cause worth recording: `ConversionJournal.FromRun` runs a
 
 **A provenance correction.** A fifth reported defect — a backup left behind when a repeated-BOM refusal aborts the conversion — was investigated as v3.9.0 behaviour and was not. `MultipleLeadingByteOrderMarks` does not exist in the v3.9.0 tag; the reproduction ran against a working-tree build that already carried unreleased work, and the binary was never checked against the tag. The defect was real in that unreleased state and is fixed, but it was never reachable in a released build, and the earlier report describing it as shipped behaviour was wrong.
 
-#### v3.9.2 — `bf6065c15fd82c58e634cb53b73c97939c4d8e94`
+### v3.9.2 audited build
+
+v3.9.2 was measured against the same four corpora as v3.9.0, from a clean checkout of the commit it was tagged at.
+
+```
+commit    bf6065c15fd82c58e634cb53b73c97939c4d8e94   (annotated tag v3.9.2)
+worktree  clean
+platform  .NET 10 - Windows 11 10.0.26200
+assembly  EncodingChecker.dll
+          1622eb56d5e008875530e677c66c8e88f63cd7f1449f4ac772227548a86dbea0
+run       rel392, compared against rel390 in audit/reports/rel390-vs-rel392/
+```
+
+That digest identifies the managed assembly the audit loaded and exercised. It is **not** the digest of the apphost `EncodingChecker.exe`, and not of either release ZIP; GitHub publishes those separately.
+
+**Across all 5,078 files, not one changed outcome from v3.9.0.**
+
+| Metric | v3.9.0 | v3.9.2 |
+|---|---|---|
+| Detection accuracy | 4640/4646 (99.87%) | 4640/4646 (99.87%) |
+| Strict-decoding correctness | 4695/4695 (100.00%) | 4695/4695 (100.00%) |
+| Codec conformance | 4592/4695 (97.81%) | 4592/4695 (97.81%) |
+| End-to-end text preservation | 4520/4623 (97.77%) | 4520/4623 (97.77%) |
+
+`compare.py` joins per file rather than comparing totals, and reported `changed=0 improved=0 regressed=0 lateral=0` with its distribution alarm armed at one percentage point. The outcome table matches row for row, including the 103 mapping differences and the 297 unscored files, and all four corpora recorded zero implementation defects, zero throws, and zero backup-integrity failures. Both runs covered four complete corpora and the same 5,207 rows; that was checked before the figures were read.
+
+**What the audit establishes here.** That two patches touching the plan, journal, recovery-metadata and scan-coverage paths did not perturb the conversion engine — the claim the release notes make, now measured rather than asserted.
+
+**What it does not.** The corpus exercises direct conversion with an explicit source, so it does not touch the plan validation, `-Include` rejection, coverage counting, or `Prepared`/`Completed` protocol that this patch added. `changed=0` is evidence of no regression, not evidence that the new behaviour works; that rests on the regression suite.
+
+The caveats stated for v3.9.0 apply unchanged: 297 files remain unscored in both directions, and the 103 mapping differences changed exact Unicode scalars.
+
+#### What changed in v3.9.2
 
 Closes two paths where a run could describe more than it had established, and hardens the recovery record:
 
@@ -147,7 +175,7 @@ Closes two paths where a run could describe more than it had established, and ha
 
 Verified on the tagged commit: CI and the shared-detector parity job both pass, the full suite passes 485/485 with zero warnings, and the three-repository detector drift check reports no drift. The drift check proves the copies agree, not that they are correct.
 
-**What is not covered.** The `Prepared`/`Completed` protocol has no restore command to exercise it, so its recovery value rests on the record being readable by hand rather than on a tested recovery path. `ExpectedOutputSha256` is recorded but nothing in EC consumes it yet.
+The `Prepared`/`Completed` protocol still has no restore command to exercise it, so its recovery value rests on the record being readable by hand rather than on a tested recovery path, and `ExpectedOutputSha256` is recorded but nothing in EC consumes it yet.
 
 ## Known limits
 
