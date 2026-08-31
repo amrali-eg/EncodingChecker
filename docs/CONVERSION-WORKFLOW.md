@@ -35,15 +35,20 @@ disable strict decoding, output verification, backup verification, or safe insta
 flowchart LR
     A[Scan files] --> B[Decide source interpretation]
     B --> C[Build review plan]
-    C --> D[User confirms]
-    D --> E[Strict source decode]
-    E --> F[Strict target encode]
-    F --> G[Verify identical text]
-    G --> H[Backup and metadata]
-    H --> I[Install verified output]
+    C --> D[Conversion is confirmed or applied]
+    D --> E[Create backup if enabled]
+    E --> F[Strict source decode]
+    F --> G[Strict target encode]
+    G --> H[Verify identical text]
+    H --> I[If backed up: verify backup and write Prepared metadata]
+    I --> J[Install verified output]
+    J --> K[If backed up: mark metadata Completed]
 ```
 
-Every step after confirmation must succeed. If decoding, encoding, verification, backup creation, or installation fails, EC leaves that source file unchanged.
+Every step after confirmation must succeed. If decoding, encoding, verification, backup
+creation, or installation fails, EC leaves that source file unchanged. Because the backup
+is created first, a later refusal or failure can leave a `.bak` file beside the unchanged
+source. Recovery metadata is written only after the converted output and backup both verify.
 
 ## Two ways to start a conversion
 
@@ -51,8 +56,9 @@ EC offers two workflows, but they do not use different conversion engines. Both 
 same source-encoding policy, strict codecs, output verification, backup checks, and safe
 file installation.
 
-**Most users should use direct conversion. Saved plan/apply is an optional advanced
-workflow for delayed approval or repeatable automation.**
+**Use direct conversion for ordinary interactive work. For batch jobs or automation,
+saved plan/apply is the safest workflow because it binds approval to the exact files and
+settings that were reviewed.**
 
 | Workflow | Best for | What happens |
 | --- | --- | --- |
