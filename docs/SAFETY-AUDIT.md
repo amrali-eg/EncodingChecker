@@ -114,6 +114,41 @@ sha256sum sources/EncodingChecker/bin/Release/net10.0-windows/EncodingChecker.dl
 
 then, in CorpusTesters, `CORPUS_ROOT=<corpora> ./run-all.sh release`. Every run records `ECGitCommit`, `ECGitTreeDirty` and `ECAssemblySha256` in its `run.json`; this was the first run of these corpora with a clean worktree, and three separate builds produced identical counts.
 
+### v3.9.1 and v3.9.2 — patches, not re-audited
+
+Both are defect-fix releases. **Neither was measured against the four corpora.** The figures above describe the v3.9.0 build and are not evidence about either patch. The conversion engine — strict decoding, strict encoding, exact text verification, atomic installation, and the legacy-source policy — is unchanged across both, so v3.9.0's corpus evidence continues to describe that path. It says nothing about the plan, journal, recovery-metadata, or scan-coverage paths these patches changed, which are covered by regression tests rather than by corpus measurement.
+
+Neither section quotes an assembly hash. No audited build exists for either, and a locally compiled hash would not identify what users download; the published artifacts' digests are on their GitHub release pages.
+
+#### v3.9.1 — `8ffd79bb9d463fbe345e93efc2821250cb6f50c0`
+
+Four defects, each verified to no longer reproduce against a build of the tagged commit, with the full suite passing 459/459:
+
+| Defect in v3.9.0 | v3.9.0 behaviour | v3.9.1 behaviour |
+|---|---|---|
+| Saved plan with a path escaping its recorded root | Unhandled `ArgumentNullException`, exit 127, **after** files were converted; no journal written | Refused at plan load, exit 3, nothing written |
+| Saved plan naming a runtime-unsupported codec | Unhandled `NotSupportedException`, exit 127, same point | Refused at plan load, exit 3, named in the message |
+| One unreadable file in a scanned folder | No plan produced for any file, exit 3 | Plan written; the unreadable file appears as an explicit `Refuse` / `ScanFailed` |
+| Stale-file check | Inspected only files planned for conversion, contradicting its own contract | Inspects every planned file |
+
+The first two shared a cause worth recording: `ConversionJournal.FromRun` runs after the conversion pass, so an exception there destroyed the record of work already completed. The fix rejects the malformed plan before any conversion begins rather than making the journal tolerant — the run that should not have happened no longer happens, instead of being accurately recorded.
+
+**A provenance correction.** A fifth reported defect — a backup left behind when a repeated-BOM refusal aborts the conversion — was investigated as v3.9.0 behaviour and was not. `MultipleLeadingByteOrderMarks` does not exist in the v3.9.0 tag; the reproduction ran against a working-tree build that already carried unreleased work, and the binary was never checked against the tag. The defect was real in that unreleased state and is fixed, but it was never reachable in a released build, and the earlier report describing it as shipped behaviour was wrong.
+
+#### v3.9.2 — `bf6065c15fd82c58e634cb53b73c97939c4d8e94`
+
+Closes two paths where a run could describe more than it had established, and hardens the recovery record:
+
+- A `-Include` value parsing to no usable pattern is rejected rather than silently meaning every file. This is a behaviour change at the CLI boundary: `-Include ""` now exits 1 where it previously ran.
+- Files and folders skipped for hidden, system, or reparse-point attributes are counted and reported, so a clean result is distinguishable from files never opened. The counts are informational and do not change the exit code.
+- The sidecar is written through a verified temporary file and atomically replaced, and records an installation state — `Prepared` before installation, `Completed` after — with the expected output hash, so a run interrupted between the two can be resolved by hashing the current file.
+- An explicit source that disagrees with a BOM-less UTF-16/32 estimate is now recorded and displayed as `ExplicitSourceDiffersFromBomlessUnicodeEstimate` instead of converting silently. The user's choice still wins, as designed; a BOM-confirmed conflict remains a refusal.
+- Saved plans preserve automatic-detection provenance. **The plan schema is version 4**; plans written by an earlier release are rejected and must be regenerated.
+
+Verified on the tagged commit: CI and the shared-detector parity job both pass, the full suite passes 485/485 with zero warnings, and the three-repository detector drift check reports no drift. The drift check proves the copies agree, not that they are correct.
+
+**What is not covered.** The `Prepared`/`Completed` protocol has no restore command to exercise it, so its recovery value rests on the record being readable by hand rather than on a tested recovery path. `ExpectedOutputSha256` is recorded but nothing in EC consumes it yet.
+
 ## Known limits
 
 - No detector can recover an author's historical legacy encoding when the same bytes admit multiple plausible readings. EC refuses automatic legacy conversion instead of guessing.
