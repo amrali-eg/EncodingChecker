@@ -111,7 +111,29 @@ sha256sum sources/EncodingChecker/bin/Release/net10.0-windows/EncodingChecker.dl
 
 then, in CorpusTesters, `CORPUS_ROOT=<corpora> ./run-all.sh release`. Every run records `ECGitCommit`, `ECGitTreeDirty` and `ECAssemblySha256` in its `run.json`; this was the first run of these corpora with a clean worktree, and three separate builds produced identical counts.
 
+### v3.9.1 — defect-fix patch, not re-audited
+
+v3.9.1 (`8ffd79bb9d463fbe345e93efc2821250cb6f50c0`) hardens saved-plan validation, journal construction, and refusal ordering. **The four-corpus audit was not re-run against it.** The figures above describe the v3.9.0 build and are not evidence about this one.
+
+What was verified, and only this: the four defects below no longer reproduce, and the full suite passes 459/459 with 0 warnings, against a local Release build of the tagged commit.
+
+| Defect in v3.9.0 | v3.9.0 behaviour | v3.9.1 behaviour |
+|---|---|---|
+| Saved plan with a path escaping its recorded root | Unhandled `ArgumentNullException`, exit 127, **after** files were converted; no journal written | Refused at plan load, exit 3, nothing written |
+| Saved plan naming a runtime-unsupported codec | Unhandled `NotSupportedException`, exit 127, same point | Refused at plan load, exit 3, named in the message |
+| One unreadable file in a scanned folder | No plan produced for any file, exit 3 | Plan written; the unreadable file appears as an explicit `Refuse` / `ScanFailed` |
+| Stale-file check | Inspected only files planned for conversion, contradicting its own contract | Inspects every planned file |
+
+The first two shared a cause worth recording: `ConversionJournal.FromRun` runs after the conversion pass, so an exception there destroyed the record of work already completed. v3.9.1 fixes this by rejecting the malformed plan before any conversion begins, rather than by making the journal tolerant — the run that should not have happened now does not happen, instead of being accurately recorded.
+
+**A provenance correction.** A fifth reported defect — a backup left behind when a repeated-BOM refusal aborts the conversion — was investigated as a v3.9.0 defect and was not one. `MultipleLeadingByteOrderMarks` does not exist in the v3.9.0 tag; the reproduction ran against a working-tree build that already carried unreleased work. The defect was real in that unreleased state and is fixed in v3.9.1, where a repeated-BOM file is refused before any backup is created and the run exits 5. It was never reachable in a released build, and the earlier report that described it as shipped behaviour was wrong.
+
+The local build used for this verification hashes to `241adb83a7a3d74fb3dee312f1571e49114be1f5b154811fc61391c5cb159a3c`. That identifies what was tested here; it has **not** been compared against the published v3.9.1 artifacts, so it is not a download digest and should not be quoted as one.
+
+The strict streaming converter, atomic installation, and the legacy-source policy are unchanged from v3.9.0, so that release's corpus evidence continues to describe the conversion path. It says nothing about the plan-validation and journal paths this patch changed, which are covered by regression tests rather than by corpus measurement.
+
 ## Known limits
+
 
 - No detector can recover an author's historical legacy encoding when the same bytes admit multiple plausible readings. EC refuses automatic legacy conversion instead of guessing.
 - Some named legacy codecs have legitimate mapping/profile differences across implementations. An explicit source choice specifies the .NET profile EC will use; strict conversion still verifies that profile's text round trip.
