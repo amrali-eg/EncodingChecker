@@ -50,6 +50,12 @@ internal sealed class ScanDirectoryOptions
     /// <summary>Full paths to exclude regardless of pattern matches.</summary>
     internal IReadOnlyCollection<string>? ExcludedFullPaths { get; init; }
 
+    /// <summary>
+    /// Receives counts of files the scan never examined. Supply one to report
+    /// coverage; the scan behaves identically either way.
+    /// </summary>
+    internal DirectoryTraversal.TraversalCounters? Counters { get; init; }
+
     internal ScanAction Action { get; init; }
 
     /// <summary>Accepted charset labels for validation.</summary>
@@ -128,7 +134,8 @@ internal static class ScanEngine
             includePatterns,
             excludePatterns,
             options.ExcludedFullPaths,
-            onWarning);
+            onWarning,
+            options.Counters);
 
         RunParallel(
             files,
@@ -936,7 +943,8 @@ internal static class ScanEngine
                 path, FileMode.Open, FileAccess.Read, FileShare.Read,
                 prefix.Length, FileOptions.SequentialScan);
 
-            int read = stream.Read(prefix, 0, prefix.Length);
+            int read = stream.ReadAtLeast(
+                prefix, prefix.Length, throwOnEndOfStream: false);
 
             return read == prefix.Length
                    && prefix.AsSpan(0, preamble.Length).SequenceEqual(preamble)

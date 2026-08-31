@@ -1,6 +1,6 @@
 [![CI](https://github.com/amrali-eg/EncodingChecker/actions/workflows/ci.yml/badge.svg)](https://github.com/amrali-eg/EncodingChecker/actions/workflows/ci.yml)
 
-# EncodingChecker v3.9.1
+# EncodingChecker v3.9.2
 
 EncodingChecker is a Windows tool for finding, checking, and safely converting text-file encodings. Use the GUI for everyday work or the command line for repeatable jobs.
 
@@ -100,7 +100,7 @@ EncodingChecker.exe -BasePath "D:\Share" -Target utf-8 -MaxParallelism 2
 | `-MaxParallelism <N>` | Maximum simultaneous files; default is `min(CPU count, 4)`. |
 | `-FailOnChanges` | Return exit code `2` if files need conversion or fail validation. Useful in CI. |
 
-Patterns without a path separator match filenames at any depth, such as `*.txt`. Patterns containing `/` or `\` match paths relative to `-BasePath`, such as `src/*.cs`. Build and metadata folders including `.git`, `bin`, `obj`, and `node_modules` are skipped automatically.
+Patterns without a path separator match filenames at any depth, such as `*.txt`. Patterns containing `/` or `\` match paths relative to `-BasePath`, such as `src/*.cs`. Build and metadata folders including `.git`, `bin`, `obj`, and `node_modules` are skipped automatically. Hidden files, system files, and shortcuts to files elsewhere are left alone as well. If a scan comes across any of these, it tells you how many it passed over, so a clean result never hides files EC did not open.
 
 Run `EncodingChecker.exe -?` for the same reference from the executable. The help aliases are `-?`, `/?`, `-h`, `/h`, and `--help`. Exit codes: `0` completed, `1` invalid command, `2` `-FailOnChanges`, `3` processing/plan/report failure, `4` cancelled, `5` conversion safely refused.
 

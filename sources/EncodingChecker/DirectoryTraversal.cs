@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 
 namespace EncodingChecker;
 
@@ -39,6 +40,38 @@ internal static class DirectoryTraversal
         IgnoreInaccessible = false,
     };
 
+    // Files are enumerated without an attribute filter so the excluded ones can be
+    // counted rather than vanishing. AttributesToSkip drops them inside the OS
+    // enumeration, which left a scan unable to distinguish "this folder is clean"
+    // from "this folder holds files I never looked at". The same attributes are
+    // still excluded below; they are now counted first.
+    private static readonly EnumerationOptions FileWalkOptions = new()
+    {
+        AttributesToSkip = FileAttributes.None,
+        IgnoreInaccessible = false,
+    };
+
+    private const FileAttributes ExcludedFileAttributes =
+        FileAttributes.Hidden | FileAttributes.System | FileAttributes.ReparsePoint;
+
+    /// <summary>
+    /// Counts files a scan never examined, so a report can say so.
+    /// </summary>
+    /// <remarks>
+    /// Incremented while <see cref="Parallel.ForEach"/> pulls from the traversal, so
+    /// the increments are interlocked rather than assumed to be serialized.
+    /// </remarks>
+    internal sealed class TraversalCounters
+    {
+        private int _excludedByAttribute;
+
+        /// <summary>Files skipped for being hidden, system, or reparse points.</summary>
+        internal int ExcludedByAttribute => Volatile.Read(ref _excludedByAttribute);
+
+        internal void CountExcludedByAttribute() =>
+            Interlocked.Increment(ref _excludedByAttribute);
+    }
+
     /// <summary>
     /// Files always excluded from scans, regardless of include patterns.
     /// </summary>
@@ -73,7 +106,8 @@ internal static class DirectoryTraversal
         List<Regex> includePatterns,
         List<Regex> excludePatterns,
         IReadOnlyCollection<string>? excludedFullPaths = null,
-        Action<string>? onWarning = null)
+        Action<string>? onWarning = null,
+        TraversalCounters? counters = null)
     {
         var pending = new Stack<string>();
         pending.Push(baseDirectory);
@@ -82,17 +116,18 @@ internal static class DirectoryTraversal
         {
             string dir = pending.Pop();
 
-            List<string> files;
+            List<FileInfo> files;
 
             try
             {
                 // Enumerate inside the try so directory access failures can be reported.
+                // FileInfo carries the attributes the enumeration already returned, so
+                // the exclusion test below costs no extra call per file.
                 files =
                 [
-                    .. Directory.EnumerateFiles(
-                        dir,
+                    .. new DirectoryInfo(dir).EnumerateFiles(
                         "*",
-                        DirectoryWalkOptions)
+                        FileWalkOptions)
                 ];
             }
             catch (Exception ex) when (
@@ -104,9 +139,19 @@ internal static class DirectoryTraversal
                 continue;
             }
 
-            foreach (string file in files)
+            foreach (FileInfo info in files)
             {
-                string fileName = Path.GetFileName(file);
+                string file = info.FullName;
+                string fileName = info.Name;
+
+                // Counted, not silently dropped: the caller reports how many files
+                // the scan never examined so a clean result cannot be mistaken for
+                // complete coverage.
+                if ((info.Attributes & ExcludedFileAttributes) != 0)
+                {
+                    counters?.CountExcludedByAttribute();
+                    continue;
+                }
 
                 if (IsAlwaysExcludedFile(fileName))
                     continue;

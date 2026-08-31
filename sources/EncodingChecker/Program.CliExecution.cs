@@ -220,8 +220,13 @@ internal static partial class Program
                 out targetWriteBom);
         }
 
+        // Counts files the scan never examined so the run can say so rather than
+        // letting a clean result stand in for complete coverage.
+        var traversalCounters = new DirectoryTraversal.TraversalCounters();
+
         var scanOptions = new ScanDirectoryOptions
         {
+            Counters = traversalCounters,
             SourceCharset = options.From,
             BaseDirectory = options.BasePath!,
             IncludeSubdirectories = true,
@@ -296,6 +301,16 @@ internal static partial class Program
         else
         {
             ConversionReport.WriteCsv(entries, Console.Out);
+        }
+
+        // Coverage, not a result: a caller reading only the rows cannot tell a clean
+        // folder from one holding files the scan never opened. Written to stderr so it
+        // survives -Quiet and stays out of the machine-readable report on stdout.
+        if (traversalCounters.ExcludedByAttribute > 0)
+        {
+            Console.Error.WriteLine(
+                $"{traversalCounters.ExcludedByAttribute} file(s) not examined "
+                + "(hidden, system, or reparse point).");
         }
 
         if (options.Verbose)

@@ -45,6 +45,7 @@ internal static partial class Program
                     }
 
                     // Repeated options accumulate patterns.
+                    options.IncludeSpecified = true;
                     options.Include.AddRange(SplitCommaList(include));
                     break;
 
@@ -59,6 +60,7 @@ internal static partial class Program
                     }
 
                     // Repeated options accumulate patterns.
+                    options.ExcludeSpecified = true;
                     options.Exclude.AddRange(SplitCommaList(exclude));
                     break;
 
@@ -230,6 +232,24 @@ internal static partial class Program
         CliOptions options,
         [NotNullWhen(false)] out string? error)
     {
+        // A filter that fails to parse must not widen the scan. -Include "" and
+        // -Include ",,," both leave no usable pattern, which would otherwise mean
+        // every file - the opposite of what the caller asked for, and dangerous
+        // when the value came from an unset variable in a script.
+        if (options.IncludeSpecified && options.Include.Count == 0)
+        {
+            error = "-Include was given but contains no usable pattern. Omit "
+                    + "-Include to process every file.";
+            return false;
+        }
+
+        if (options.ExcludeSpecified && options.Exclude.Count == 0)
+        {
+            error = "-Exclude was given but contains no usable pattern. Omit "
+                    + "-Exclude to process every file.";
+            return false;
+        }
+
         if (!string.IsNullOrWhiteSpace(options.PlanPath) &&
             !string.IsNullOrWhiteSpace(options.ApplyPath))
         {

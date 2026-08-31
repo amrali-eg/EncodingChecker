@@ -175,16 +175,25 @@ public partial class MainForm : Form
     {
         if (_actionWorker.IsBusy)
         {
-            // Let the worker finish its cancellation path before closing.
-            e.Cancel = true;
-
             if (!_closeRequested)
             {
+                // Let the worker finish its cancellation path before closing.
+                e.Cancel = true;
                 _closeRequested = true;
                 _actionCancellation?.Cancel();
+                return;
             }
 
-            return;
+            // Cancellation is cooperative, so a run blocked on unresponsive storage
+            // would otherwise leave the window impossible to close. A second request
+            // closes anyway: each file is installed atomically only after its output
+            // is verified, so abandoning a run leaves finished files converted and the
+            // one in flight untouched.
+            if (!ConfirmCloseDuringRun())
+            {
+                e.Cancel = true;
+                return;
+            }
         }
 
         SaveSettings();
@@ -414,6 +423,21 @@ public partial class MainForm : Form
 
         actionStatus.Text = statusMessage;
     }
+
+    /// <summary>
+    /// Asks whether to close while a run that ignored cancellation is still active.
+    /// </summary>
+    private bool ConfirmCloseDuringRun() =>
+        MessageBox.Show(
+            this,
+            "This run has not stopped yet. Closing now abandons it.\r\n\r\n"
+            + "Files already converted stay converted, and the file being written "
+            + "is left unchanged, but no report or journal will be saved.\r\n\r\n"
+            + "Close anyway?",
+            @"Close while running",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button2) == DialogResult.Yes;
 
     private void ShowWarning(
         string message,

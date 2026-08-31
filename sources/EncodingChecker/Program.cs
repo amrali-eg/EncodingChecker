@@ -93,6 +93,13 @@ internal static partial class Program
         internal string? BasePath;
         internal List<string> Include = [];
         internal List<string> Exclude = [];
+
+        // A pattern list that parses to nothing is not the same as no list at all:
+        // an empty -Include would silently widen the scan to every file. Record
+        // that the option was supplied so validation can reject the degenerate form.
+        internal bool IncludeSpecified;
+        internal bool ExcludeSpecified;
+
         internal string? Target;
         internal string? From;
         internal string? PlanPath;
@@ -110,7 +117,7 @@ internal static partial class Program
     }
 
     private const string UsageText = """
-        EncodingChecker v3.9.1
+        EncodingChecker v3.9.2
 
         Common commands:
 
@@ -191,7 +198,10 @@ internal static partial class Program
             EncodingChecker.exe -BasePath "D:\Share" -Target utf-8 -MaxParallelism 2
 
         Directories named .git, .svn, .hg, .vs, .idea, bin, obj, node_modules,
-        packages, dist, build, and target are always skipped.
+        packages, dist, build, and target are always skipped. Hidden files,
+        system files, and reparse points are not examined; when any are found
+        their count is reported on stderr so a clean result is not mistaken for
+        complete coverage.
 
         Help: -?, /?, -h, /h, or --help.
 
