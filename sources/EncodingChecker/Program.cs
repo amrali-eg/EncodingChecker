@@ -127,6 +127,9 @@ internal static partial class Program
           Review that plan, then apply exactly it:
             EncodingChecker.exe -Apply plan.json
 
+          Convert a folder directly, keeping each original:
+            EncodingChecker.exe -BasePath "C:\Files" -Target utf-8 -Backup
+
           Convert files whose original legacy encoding you know:
             EncodingChecker.exe -BasePath "C:\Files" -Target utf-8 -From windows-1252 -Backup
 
