@@ -21,6 +21,7 @@ public partial class MainForm : Form
         internal bool IncludeSubdirectories;
         internal required string FileMasks;
         internal required List<string> ValidCharsets;
+        internal required DirectoryTraversal.TraversalCounters Counters;
         internal CancellationToken CancellationToken;
     }
 
@@ -71,6 +72,9 @@ public partial class MainForm : Form
 
     // Shared with the completion handler so it can report how the run ended.
     private ConvertWorkerArgs? _convertArgs;
+
+    // The completed scan's coverage is shown with its result count.
+    private DirectoryTraversal.TraversalCounters? _scanCounters;
 
     // Indices into imgsResults (see SetKeyName calls in MainForm.Designer.cs).
     // Reuses the existing Failed and Warning icons; Warning marks preview rows.
@@ -175,16 +179,25 @@ public partial class MainForm : Form
     {
         if (_actionWorker.IsBusy)
         {
-            // Let the worker finish its cancellation path before closing.
-            e.Cancel = true;
-
             if (!_closeRequested)
             {
+                // Let the worker finish its cancellation path before closing.
+                e.Cancel = true;
                 _closeRequested = true;
                 _actionCancellation?.Cancel();
+                return;
             }
 
-            return;
+            // Cancellation is cooperative, so a run blocked on unresponsive storage
+            // would otherwise leave the window impossible to close. A second request
+            // closes anyway: each file is installed atomically only after its output
+            // is verified, so abandoning a run leaves finished files converted and the
+            // one in flight untouched.
+            if (!ConfirmCloseDuringRun())
+            {
+                e.Cancel = true;
+                return;
+            }
         }
 
         SaveSettings();
@@ -414,6 +427,21 @@ public partial class MainForm : Form
 
         actionStatus.Text = statusMessage;
     }
+
+    /// <summary>
+    /// Asks whether to close while a run that ignored cancellation is still active.
+    /// </summary>
+    private bool ConfirmCloseDuringRun() =>
+        MessageBox.Show(
+            this,
+            "This run has not stopped yet. Closing now abandons it.\r\n\r\n"
+            + "Files already completed stay converted. A file currently being installed "
+            + "may need to be checked afterward, and no report or journal will be saved.\r\n\r\n"
+            + "Close anyway?",
+            @"Close while running",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button2) == DialogResult.Yes;
 
     private void ShowWarning(
         string message,

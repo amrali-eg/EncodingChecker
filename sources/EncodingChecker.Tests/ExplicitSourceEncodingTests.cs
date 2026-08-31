@@ -146,6 +146,25 @@ public sealed class ExplicitSourceEncodingTests : IDisposable
     }
 
     [Fact]
+    public void ExplicitSource_DifferingFromBomlessUtf16Estimate_ConvertsWithWarning()
+    {
+        byte[] original = new UnicodeEncoding(bigEndian: true, byteOrderMark: false)
+            .GetBytes(string.Concat(Enumerable.Repeat("Hello, World! ", 40)));
+        Write("bomless-utf16.txt", original);
+
+        ConversionReportEntry entry = Assert.Single(Scan(from: "windows-1252"));
+
+        Assert.Equal(ConversionRowResult.Converted, entry.Result);
+        Assert.Equal("utf-16BE", entry.DetectedEncodingLabel);
+        Assert.False(entry.DetectedEncodingHasBom);
+        Assert.Equal(
+            ConversionReasonCodes.ExplicitSourceDiffersFromBomlessUnicodeEstimate,
+            entry.ReasonCode);
+        Assert.Contains("BOM-less utf-16BE", entry.Diagnostic);
+        Assert.Contains("you selected windows-1252", entry.Diagnostic);
+    }
+
+    [Fact]
     public void ExplicitShiftJisSource_StillConvertsShiftJisText()
     {
         const string text = "こんにちは世界。日本語のテキストです。";

@@ -20,14 +20,17 @@ The source is not rewritten in place. File attributes and timestamps are applied
 
 Encoding identification and text preservation are different questions. A sequence of legacy bytes often cannot prove which historical single-byte code page produced it.
 
-EC therefore has a simple policy:
+EC therefore has a simple policy. For a file that needs conversion:
 
-| Source interpretation | Automatic conversion |
+| Source interpretation | EC's action |
 | --- | --- |
-| Unicode or ASCII | Allowed |
-| Legacy codec supplied explicitly by the user | Allowed, subject to all safety checks; rejected if it conflicts with a fully validated Unicode reading |
-| Legacy codec detected automatically | Refused; choose the source codec first |
-| Unknown or unreadable source | Not converted |
+| Unicode or ASCII detected automatically | Convert if needed |
+| Legacy codec selected explicitly by the user | Convert if needed, subject to every safety check; refuse if the choice conflicts with fully validated UTF-8 or BOM-confirmed UTF-16/32 |
+| Legacy codec detected automatically | Refuse conversion until you choose or confirm the source codec |
+| Unknown or unreadable source | Do not convert |
+
+A file that already matches the target encoding and BOM is reported as **Unchanged** and
+is not decoded or rewritten. No source choice is needed because no conversion occurs.
 
 `-From` and the GUI source chooser replace detection only. They do not bypass strict decoding, output verification, backup verification, or atomic installation.
 
@@ -39,7 +42,7 @@ EC therefore has a simple policy:
 
 The GUI uses the same policy and plan model. It displays a review before writing, and a changed source while that review is open invalidates the run.
 
-With backups enabled, each conversion has a portable `<file>.ecmeta.json` sidecar. The sidecar records the source codec actually used, whether it was detected or explicitly selected, source and backup hashes, target/BOM policy, conversion timestamp, and version. The backup and sidecar provide independently verifiable recovery metadata; EC does not currently provide a restore command.
+With backups enabled, each conversion has a portable `<file>.ecmeta.json` sidecar. The sidecar records the source codec actually used, whether it was detected or explicitly selected, source and backup hashes, the expected converted-file hash, target/BOM policy, preparation state, timestamp, and version. It is written as `Prepared` before installation and changed to `Completed` only after installation succeeds. If a run stops between those steps, the current file's hash shows whether it is still the original or the verified output. The backup and sidecar provide independently verifiable recovery metadata; EC does not currently provide a restore command.
 
 `-Journal` provides the batch-level record: EC's detected source, the source codec actually selected, whether that selection was explicit, any canonical-code-page disagreement between the two, the policy decision, planned action, actual outcome, stable reason code, diagnostic, and before/after hashes for every file—including skipped and refused ones. The GUI exports the immutable journal returned by the completed run rather than reconstructing history from mutable controls.
 

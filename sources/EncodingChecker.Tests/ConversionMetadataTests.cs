@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -67,7 +69,11 @@ public sealed class ConversionMetadataTests : IDisposable
         var metadata = JsonSerializer.Deserialize<ConversionMetadata>(
             File.ReadAllText(metadataPath))!;
 
-        Assert.Equal(2, metadata.MetadataVersion);
+        Assert.Equal(3, metadata.MetadataVersion);
+        Assert.Equal(ConversionInstallationState.Completed, metadata.InstallationState);
+        Assert.Equal(
+            ConversionMetadataStore.ComputeSha256(path),
+            metadata.ExpectedOutputSha256);
 
         // The recovery key is the codec actually used. This conversion used an
         // explicit source, so it deliberately has no detector provenance.
@@ -163,6 +169,102 @@ public sealed class ConversionMetadataTests : IDisposable
 
         Assert.Contains("does not match", ConversionMetadataStore.ValidateRecoveryHashes(
             hash, new string('b', 64), "example.txt.bak"));
+    }
+
+    [Fact]
+    public void FailedInstallationLeavesATruthfulPreparedRecord()
+    {
+        const string text = "café";
+        string path = Path.Combine(_root, "locked.txt");
+        byte[] original = Encoding.GetEncoding("windows-1252").GetBytes(text);
+        File.WriteAllBytes(path, original);
+
+        // Allow reads and backup creation but deny replacement. This reaches the real
+        // failure window after the sidecar is prepared and before output installation.
+        using FileStream locked = new(
+            path, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+        var entries = new ConcurrentBag<ConversionReportEntry>();
+
+        ScanEngine.ScanDirectory(
+            new ScanDirectoryOptions
+            {
+                BaseDirectory = _root,
+                IncludeSubdirectories = true,
+                IncludePatterns = ["locked.txt"],
+                Action = ScanAction.Convert,
+                SourceCharset = "windows-1252",
+                TargetCharset = "utf-8",
+                TargetWriteBom = false,
+                Backup = true,
+            },
+            entries.Add,
+            CancellationToken.None);
+
+        ConversionReportEntry entry = Assert.Single(entries);
+        Assert.Equal(ConversionRowResult.Error, entry.Result);
+        Assert.Equal(original, File.ReadAllBytes(path));
+
+        var metadata = JsonSerializer.Deserialize<ConversionMetadata>(
+            File.ReadAllText(ConversionMetadataStore.MetadataPathFor(path)))!;
+
+        Assert.Equal(ConversionInstallationState.Prepared, metadata.InstallationState);
+        Assert.Equal(metadata.OriginalSha256, ConversionMetadataStore.ComputeSha256(path));
+        Assert.Equal(
+            System.Convert.ToHexStringLower(
+                SHA256.HashData(new UTF8Encoding(false).GetBytes(text))),
+            metadata.ExpectedOutputSha256);
+        Assert.NotEqual(metadata.OriginalSha256, metadata.ExpectedOutputSha256);
+    }
+
+    [Fact]
+    public void FailedSidecarUpdatePreservesThePreviousValidRecord()
+    {
+        const string text = "café";
+        string path = Path.Combine(_root, "sidecar-locked.txt");
+        File.WriteAllBytes(path, Encoding.GetEncoding("windows-1252").GetBytes(text));
+
+        var entries = new ConcurrentBag<ConversionReportEntry>();
+
+        ScanEngine.ScanDirectory(
+            new ScanDirectoryOptions
+            {
+                BaseDirectory = _root,
+                IncludeSubdirectories = true,
+                IncludePatterns = ["sidecar-locked.txt"],
+                Action = ScanAction.Convert,
+                SourceCharset = "windows-1252",
+                TargetCharset = "utf-8",
+                TargetWriteBom = false,
+                Backup = true,
+            },
+            entries.Add,
+            CancellationToken.None);
+
+        Assert.Equal(ConversionRowResult.Converted, Assert.Single(entries).Result);
+
+        string metadataPath = ConversionMetadataStore.MetadataPathFor(path);
+        var completed = JsonSerializer.Deserialize<ConversionMetadata>(
+            File.ReadAllBytes(metadataPath))!;
+        ConversionMetadata prepared = completed with
+        {
+            InstallationState = ConversionInstallationState.Prepared,
+        };
+
+        Assert.Null(ConversionMetadataStore.Write(path, prepared));
+        byte[] validPreparedRecord = File.ReadAllBytes(metadataPath);
+
+        using FileStream locked = new(
+            metadataPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+        string? error = ConversionMetadataStore.Write(path, completed);
+
+        Assert.NotNull(error);
+        Assert.Equal(validPreparedRecord, File.ReadAllBytes(metadataPath));
+        Assert.Equal(
+            ConversionInstallationState.Prepared,
+            JsonSerializer.Deserialize<ConversionMetadata>(validPreparedRecord)!
+                .InstallationState);
     }
 
 }

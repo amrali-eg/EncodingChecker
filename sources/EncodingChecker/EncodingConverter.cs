@@ -72,6 +72,12 @@ internal sealed record ConversionOptions
     internal Func<ConversionRecord, string?>? RecordConversion { get; init; }
 
     /// <summary>
+    /// Marks a prepared conversion record complete after installation.
+    /// Returns <see langword="null"/> on success.
+    /// </summary>
+    internal Func<string?>? CompleteConversionRecord { get; init; }
+
+    /// <summary>
     /// The SHA-256 the source must still have at installation time, or
     /// <see langword="null"/> to skip the check.
     /// </summary>
@@ -101,6 +107,9 @@ internal sealed record ConversionRecord
     /// successful verification.
     /// </summary>
     internal required string OutputTextSha256 { get; init; }
+
+    /// <summary>SHA-256 of the verified output file's exact bytes.</summary>
+    internal required string OutputSha256 { get; init; }
 
     internal required string SourceEncoding { get; init; }
 
@@ -457,6 +466,11 @@ internal static partial class EncodingConverter
 
             if (options.RecordConversion is not null)
             {
+                string outputFileSha = RunIoStage(
+                    ConversionErrorCode.TargetReadError,
+                    "The verified output could not be hashed",
+                    () => ComputeFileSha256(tempPath!));
+
                 string? recordError = options.RecordConversion(new ConversionRecord
                 {
                     SourcePath = sourcePath,
@@ -464,6 +478,7 @@ internal static partial class EncodingConverter
                     SourceSha256 = sourceFileSha,
                     SourceTextSha256 = System.Convert.ToHexStringLower(sourceDigest.Hash),
                     OutputTextSha256 = System.Convert.ToHexStringLower(sourceDigest.Hash),
+                    OutputSha256 = outputFileSha,
                     SourceEncoding = sourceEncoding.WebName,
                     SourceCodePage = sourceEncoding.CodePage,
                     SourceHasBom = sourceHadBom,
@@ -560,6 +575,32 @@ internal static partial class EncodingConverter
             }
 
             tempPath = null;
+
+            if (options.CompleteConversionRecord is not null)
+            {
+                string? completionError = options.CompleteConversionRecord();
+
+                if (completionError is not null)
+                {
+                    return new ConversionResult
+                    {
+                        Success = false,
+                        ErrorCode = ConversionErrorCode.RecoveryRecordError,
+                        ErrorMessage =
+                            "The converted file was installed and verified, but its recovery "
+                            + $"record could not be marked complete: {completionError} The "
+                            + "prepared record still contains the hashes needed to inspect it.",
+                        SourceEncoding = sourceEncoding,
+                        TargetEncoding = targetEncoding,
+                        SourceBytes = sourceBytesProcessed,
+                        TargetBytes = targetBytesWritten,
+                        UnicodeScalarsVerified = verification.ScalarsCompared,
+                        VerificationPassed = true,
+                        BomVerificationPassed = true,
+                        ReplacementCommitted = true,
+                    };
+                }
+            }
 
             return new ConversionResult
             {

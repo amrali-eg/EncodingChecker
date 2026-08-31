@@ -50,6 +50,12 @@ internal sealed class ScanDirectoryOptions
     /// <summary>Full paths to exclude regardless of pattern matches.</summary>
     internal IReadOnlyCollection<string>? ExcludedFullPaths { get; init; }
 
+    /// <summary>
+    /// Receives counts of files the scan never examined. Supply one to report
+    /// coverage; the scan behaves identically either way.
+    /// </summary>
+    internal DirectoryTraversal.TraversalCounters? Counters { get; init; }
+
     internal ScanAction Action { get; init; }
 
     /// <summary>Accepted charset labels for validation.</summary>
@@ -128,7 +134,8 @@ internal static class ScanEngine
             includePatterns,
             excludePatterns,
             options.ExcludedFullPaths,
-            onWarning);
+            onWarning,
+            options.Counters);
 
         RunParallel(
             files,
@@ -340,6 +347,7 @@ internal static class ScanEngine
                         ? FormatCharsetLabel(entry.SourceEncoding, snapshot.HasBom)
                         : null;
                     entry.DetectedEncodingLabel = snapshot.DetectedEncoding?.WebName;
+                    entry.DetectedEncodingHasBom = snapshot.DetectedEncodingHasBom;
                     entry.HasReliableUnicodeDetection = snapshot.HasReliableUnicodeDetection;
                     entry.ExpectedSourceSha256 = snapshot.Sha256;
                     entry.ExpectedSourceSize = snapshot.Size;
@@ -424,6 +432,7 @@ internal static class ScanEngine
         Encoding? detected;
         Encoding? automaticallyDetected = null;
         bool hasReliableUnicodeDetection = false;
+        bool snapshotDetectedHasBom = false;
         bool hasBom;
         string? sourceSha256 = null;
         long? sourceSize = null;
@@ -437,6 +446,7 @@ internal static class ScanEngine
             detected = snapshot.SourceEncoding;
             automaticallyDetected = snapshot.DetectedEncoding;
             hasReliableUnicodeDetection = snapshot.HasReliableUnicodeDetection;
+            snapshotDetectedHasBom = snapshot.DetectedEncodingHasBom;
             hasBom = snapshot.HasBom;
             sourceSha256 = snapshot.Sha256;
             sourceSize = snapshot.Size;
@@ -475,6 +485,8 @@ internal static class ScanEngine
             ExpectedSourceSize = sourceSize,
             HasReliableUnicodeDetection = options.Action == ScanAction.Convert &&
                 hasReliableUnicodeDetection,
+            DetectedEncodingHasBom = options.Action == ScanAction.Convert &&
+                snapshotDetectedHasBom,
         };
 
         if (options.Action == ScanAction.Convert)
@@ -560,6 +572,7 @@ internal static class ScanEngine
         Encoding? DetectedEncoding,
         Encoding? SourceEncoding,
         bool HasReliableUnicodeDetection,
+        bool DetectedEncodingHasBom,
         bool HasBom,
         string Sha256,
         long Size);
@@ -607,7 +620,7 @@ internal static class ScanEngine
 
         return new SourceSnapshot(
             detectedEncoding, sourceEncoding, hasReliableUnicodeDetection,
-            hasBom, hash, stream.Length);
+            detectedHasBom, hasBom, hash, stream.Length);
     }
 
     private static bool IsReliablyDetectedUnicode(
@@ -748,6 +761,25 @@ internal static class ScanEngine
             _ => null,
         };
 
+        // A retry must not carry a diagnostic from an earlier failed attempt.
+        // The optional BOM-less Unicode advisory below is added back for this pass.
+        entry.Diagnostic = null;
+
+        if (action == PlannedAction.Convert &&
+            entry.SourceEncodingWasSpecified &&
+            automaticallyDetected is not null &&
+            IsUtf16OrUtf32(automaticallyDetected) &&
+            !entry.DetectedEncodingHasBom &&
+            automaticallyDetected.CodePage != sourceEncoding.CodePage)
+        {
+            entry.ReasonCode =
+                ConversionReasonCodes.ExplicitSourceDiffersFromBomlessUnicodeEstimate;
+            entry.Diagnostic =
+                $"EC estimated BOM-less {automaticallyDetected.WebName}, but you selected "
+                + $"{sourceEncoding.WebName}. BOM-less Unicode can be ambiguous, so EC used "
+                + "your explicit selection and kept all strict conversion checks enabled.";
+        }
+
         if (action != PlannedAction.Convert)
         {
             entry.Result = ConversionPolicy.ToRowResult(action);
@@ -789,6 +821,8 @@ internal static class ScanEngine
             }
         }
 
+        ConversionMetadata? recoveryMetadata = null;
+
         var conversionOptions = new ConversionOptions
         {
             WriteBom = targetWriteBom,
@@ -797,10 +831,34 @@ internal static class ScanEngine
             RecordConversion = backup
                 ? record =>
                 {
-                    string? error = WriteConversionMetadata(path, record, entry);
+                    string? error = PrepareConversionMetadata(
+                        path, record, entry, out ConversionMetadata? prepared);
 
                     if (error is null)
+                    {
+                        recoveryMetadata = prepared;
                         entry.RecoveryMetadataPath = ConversionMetadataStore.MetadataPathFor(path);
+                    }
+
+                    return error;
+                }
+                : null,
+
+            CompleteConversionRecord = backup
+                ? () =>
+                {
+                    if (recoveryMetadata is null)
+                        return "the prepared recovery record is unavailable.";
+
+                    ConversionMetadata completed = recoveryMetadata with
+                    {
+                        InstallationState = ConversionInstallationState.Completed,
+                    };
+
+                    string? error = ConversionMetadataStore.Write(path, completed);
+
+                    if (error is null)
+                        recoveryMetadata = completed;
 
                     return error;
                 }
@@ -842,12 +900,15 @@ internal static class ScanEngine
                 ? ConversionRowResult.Converted
                 : ConversionRowResult.Error;
 
-        entry.Diagnostic =
-            result.Success
-                ? null
-                : $"{result.ErrorCode}: {result.ErrorMessage}";
-        entry.ReasonCode = result.Success ? null : result.ErrorCode.ToString();
+        if (!result.Success)
+        {
+            entry.Diagnostic = $"{result.ErrorCode}: {result.ErrorMessage}";
+            entry.ReasonCode = result.ErrorCode.ToString();
+        }
     }
+
+    private static bool IsUtf16OrUtf32(Encoding encoding) =>
+        encoding.CodePage is 1200 or 1201 or 12000 or 12001;
 
     /// <summary>
     /// Writes recovery metadata only after output verification and before installation.
@@ -856,9 +917,13 @@ internal static class ScanEngine
     /// Called after output verification and before installation so metadata failure leaves
     /// the original file intact.
     /// </remarks>
-    private static string? WriteConversionMetadata(
-        string path, ConversionRecord record, ConversionReportEntry entry)
+    private static string? PrepareConversionMetadata(
+        string path,
+        ConversionRecord record,
+        ConversionReportEntry entry,
+        out ConversionMetadata? metadata)
     {
+        metadata = null;
         string backupPath = path + ".bak";
 
         string backupHash;
@@ -879,18 +944,20 @@ internal static class ScanEngine
         if (hashError is not null)
             return hashError;
 
-        return ConversionMetadataStore.Write(path, new ConversionMetadata
+        var prepared = new ConversionMetadata
         {
             ConversionId = Guid.NewGuid().ToString("D"),
             ConversionTimestampUtc =
                 DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
             EcVersion = typeof(ScanEngine).Assembly.GetName().Version?.ToString()
                         ?? "unknown",
+            InstallationState = ConversionInstallationState.Prepared,
             OriginalPath = path,
             OriginalSize = record.SourceBytes,
             OriginalSha256 = record.SourceSha256,
             BackupPath = backupPath,
             BackupSha256 = backupHash,
+            ExpectedOutputSha256 = record.OutputSha256,
             // The recovery key is the codec that actually read the source.
             SourceEncodingId = record.SourceCodePage,
             SourceEncodingName = record.SourceEncoding,
@@ -909,7 +976,14 @@ internal static class ScanEngine
             SourceTextSha256 = record.SourceTextSha256,
             OutputTextSha256 = record.OutputTextSha256,
             UnicodeScalars = record.UnicodeScalars,
-        });
+        };
+
+        string? error = ConversionMetadataStore.Write(path, prepared);
+
+        if (error is null)
+            metadata = prepared;
+
+        return error;
     }
 
     /// <summary>The code page for a charset label, or null when it cannot be resolved.</summary>
@@ -936,7 +1010,8 @@ internal static class ScanEngine
                 path, FileMode.Open, FileAccess.Read, FileShare.Read,
                 prefix.Length, FileOptions.SequentialScan);
 
-            int read = stream.Read(prefix, 0, prefix.Length);
+            int read = stream.ReadAtLeast(
+                prefix, prefix.Length, throwOnEndOfStream: false);
 
             return read == prefix.Length
                    && prefix.AsSpan(0, preamble.Length).SequenceEqual(preamble)

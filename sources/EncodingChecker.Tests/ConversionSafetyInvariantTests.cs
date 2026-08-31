@@ -167,6 +167,68 @@ public sealed class ConversionSafetyInvariantTests : IDisposable
     }
 
     [Fact]
+    public void RecoveryRecordIsCompletedOnlyAfterOutputInstallation()
+    {
+        const string text = "café — 日本語";
+        string path = Path.Combine(_root, "record-complete.txt");
+        File.WriteAllBytes(path, Encoding.UTF8.GetBytes(text));
+
+        var prepared = false;
+        var completed = false;
+
+        ConversionResult result = EncodingConverter.Convert(
+            path,
+            path,
+            Encoding.UTF8,
+            new UnicodeEncoding(false, false),
+            new ConversionOptions
+            {
+                RecordConversion = record =>
+                {
+                    prepared = true;
+                    Assert.NotEmpty(record.OutputSha256);
+                    return null;
+                },
+                CompleteConversionRecord = () =>
+                {
+                    // Completion must run after replacement, not merely after preparation.
+                    Assert.Equal(text, Encoding.Unicode.GetString(File.ReadAllBytes(path)));
+                    completed = true;
+                    return null;
+                },
+            });
+
+        Assert.True(result.Success);
+        Assert.True(prepared);
+        Assert.True(completed);
+    }
+
+    [Fact]
+    public void RecoveryRecordCompletionFailureReportsInstalledOutputTruthfully()
+    {
+        const string text = "café — 日本語";
+        string path = Path.Combine(_root, "record-complete-fail.txt");
+        File.WriteAllBytes(path, Encoding.UTF8.GetBytes(text));
+
+        ConversionResult result = EncodingConverter.Convert(
+            path,
+            path,
+            Encoding.UTF8,
+            new UnicodeEncoding(false, false),
+            new ConversionOptions
+            {
+                RecordConversion = _ => null,
+                CompleteConversionRecord = () => "simulated completion failure",
+            });
+
+        Assert.False(result.Success);
+        Assert.Equal(ConversionErrorCode.RecoveryRecordError, result.ErrorCode);
+        Assert.True(result.ReplacementCommitted);
+        Assert.Equal(text, Encoding.Unicode.GetString(File.ReadAllBytes(path)));
+        Assert.Contains("installed and verified", result.ErrorMessage);
+    }
+
+    [Fact]
     public void WhatIf_NeverModifiesAnything()
     {
         // The dry run must be exactly that, including for a file that would

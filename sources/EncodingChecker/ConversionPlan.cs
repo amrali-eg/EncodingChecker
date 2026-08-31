@@ -92,6 +92,15 @@ internal sealed record PlannedFile
 
     public required bool SourceWasSpecified { get; init; }
 
+    /// <summary>What automatic detection found before an explicit source was applied.</summary>
+    public string? DetectedEncoding { get; init; }
+
+    /// <summary>The detected encoding's canonical code page, when available.</summary>
+    public int? DetectedCodePage { get; init; }
+
+    /// <summary>Whether automatic detection found the encoding's BOM.</summary>
+    public bool DetectedHasBom { get; init; }
+
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public required SourceInterpretation SourceInterpretation { get; init; }
 
@@ -120,7 +129,7 @@ internal sealed record PlannedFile
 internal sealed record ConversionPlan
 {
     /// <summary>The plan file schema version.</summary>
-    internal const int CurrentPlanVersion = 3;
+    internal const int CurrentPlanVersion = 4;
 
     public int PlanVersion { get; init; } = CurrentPlanVersion;
 
@@ -204,6 +213,11 @@ internal sealed record ConversionPlan
             if (TextEncoding.TryResolve(sourceCharset, out Encoding? encoding))
                 codePage = encoding!.CodePage;
 
+            int? detectedCodePage = null;
+
+            if (TextEncoding.TryResolve(entry.DetectedEncodingLabel, out Encoding? detected))
+                detectedCodePage = detected!.CodePage;
+
             files.Add(new PlannedFile
             {
                 RelativePath = Path.GetRelativePath(root, entry.FilePath),
@@ -214,6 +228,9 @@ internal sealed record ConversionPlan
                 SourceCodePage = codePage,
                 SourceHasBom = sourceHasBom,
                 SourceWasSpecified = entry.SourceEncodingWasSpecified,
+                DetectedEncoding = entry.DetectedEncodingLabel,
+                DetectedCodePage = detectedCodePage,
+                DetectedHasBom = entry.DetectedEncodingHasBom,
                 SourceInterpretation = entry.SourceInterpretation
                     ?? throw new InvalidOperationException(
                         $"'{entry.FilePath}' reached a conversion plan without being "
@@ -388,6 +405,22 @@ internal sealed record ConversionPlan
                 sourceEncoding!.CodePage != file.SourceCodePage)
             {
                 stale.Add($"{path} (source codec identity does not match the plan)");
+                continue;
+            }
+
+            if (file.DetectedEncoding is not null)
+            {
+                if (!TextEncoding.TryResolve(file.DetectedEncoding, out Encoding? detected) ||
+                    !file.DetectedCodePage.HasValue ||
+                    detected!.CodePage != file.DetectedCodePage.Value)
+                {
+                    stale.Add($"{path} (detected codec identity does not match the plan)");
+                    continue;
+                }
+            }
+            else if (file.DetectedCodePage.HasValue || file.DetectedHasBom)
+            {
+                stale.Add($"{path} (detected codec provenance is incomplete)");
                 continue;
             }
 

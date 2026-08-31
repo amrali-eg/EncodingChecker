@@ -184,6 +184,84 @@ public sealed class CliArgumentParserTests
         return options;
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData(",,,")]
+    [InlineData("   ")]
+    [InlineData(",")]
+    public void TryValidateOptions_IncludeGivenButUnusable_Fails(string pattern)
+    {
+        // A filter that parses to nothing must not mean "every file". This is the
+        // dangerous direction: -Include "$VAR" with VAR unset would otherwise widen
+        // a conversion to the whole tree instead of failing.
+        Program.CliOptions options =
+            ParsedOptions("-BasePath", @"C:\Source", "-Target", "utf-8", "-Include", pattern);
+
+        Assert.True(options.IncludeSpecified);
+        Assert.Empty(options.Include);
+
+        bool valid = Program.TryValidateOptions(options, out string? error);
+
+        Assert.False(valid);
+        Assert.Contains("no usable pattern", error);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(",,,")]
+    public void TryValidateOptions_ExcludeGivenButUnusable_Fails(string pattern)
+    {
+        Program.CliOptions options =
+            ParsedOptions("-BasePath", @"C:\Source", "-Target", "utf-8", "-Exclude", pattern);
+
+        bool valid = Program.TryValidateOptions(options, out string? error);
+
+        Assert.False(valid);
+        Assert.Contains("no usable pattern", error);
+    }
+
+    [Fact]
+    public void TryValidateOptions_IncludeOmitted_StillMeansEveryFile()
+    {
+        // The fix must not turn "no filter" into an error; only a supplied-but-empty
+        // one. Validation also requires the base path to exist, so use a real folder
+        // and the assertion cannot pass for the wrong reason.
+        string root = Directory.CreateTempSubdirectory("ec-include-").FullName;
+
+        try
+        {
+            Program.CliOptions options =
+                ParsedOptions("-BasePath", root, "-Target", "utf-8");
+
+            Assert.False(options.IncludeSpecified);
+            Assert.Empty(options.Include);
+            Assert.True(Program.TryValidateOptions(options, out string? error), error);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TryValidateOptions_IncludeWithOneUsablePattern_Passes()
+    {
+        string root = Directory.CreateTempSubdirectory("ec-include-").FullName;
+
+        try
+        {
+            Program.CliOptions options = ParsedOptions(
+                "-BasePath", root, "-Target", "utf-8", "-Include", ",,*.txt,,");
+
+            Assert.Equal(["*.txt"], options.Include);
+            Assert.True(Program.TryValidateOptions(options, out string? error), error);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public void TryValidateOptions_MissingBasePath_Fails()
     {

@@ -75,6 +75,8 @@ public partial class MainForm
         _actionCancellation?.Dispose();
         _actionCancellation = new CancellationTokenSource();
 
+        var counters = new DirectoryTraversal.TraversalCounters();
+
         var args = new WorkerArgs
         {
             Action = action,
@@ -82,8 +84,11 @@ public partial class MainForm
             IncludeSubdirectories = chkIncludeSubdirectories.Checked,
             FileMasks = txtFileMasks.Text,
             ValidCharsets = validCharsets,
+            Counters = counters,
             CancellationToken = _actionCancellation.Token,
         };
+
+        _scanCounters = counters;
 
         _actionWorker.RunWorkerAsync(args);
     }
@@ -213,6 +218,7 @@ public partial class MainForm
                     ? ScanAction.Validate
                     : ScanAction.Detect,
             ValidCharsets = args.ValidCharsets,
+            Counters = args.Counters,
         };
 
         try
@@ -351,8 +357,36 @@ public partial class MainForm
                 ? "{0} files processed"
                 : "{0} files do not have the correct encoding";
 
+        string completedStatus = string.Format(statusMessage, lstResults.Items.Count);
+        string coverage = FormatCoverage(_scanCounters);
+
         UpdateControlsOnActionDone(
-            string.Format(statusMessage, lstResults.Items.Count));
+            coverage.Length == 0
+                ? completedStatus
+                : completedStatus + "; " + coverage);
+    }
+
+    /// <summary>Describes matching files and directories deliberately left unexamined.</summary>
+    internal static string FormatCoverage(DirectoryTraversal.TraversalCounters? counters)
+    {
+        if (counters is null)
+            return string.Empty;
+
+        var parts = new List<string>(2);
+
+        if (counters.FilesExcludedByAttribute > 0)
+        {
+            parts.Add(
+                $"{counters.FilesExcludedByAttribute} matching file(s) not examined");
+        }
+
+        if (counters.DirectoriesExcludedByAttribute > 0)
+        {
+            parts.Add(
+                $"{counters.DirectoriesExcludedByAttribute} folder(s) not entered");
+        }
+
+        return string.Join(", ", parts);
     }
 
     private void ConvertWorkerCompleted(RunWorkerCompletedEventArgs e)
