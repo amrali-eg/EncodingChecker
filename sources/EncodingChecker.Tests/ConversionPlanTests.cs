@@ -437,6 +437,11 @@ public sealed class ConversionPlanTests : IDisposable
         Assert.True(plan.Semantics.OutputVerification);
         Assert.True(plan.Semantics.AtomicInstall);
         Assert.True(plan.Semantics.LegacyRequiresExplicitSource);
+
+        PlannedFile file = Assert.Single(plan.Files);
+        Assert.Equal("shift_jis", file.DetectedEncoding);
+        Assert.Equal(932, file.DetectedCodePage);
+        Assert.False(file.DetectedHasBom);
     }
 
     [Fact]

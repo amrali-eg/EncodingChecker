@@ -32,9 +32,8 @@ internal static class DirectoryTraversal
 
     private static readonly EnumerationOptions DirectoryWalkOptions = new()
     {
-        // Never traverse symlinks, junctions, or other reparse points.
-        AttributesToSkip = FileAttributes.Hidden | FileAttributes.System |
-            FileAttributes.ReparsePoint,
+        // Enumerate excluded directories so callers can report that they were not entered.
+        AttributesToSkip = FileAttributes.None,
 
         // Keep access failures visible so callers can report skipped directories.
         IgnoreInaccessible = false,
@@ -63,13 +62,21 @@ internal static class DirectoryTraversal
     /// </remarks>
     internal sealed class TraversalCounters
     {
-        private int _excludedByAttribute;
+        private int _filesExcludedByAttribute;
+        private int _directoriesExcludedByAttribute;
 
-        /// <summary>Files skipped for being hidden, system, or reparse points.</summary>
-        internal int ExcludedByAttribute => Volatile.Read(ref _excludedByAttribute);
+        /// <summary>Matching files skipped for being hidden, system, or reparse points.</summary>
+        internal int FilesExcludedByAttribute => Volatile.Read(ref _filesExcludedByAttribute);
 
-        internal void CountExcludedByAttribute() =>
-            Interlocked.Increment(ref _excludedByAttribute);
+        /// <summary>Directories not entered because they are hidden, system, or reparse points.</summary>
+        internal int DirectoriesExcludedByAttribute =>
+            Volatile.Read(ref _directoriesExcludedByAttribute);
+
+        internal void CountFileExcludedByAttribute() =>
+            Interlocked.Increment(ref _filesExcludedByAttribute);
+
+        internal void CountDirectoryExcludedByAttribute() =>
+            Interlocked.Increment(ref _directoriesExcludedByAttribute);
     }
 
     /// <summary>
@@ -144,15 +151,6 @@ internal static class DirectoryTraversal
                 string file = info.FullName;
                 string fileName = info.Name;
 
-                // Counted, not silently dropped: the caller reports how many files
-                // the scan never examined so a clean result cannot be mistaken for
-                // complete coverage.
-                if ((info.Attributes & ExcludedFileAttributes) != 0)
-                {
-                    counters?.CountExcludedByAttribute();
-                    continue;
-                }
-
                 if (IsAlwaysExcludedFile(fileName))
                     continue;
 
@@ -169,24 +167,31 @@ internal static class DirectoryTraversal
                 string relativePath =
                     Path.GetRelativePath(baseDirectory, file).Replace('\\', '/');
 
-                if (MatchesAny(relativePath, includePatterns) &&
-                    !MatchesAny(relativePath, excludePatterns))
+                if (!MatchesAny(relativePath, includePatterns) ||
+                    MatchesAny(relativePath, excludePatterns))
+                    continue;
+
+                // Count only matching files. Files outside the requested scope and EC's
+                // own artifacts must not inflate the incomplete-coverage warning.
+                if ((info.Attributes & ExcludedFileAttributes) != 0)
                 {
-                    yield return file;
+                    counters?.CountFileExcludedByAttribute();
+                    continue;
                 }
+
+                yield return file;
             }
 
             if (!includeSubdirectories)
                 continue;
 
-            List<string> subdirectories;
+            List<DirectoryInfo> subdirectories;
 
             try
             {
                 subdirectories =
                 [
-                    .. Directory.EnumerateDirectories(
-                        dir,
+                    .. new DirectoryInfo(dir).EnumerateDirectories(
                         "*",
                         DirectoryWalkOptions)
                 ];
@@ -200,13 +205,21 @@ internal static class DirectoryTraversal
                 continue;
             }
 
-            foreach (string subdirectory in subdirectories)
+            foreach (DirectoryInfo subdirectory in subdirectories)
             {
-                if (!ExcludedDirectoryNames.Contains(
-                    Path.GetFileName(subdirectory)))
+                if (ExcludedDirectoryNames.Contains(
+                    subdirectory.Name))
+                    continue;
+
+                // Do not traverse excluded directories merely to count their contents.
+                // Reporting the directory itself is honest about the unknown scope.
+                if ((subdirectory.Attributes & ExcludedFileAttributes) != 0)
                 {
-                    pending.Push(subdirectory);
+                    counters?.CountDirectoryExcludedByAttribute();
+                    continue;
                 }
+
+                pending.Push(subdirectory.FullName);
             }
         }
     }

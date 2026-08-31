@@ -28,10 +28,21 @@ internal enum SourceEncodingMode
     Explicit,
 }
 
+/// <summary>Whether verified output is prepared or installed.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+internal enum ConversionInstallationState
+{
+    /// <summary>The output passed verification but installation is not yet recorded.</summary>
+    Prepared,
+
+    /// <summary>The verified output was installed.</summary>
+    Completed,
+}
+
 internal sealed record ConversionMetadata
 {
     /// <summary>The schema version written and understood by this build.</summary>
-    internal const int CurrentMetadataVersion = 2;
+    internal const int CurrentMetadataVersion = 3;
 
     /// <summary>Schema version for future readers.</summary>
     [JsonPropertyOrder(0)]
@@ -47,19 +58,27 @@ internal sealed record ConversionMetadata
     public required string EcVersion { get; init; }
 
     [JsonPropertyOrder(4)]
-    public required string OriginalPath { get; init; }
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public required ConversionInstallationState InstallationState { get; init; }
 
     [JsonPropertyOrder(5)]
-    public required long OriginalSize { get; init; }
+    public required string OriginalPath { get; init; }
 
     [JsonPropertyOrder(6)]
-    public required string OriginalSha256 { get; init; }
+    public required long OriginalSize { get; init; }
 
     [JsonPropertyOrder(7)]
-    public required string BackupPath { get; init; }
+    public required string OriginalSha256 { get; init; }
 
     [JsonPropertyOrder(8)]
+    public required string BackupPath { get; init; }
+
+    [JsonPropertyOrder(9)]
     public required string BackupSha256 { get; init; }
+
+    /// <summary>SHA-256 of the exact verified bytes prepared for installation.</summary>
+    [JsonPropertyOrder(10)]
+    public required string ExpectedOutputSha256 { get; init; }
 
     /// <summary>
     /// The codec that actually read the file. This is the authoritative recovery key.
@@ -67,19 +86,19 @@ internal sealed record ConversionMetadata
     /// <remarks>
     /// The numeric identifier is authoritative because encoding names can have aliases.
     /// </remarks>
-    [JsonPropertyOrder(9)]
+    [JsonPropertyOrder(11)]
     public required int SourceEncodingId { get; init; }
 
     /// <summary>The source codec's human-readable name.</summary>
-    [JsonPropertyOrder(10)]
+    [JsonPropertyOrder(12)]
     public required string SourceEncodingName { get; init; }
 
     /// <summary>Whether the source codec was detected or explicitly supplied.</summary>
-    [JsonPropertyOrder(11)]
+    [JsonPropertyOrder(13)]
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public required SourceEncodingMode SourceEncodingMode { get; init; }
 
-    [JsonPropertyOrder(12)]
+    [JsonPropertyOrder(14)]
     public required bool SourceHasBom { get; init; }
 
     /// <summary>
@@ -91,30 +110,30 @@ internal sealed record ConversionMetadata
     /// case the sidecar preserves both the detector's earlier conclusion and the
     /// codec the conversion actually used.
     /// </remarks>
-    [JsonPropertyOrder(13)]
+    [JsonPropertyOrder(15)]
     public int? DetectedEncodingId { get; init; }
 
     /// <summary>The detected codec's name, or <see langword="null"/> when none exists.</summary>
-    [JsonPropertyOrder(14)]
+    [JsonPropertyOrder(16)]
     public string? DetectedEncodingName { get; init; }
 
     /// <summary>The codec the file was converted to.</summary>
-    [JsonPropertyOrder(15)]
+    [JsonPropertyOrder(17)]
     public required int TargetEncodingId { get; init; }
 
-    [JsonPropertyOrder(16)]
+    [JsonPropertyOrder(18)]
     public required string TargetEncodingName { get; init; }
 
-    [JsonPropertyOrder(17)]
+    [JsonPropertyOrder(19)]
     public required bool TargetHasBom { get; init; }
 
-    [JsonPropertyOrder(18)]
+    [JsonPropertyOrder(20)]
     public required string SourceTextSha256 { get; init; }
 
-    [JsonPropertyOrder(19)]
+    [JsonPropertyOrder(21)]
     public required string OutputTextSha256 { get; init; }
 
-    [JsonPropertyOrder(20)]
+    [JsonPropertyOrder(22)]
     public required long UnicodeScalars { get; init; }
 }
 
@@ -174,29 +193,50 @@ internal static class ConversionMetadataStore
     internal static string? Write(string filePath, ConversionMetadata metadata)
     {
         string path = MetadataPathFor(filePath);
+        string tempPath =
+            $"{path}.{Guid.NewGuid():N}.{EncodingConverter.TempFileSuffix}";
 
         try
         {
             File.WriteAllText(
-                path, JsonSerializer.Serialize(metadata, Options), new UTF8Encoding(false));
+                tempPath,
+                JsonSerializer.Serialize(metadata, Options),
+                new UTF8Encoding(false));
 
             ConversionMetadata? readBack =
-                JsonSerializer.Deserialize<ConversionMetadata>(File.ReadAllText(path));
+                JsonSerializer.Deserialize<ConversionMetadata>(File.ReadAllText(tempPath));
 
             if (readBack is null)
-                return $"'{path}' was written but could not be read back.";
+                return $"The temporary recovery record for '{path}' could not be read back.";
 
             if (!MatchesForRecovery(readBack, metadata))
             {
-                return $"'{path}' was written but does not describe the expected file.";
+                return $"The temporary recovery record for '{path}' does not describe "
+                       + "the expected file.";
             }
+
+            // Keep the previous truthful record intact unless the complete replacement succeeds.
+            EncodingConverter.AtomicReplaceForBackup(tempPath, path);
 
             return null;
         }
         catch (Exception ex) when (
-            ex is IOException or UnauthorizedAccessException or JsonException)
+            ex is IOException or UnauthorizedAccessException or JsonException or
+                ArgumentException or NotSupportedException)
         {
             return $"{ex.Message}";
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(tempPath))
+                    File.Delete(tempPath);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Cleanup failure cannot make the existing sidecar less truthful.
+            }
         }
     }
 
@@ -209,11 +249,13 @@ internal static class ConversionMetadataStore
         ConversionMetadata expected) =>
         actual.MetadataVersion == ConversionMetadata.CurrentMetadataVersion &&
         actual.ConversionId == expected.ConversionId &&
+        actual.InstallationState == expected.InstallationState &&
         actual.OriginalPath == expected.OriginalPath &&
         actual.OriginalSize == expected.OriginalSize &&
         actual.OriginalSha256 == expected.OriginalSha256 &&
         actual.BackupPath == expected.BackupPath &&
         actual.BackupSha256 == expected.BackupSha256 &&
+        actual.ExpectedOutputSha256 == expected.ExpectedOutputSha256 &&
         actual.SourceEncodingId == expected.SourceEncodingId &&
         actual.SourceEncodingName == expected.SourceEncodingName &&
         actual.SourceEncodingMode == expected.SourceEncodingMode &&

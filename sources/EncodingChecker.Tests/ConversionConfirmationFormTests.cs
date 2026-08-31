@@ -108,6 +108,51 @@ public sealed class ConversionConfirmationFormTests : IDisposable
     }
 
     [Fact]
+    public void ItShowsBomlessUnicodeDisagreementWithoutCallingItARefusal()
+    {
+        var plan = new ConversionPlan
+        {
+            CreatedUtc = DateTime.UtcNow.ToString("O"),
+            EcVersion = "test",
+            BaseDirectory = _root,
+            TargetEncoding = "utf-8",
+            TargetHasBom = false,
+            BackupEnabled = true,
+            ExplicitSourceEncoding = "windows-1252",
+            Files =
+            [
+                new PlannedFile
+                {
+                    RelativePath = "bomless.txt",
+                    Size = 20,
+                    Sha256 = new string('0', 64),
+                    Action = PlannedAction.Convert,
+                    SourceEncoding = "windows-1252",
+                    SourceCodePage = 1252,
+                    SourceHasBom = false,
+                    SourceWasSpecified = true,
+                    SourceInterpretation = SourceInterpretation.ExplicitSource,
+                    ReasonCode = ConversionReasonCodes
+                        .ExplicitSourceDiffersFromBomlessUnicodeEstimate,
+                    Reason =
+                        "EC estimated BOM-less utf-16BE, but you selected windows-1252.",
+                },
+            ],
+        };
+
+        UiTest.OnStaThread(() =>
+        {
+            using var form = new ConversionConfirmationForm(plan);
+            string text = AllText(form);
+
+            Assert.Contains("BOM-less Unicode estimate", text);
+            Assert.Contains("bomless.txt", text);
+            Assert.Contains("Convert 1 file(s)", text);
+            Assert.DoesNotContain("Needs a source encoding", text);
+        });
+    }
+
+    [Fact]
     public void ItBuildsWhenEverythingIsRefused()
     {
         // Nothing to convert. The button has to say so rather than offering an action

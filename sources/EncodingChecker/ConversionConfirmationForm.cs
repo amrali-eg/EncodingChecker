@@ -80,6 +80,13 @@ internal sealed class ConversionConfirmationForm : Form
         ConversionPlanSummary summary = _plan.Summary;
         int convert = summary.ReadyToConvert;
         List<PlannedFile> refused = Refused;
+        List<PlannedFile> advisories =
+        [
+            .. _plan.Files.Where(f =>
+                f.Action == PlannedAction.Convert &&
+                f.ReasonCode == ConversionReasonCodes
+                    .ExplicitSourceDiffersFromBomlessUnicodeEstimate)
+        ];
 
         body.Controls.Add(Heading(
             "Review this conversion plan before changing files."));
@@ -108,6 +115,28 @@ internal sealed class ConversionConfirmationForm : Form
             ("Cannot be processed safely", summary.OtherRefusals,
              "Left unchanged because a safety check did not pass."),
         ]));
+
+        if (advisories.Count > 0)
+        {
+            string examples = string.Join(
+                Environment.NewLine,
+                advisories.Take(5).Select(f => $"• {f.RelativePath}: {f.Reason}"));
+
+            if (advisories.Count > 5)
+                examples += Environment.NewLine + $"• and {advisories.Count - 5} more";
+
+            body.Controls.Add(new Label
+            {
+                AutoSize = true,
+                MaximumSize = new Size(660, 0),
+                Padding = new Padding(0, 8, 0, 8),
+                ForeColor = Color.FromArgb(150, 80, 0),
+                Text =
+                    $"{advisories.Count} file(s) have a BOM-less Unicode estimate that "
+                    + "differs from your source choice. EC will use your choice, but review "
+                    + "these files carefully:" + Environment.NewLine + examples,
+            });
+        }
 
         body.Controls.Add(Rule());
 

@@ -1,34 +1,50 @@
 # EncodingChecker v3.9.2
 
-This patch closes two gaps where a run could report a result it had not established, and
-hardens two smaller paths found in the same review.
+This patch closes cases where a run or recovery record could describe more than EC had
+actually established. It also improves scan-coverage reporting without changing which
+files EC is willing to convert.
 
-## Fixes
+## Safety fixes
 
-- A `-Include` value that contains no usable pattern is now rejected instead of silently
-  meaning *every file*. `-Include ""`, `-Include ",,,"` and similar previously widened a
-  scan to the whole folder — the opposite of what the caller asked for, and dangerous when
-  the value came from an unset variable in a script. `-Exclude` is validated the same way.
-  Omitting either option still means "every file", unchanged.
-- Files skipped for being hidden, system, or reparse points are now counted and reported.
-  They were dropped inside the operating system's own enumeration, so they produced no row,
-  no count and no note: a folder containing one validated clean and exited `0`, and a
-  conversion reported `Selected: 1` for two files. What gets skipped is unchanged; the
-  count is what makes a clean result distinguishable from files EC never opened. It is
-  written to standard error so it survives `-Quiet` and stays out of the CSV report.
-- The repeated byte-order-mark probe now requires its full prefix, rather than treating a
-  short read as "no repeated mark".
-- Closing the main window a second time during a run that has not stopped now closes it,
-  after confirmation. Cancellation is cooperative, so a run blocked on unresponsive storage
-  previously left the window impossible to close.
+- Recovery sidecars now distinguish `Prepared` from `Completed` installation and record
+  the verified output file's SHA-256. If installation fails or EC stops after preparation,
+  the sidecar remains truthful: its original and expected-output hashes identify which
+  state the current file is in. Sidecar updates use a verified temporary file so a failed
+  update does not overwrite the last valid record.
+- A `-Include` value that contains no usable pattern is rejected instead of silently
+  meaning *every file*. `-Include ""`, `-Include ",,,"` and similar values previously
+  widened a scan to the whole folder. `-Exclude` is validated the same way. Omitting either
+  option keeps its previous meaning.
+- The repeated byte-order-mark probe now requires its complete prefix, rather than treating
+  a short stream read as proof that no repeated mark exists.
+- When an explicit source differs from a BOM-less UTF-16/32 estimate, EC still follows the
+  user's source choice but now records and displays a clear warning. A BOM-confirmed UTF
+  conflict remains a refusal.
+- Saved plans now preserve automatic-detection provenance, including BOM state. This changes
+  the plan schema to version 4; regenerate plans created by an earlier release before applying
+  them with v3.9.2.
 
-## Documentation
+## Scan coverage
 
-- The help text and README now state that hidden files, system files, and reparse points are
-  not examined. This was previously recorded only in the v3.9.0 release notes, not in the two
-  places a reader looks.
+- Matching files skipped for hidden, system, or reparse-point attributes are counted after
+  include, exclude, output, backup, sidecar, and temporary-file exclusions are applied.
+- Hidden, system, and reparse-point folders are counted separately and are not entered.
+  EC does not claim to know how many matching files are inside an unexamined folder.
+- The GUI includes these counts in its completion status. The CLI writes them to standard
+  error so they remain visible with `-Quiet` without entering CSV output.
+- Coverage notices are informational and do not change the exit code. Scripts that require
+  complete coverage should inspect standard error; no new CLI policy switch is introduced
+  in this patch.
+
+## Usability
+
+- Closing the main window a second time can end a run that has not responded to cooperative
+  cancellation, after confirmation. The warning now states accurately that completed files
+  remain converted and that a file being installed may need inspection afterward.
+- The command-line help and README explain which excluded items are counted and where those
+  counts appear.
 
 ## Unchanged
 
-Detection, the strict streaming converter, output verification, atomic installation, backup
-handling, and the v3.9 legacy-source policy are untouched. No conversion behaves differently.
+Detection, strict streaming conversion, exact text verification, backup verification,
+the v3.9 legacy-source rule, and normal exit-code meanings are unchanged.

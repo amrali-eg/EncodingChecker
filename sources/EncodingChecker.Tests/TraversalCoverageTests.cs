@@ -24,19 +24,44 @@ public sealed class TraversalCoverageTests
     }
 
     private static List<string> Enumerate(
-        string root, DirectoryTraversal.TraversalCounters counters)
+        string root,
+        DirectoryTraversal.TraversalCounters counters,
+        IReadOnlyList<string>? include = null,
+        IReadOnlyList<string>? exclude = null)
     {
-        List<Regex> matchAll =
-            DirectoryTraversal.CompilePatterns(["*"], defaultToMatchAll: true);
+        List<Regex> includePatterns =
+            DirectoryTraversal.CompilePatterns(include, defaultToMatchAll: true);
+        List<Regex> excludePatterns =
+            DirectoryTraversal.CompilePatterns(exclude, defaultToMatchAll: false);
 
         return DirectoryTraversal.EnumerateFiles(
             root,
             includeSubdirectories: true,
-            matchAll,
-            [],
+            includePatterns,
+            excludePatterns,
             excludedFullPaths: null,
             onWarning: null,
             counters: counters).ToList();
+    }
+
+    private static (int ExitCode, string Error) RunCli(params string[] args)
+    {
+        TextWriter originalOut = Console.Out;
+        TextWriter originalError = Console.Error;
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        try
+        {
+            Console.SetOut(output);
+            Console.SetError(error);
+            return (Program.RunConsoleMode(args), error.ToString());
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+            Console.SetError(originalError);
+        }
     }
 
     [Fact]
@@ -60,7 +85,8 @@ public sealed class TraversalCoverageTests
             Assert.Equal([visible], found);
 
             // What changed: the caller can now say so.
-            Assert.Equal(1, counters.ExcludedByAttribute);
+            Assert.Equal(1, counters.FilesExcludedByAttribute);
+            Assert.Equal(0, counters.DirectoriesExcludedByAttribute);
         }
         finally
         {
@@ -82,7 +108,7 @@ public sealed class TraversalCoverageTests
             var counters = new DirectoryTraversal.TraversalCounters();
 
             Assert.Empty(Enumerate(root, counters));
-            Assert.Equal(1, counters.ExcludedByAttribute);
+            Assert.Equal(1, counters.FilesExcludedByAttribute);
         }
         finally
         {
@@ -104,7 +130,7 @@ public sealed class TraversalCoverageTests
             var counters = new DirectoryTraversal.TraversalCounters();
 
             Assert.Equal(2, Enumerate(root, counters).Count);
-            Assert.Equal(0, counters.ExcludedByAttribute);
+            Assert.Equal(0, counters.FilesExcludedByAttribute);
         }
         finally
         {
@@ -134,7 +160,7 @@ public sealed class TraversalCoverageTests
             var counters = new DirectoryTraversal.TraversalCounters();
 
             Assert.Single(Enumerate(root, counters));
-            Assert.Equal(2, counters.ExcludedByAttribute);
+            Assert.Equal(2, counters.FilesExcludedByAttribute);
         }
         finally
         {
@@ -159,7 +185,7 @@ public sealed class TraversalCoverageTests
             var counters = new DirectoryTraversal.TraversalCounters();
 
             Assert.Single(Enumerate(root, counters));
-            Assert.Equal(0, counters.ExcludedByAttribute);
+            Assert.Equal(0, counters.FilesExcludedByAttribute);
         }
         finally
         {
@@ -190,6 +216,162 @@ public sealed class TraversalCoverageTests
                 []).ToList();
 
             Assert.Single(found);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void HiddenFileOutsideIncludePattern_IsNotCounted()
+    {
+        string root = NewFolder();
+
+        try
+        {
+            string hidden = Path.Combine(root, "hidden.jpg");
+            File.WriteAllText(hidden, "hidden");
+            File.SetAttributes(hidden, FileAttributes.Hidden);
+            File.WriteAllText(Path.Combine(root, "kept.txt"), "kept");
+
+            var counters = new DirectoryTraversal.TraversalCounters();
+            List<string> found = Enumerate(root, counters, include: ["*.txt"]);
+
+            Assert.Single(found);
+            Assert.Equal(0, counters.FilesExcludedByAttribute);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void HiddenFileExcludedByPattern_IsNotCounted()
+    {
+        string root = NewFolder();
+
+        try
+        {
+            string hidden = Path.Combine(root, "ignored.txt");
+            File.WriteAllText(hidden, "hidden");
+            File.SetAttributes(hidden, FileAttributes.Hidden);
+            File.WriteAllText(Path.Combine(root, "kept.txt"), "kept");
+
+            var counters = new DirectoryTraversal.TraversalCounters();
+            List<string> found = Enumerate(root, counters, exclude: ["ignored.txt"]);
+
+            Assert.Single(found);
+            Assert.Equal(0, counters.FilesExcludedByAttribute);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void HiddenEcArtifact_IsNotCounted()
+    {
+        string root = NewFolder();
+
+        try
+        {
+            string artifact = Path.Combine(root, "a.txt.bak");
+            File.WriteAllText(artifact, "backup");
+            File.SetAttributes(artifact, FileAttributes.Hidden);
+
+            var counters = new DirectoryTraversal.TraversalCounters();
+
+            Assert.Empty(Enumerate(root, counters));
+            Assert.Equal(0, counters.FilesExcludedByAttribute);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void HiddenDirectory_IsReportedWithoutEnteringIt()
+    {
+        string root = NewFolder();
+
+        try
+        {
+            string hiddenDirectory = Path.Combine(root, "hidden-folder");
+            Directory.CreateDirectory(hiddenDirectory);
+            File.WriteAllText(Path.Combine(hiddenDirectory, "not-counted.txt"), "hidden");
+            File.SetAttributes(hiddenDirectory, FileAttributes.Hidden);
+            File.WriteAllText(Path.Combine(root, "kept.txt"), "kept");
+
+            var counters = new DirectoryTraversal.TraversalCounters();
+            List<string> found = Enumerate(root, counters);
+
+            Assert.Single(found);
+            Assert.Equal(0, counters.FilesExcludedByAttribute);
+            Assert.Equal(1, counters.DirectoriesExcludedByAttribute);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void GuiCoverageText_ReportsBothKindsOfIncompleteCoverage()
+    {
+        string root = NewFolder();
+
+        try
+        {
+            string hiddenFile = Path.Combine(root, "hidden.txt");
+            File.WriteAllText(hiddenFile, "hidden");
+            File.SetAttributes(hiddenFile, FileAttributes.Hidden);
+
+            string hiddenDirectory = Path.Combine(root, "hidden-folder");
+            Directory.CreateDirectory(hiddenDirectory);
+            File.SetAttributes(hiddenDirectory, FileAttributes.Hidden);
+
+            var counters = new DirectoryTraversal.TraversalCounters();
+            _ = Enumerate(root, counters);
+
+            string text = MainForm.FormatCoverage(counters);
+
+            Assert.Contains("1 matching file(s) not examined", text);
+            Assert.Contains("1 folder(s) not entered", text);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CliReportsBothKindsOfIncompleteCoverageOnStandardError()
+    {
+        string root = NewFolder();
+
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "kept.txt"), "kept");
+
+            string hiddenFile = Path.Combine(root, "hidden.txt");
+            File.WriteAllText(hiddenFile, "hidden");
+            File.SetAttributes(hiddenFile, FileAttributes.Hidden);
+
+            string hiddenDirectory = Path.Combine(root, "hidden-folder");
+            Directory.CreateDirectory(hiddenDirectory);
+            File.SetAttributes(hiddenDirectory, FileAttributes.Hidden);
+
+            (int exitCode, string error) = RunCli(
+                "-BasePath", root, "-Include", "*.txt", "-DetectOnly", "-Quiet");
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("1 matching file(s) not examined", error);
+            Assert.Contains("1 folder(s) not entered", error);
+            Assert.Contains("contents were not counted", error);
         }
         finally
         {

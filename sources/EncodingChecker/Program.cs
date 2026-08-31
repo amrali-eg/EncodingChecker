@@ -198,10 +198,10 @@ internal static partial class Program
             EncodingChecker.exe -BasePath "D:\Share" -Target utf-8 -MaxParallelism 2
 
         Directories named .git, .svn, .hg, .vs, .idea, bin, obj, node_modules,
-        packages, dist, build, and target are always skipped. Hidden files,
-        system files, and reparse points are not examined; when any are found
-        their count is reported on stderr so a clean result is not mistaken for
-        complete coverage.
+        packages, dist, build, and target are always skipped. Matching hidden,
+        system, and reparse-point files are not examined. Hidden, system, and
+        reparse-point folders are not entered. Both counts are reported on stderr
+        and are informational; they do not change the exit code.
 
         Help: -?, /?, -h, /h, or --help.
 

@@ -66,6 +66,9 @@ internal sealed class ConversionReportEntry
     /// </summary>
     internal bool HasReliableUnicodeDetection { get; set; }
 
+    /// <summary>Whether the automatically detected Unicode encoding had a BOM.</summary>
+    internal bool DetectedEncodingHasBom { get; set; }
+
     /// <summary>
     /// The SHA-256 this file must still have when installed, or <see langword="null"/>
     /// when no plan has committed to its contents. Internal state; not in CSV.
@@ -136,7 +139,9 @@ internal sealed class ConversionReportEntry
     /// <summary>The backup created by this run, even if conversion later failed.</summary>
     internal string? BackupPath { get; set; }
 
-    /// <summary>The recovery sidecar created by this run, when conversion completed.</summary>
+    /// <summary>
+    /// The recovery sidecar prepared by this run. Its state says whether installation completed.
+    /// </summary>
     internal string? RecoveryMetadataPath { get; set; }
 }
 
@@ -148,6 +153,8 @@ internal static class ConversionReasonCodes
     internal const string LegacySourceRequired = nameof(LegacySourceRequired);
     internal const string ExplicitSourceConflictsWithDetection =
         nameof(ExplicitSourceConflictsWithDetection);
+    internal const string ExplicitSourceDiffersFromBomlessUnicodeEstimate =
+        nameof(ExplicitSourceDiffersFromBomlessUnicodeEstimate);
     internal const string StrictValidationFailed = nameof(StrictValidationFailed);
     internal const string SourceSnapshotFailed = nameof(SourceSnapshotFailed);
     internal const string BackupFailed = nameof(BackupFailed);

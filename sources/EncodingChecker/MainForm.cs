@@ -21,6 +21,7 @@ public partial class MainForm : Form
         internal bool IncludeSubdirectories;
         internal required string FileMasks;
         internal required List<string> ValidCharsets;
+        internal required DirectoryTraversal.TraversalCounters Counters;
         internal CancellationToken CancellationToken;
     }
 
@@ -71,6 +72,9 @@ public partial class MainForm : Form
 
     // Shared with the completion handler so it can report how the run ended.
     private ConvertWorkerArgs? _convertArgs;
+
+    // The completed scan's coverage is shown with its result count.
+    private DirectoryTraversal.TraversalCounters? _scanCounters;
 
     // Indices into imgsResults (see SetKeyName calls in MainForm.Designer.cs).
     // Reuses the existing Failed and Warning icons; Warning marks preview rows.
@@ -431,8 +435,8 @@ public partial class MainForm : Form
         MessageBox.Show(
             this,
             "This run has not stopped yet. Closing now abandons it.\r\n\r\n"
-            + "Files already converted stay converted, and the file being written "
-            + "is left unchanged, but no report or journal will be saved.\r\n\r\n"
+            + "Files already completed stay converted. A file currently being installed "
+            + "may need to be checked afterward, and no report or journal will be saved.\r\n\r\n"
             + "Close anyway?",
             @"Close while running",
             MessageBoxButtons.YesNo,

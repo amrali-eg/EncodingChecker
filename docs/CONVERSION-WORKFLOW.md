@@ -14,13 +14,20 @@ The review tells you which files will convert, already match the target, need a 
 
 ## The important rule
 
-| File type | What EC does automatically |
-| --- | --- |
-| Unicode or ASCII | May convert it |
-| Legacy text | Leaves it unchanged until you choose the original encoding |
-| Unknown or unreadable data | Leaves it unchanged |
+For a file that needs conversion, EC applies this policy:
 
-Choosing a legacy encoding answers only “how should these bytes be read?” It does not disable strict decoding, output verification, backups, or atomic installation.
+| Source interpretation | EC's action |
+| --- | --- |
+| Unicode or ASCII detected automatically | Convert if needed |
+| Legacy codec selected explicitly by the user | Convert if needed, subject to every safety check; refuse if the choice conflicts with fully validated UTF-8 or BOM-confirmed UTF-16/32 |
+| Legacy codec detected automatically | Refuse conversion until you choose or confirm the source codec |
+| Unknown or unreadable source | Do not convert |
+
+A file that already matches the target encoding and BOM is reported as **Unchanged** and
+is not decoded or rewritten. No source choice is needed because no conversion occurs.
+
+Choosing a legacy encoding answers only “how should these bytes be read?” It does not
+disable strict decoding, output verification, backup verification, or safe installation.
 
 ## What EC does
 
@@ -38,7 +45,35 @@ flowchart LR
 
 Every step after confirmation must succeed. If decoding, encoding, verification, backup creation, or installation fails, EC leaves that source file unchanged.
 
-## Plans and the command line
+## Two ways to start a conversion
+
+EC offers two workflows, but they do not use different conversion engines. Both use the
+same source-encoding policy, strict codecs, output verification, backup checks, and safe
+file installation.
+
+**Most users should use direct conversion. Saved plan/apply is an optional advanced
+workflow for delayed approval or repeatable automation.**
+
+| Workflow | Best for | What happens |
+| --- | --- | --- |
+| Direct conversion | Normal GUI use and simple command-line jobs | EC scans, makes its safety decisions, and converts during one run. |
+| Saved plan and apply | Important batches, automation, or approval at a later time | EC saves exactly what was reviewed, then verifies that saved decision before writing. |
+
+### Direct conversion
+
+The GUI normally uses the direct workflow: **View → select → Convert → review → confirm**.
+The review plan exists in memory and is executed immediately after confirmation.
+
+The command-line equivalent is:
+
+```powershell
+EncodingChecker.exe -BasePath "C:\Files" -Target utf-8 -Backup
+```
+
+Choose direct conversion when you are reviewing and converting the files in the same
+session. It is simpler because there is no plan file to save or manage.
+
+### Saved plan and apply
 
 For a cautious batch workflow, create a plan first:
 
@@ -52,9 +87,61 @@ After reviewing it, apply that exact plan:
 EncodingChecker.exe -Apply plan.json
 ```
 
-Detection and SHA-256 hashing use the same source snapshot when the plan is built. The plan contains those hashes and the complete conversion settings. If a scheduled file changes after review, EC rejects the whole plan instead of applying an approval to different bytes. `-Apply` cannot be combined with `-WhatIf`: the saved plan is already the preview, while applying it performs the reviewed writes.
+Detection and SHA-256 hashing use the same source snapshot when the plan is built. The plan
+contains those hashes and the complete conversion settings. If a scheduled file changes
+after review, EC rejects the whole plan instead of applying an approval to different bytes.
+`-Apply` cannot be combined with `-WhatIf`: the saved plan is already the preview, while
+applying it performs the reviewed writes.
 
-The GUI uses the same planned actions. Its **Export results** menu can save selected rows as text, all displayed results as a diagnostic CSV report, or the exact completed conversion journal as JSON.
+### What a saved plan uniquely provides
+
+A saved plan lets you separate review from execution. It records:
+
+- the folder and relative file paths;
+- each file's size and SHA-256;
+- the detected or explicitly selected source encoding;
+- the target encoding and BOM choice;
+- whether backups are enabled;
+- the EC plan schema and conversion-safety rules.
+
+When you run `-Apply`, EC uses those saved decisions instead of detecting the files again.
+Before writing anything, it verifies every planned file. If any file changed, disappeared,
+or no longer matches the approved plan, EC rejects the entire plan.
+
+This is useful when:
+
+- the plan is reviewed now but applied later;
+- one person prepares a batch and another approves it;
+- a script must perform exactly a previously reviewed operation;
+- you need a durable record of what was approved.
+
+### What a saved plan does not provide
+
+A plan does not improve encoding detection or make an incorrect source choice correct. It
+does not disable any safety check, provide a restore command, or make the whole batch one
+atomic transaction. Files are still verified and installed individually. A plan also cannot
+include hidden or otherwise excluded files that EC never scanned.
+
+Plans deliberately become invalid when their files change. Regenerate and review the plan
+rather than editing its hashes or trying to force an old approval onto new bytes.
+
+### Why EC keeps direct conversion
+
+For everyday work, requiring everyone to save and reapply a JSON plan would add extra steps
+without improving the per-file conversion checks. Direct conversion therefore remains the
+simple workflow, while plan/apply is available when delayed approval, automation, or exact
+reproducibility matters.
+
+In short:
+
+```text
+Direct: scan → review → convert now
+Plan:   scan → save approval → review later → verify unchanged files → convert
+```
+
+The GUI uses the same planned actions. Its **Export results** menu can save selected rows as
+text, all displayed results as a diagnostic CSV report, or the exact completed conversion
+journal as JSON.
 
 For a known legacy source, supply the encoding explicitly:
 
