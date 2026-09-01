@@ -161,6 +161,15 @@ internal static class ConversionReasonCodes
         nameof(ExplicitSourceConflictsWithDetection);
     internal const string ExplicitSourceDiffersFromBomlessUnicodeEstimate =
         nameof(ExplicitSourceDiffersFromBomlessUnicodeEstimate);
+    /// <summary>
+    /// An explicit source was supplied for a file whose BOM-less UTF-16/32 byte order
+    /// could not be established from its bytes, and it agrees with EC's estimate.
+    /// Distinct from <see cref="ExplicitSourceDiffersFromBomlessUnicodeEstimate"/>:
+    /// agreeing with an estimate EC has already declared unprovable is not evidence,
+    /// so the caller is told the order was taken on trust either way.
+    /// </summary>
+    internal const string ExplicitSourceOnUnprovableBomlessUnicode =
+        nameof(ExplicitSourceOnUnprovableBomlessUnicode);
     internal const string AmbiguousBomlessUtf16 = BomlessUnicodeSafety.AmbiguousReasonCode;
     internal const string StrictValidationFailed = nameof(StrictValidationFailed);
     internal const string SourceSnapshotFailed = nameof(SourceSnapshotFailed);

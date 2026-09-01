@@ -766,14 +766,34 @@ internal static class ScanEngine
         if (entry.Action is null)
             DetectionCounters.RecordClassification();
 
-        // Source snapshots normally carry this result into the reviewed plan. Recheck
-        // here as well for callers of ConvertFiles that supply entries directly.
-        bool automaticBomlessUtf16IsAmbiguous =
-            !entry.SourceEncodingWasSpecified &&
-            (entry.HasAmbiguousBomlessUtf16 || IsAmbiguousBomlessUtf16(
-                path, sourceEncoding, sourceHasBom));
+        // Whether this file's byte order can be established from its bytes is a fact
+        // about the file, not a decision about what to do. Folding the two together
+        // erased the fact whenever a source was supplied: the entry then reached the
+        // advisory below with nothing left to consult but detection's own estimate,
+        // which is the very thing an ambiguous file proves nothing about.
+        //
+        // Source snapshots normally carry this in. Recheck for callers of ConvertFiles
+        // that supply entries directly, testing what detection saw - with an explicit
+        // source, sourceEncoding is the answer being offered, not evidence about the
+        // file, and asking it would always answer no.
+        Encoding? bomlessCandidate = entry.SourceEncodingWasSpecified
+            ? automaticallyDetected
+            : sourceEncoding;
 
-        entry.HasAmbiguousBomlessUtf16 = automaticBomlessUtf16IsAmbiguous;
+        bool candidateHasBom = entry.SourceEncodingWasSpecified
+            ? entry.DetectedEncodingHasBom
+            : sourceHasBom;
+
+        bool bomlessUtf16IsAmbiguous =
+            entry.HasAmbiguousBomlessUtf16 ||
+            (bomlessCandidate is not null && IsAmbiguousBomlessUtf16(
+                path, bomlessCandidate, candidateHasBom));
+
+        entry.HasAmbiguousBomlessUtf16 = bomlessUtf16IsAmbiguous;
+
+        // The decision: refuse automatically only when nobody has supplied an answer.
+        bool automaticBomlessUtf16IsAmbiguous =
+            !entry.SourceEncodingWasSpecified && bomlessUtf16IsAmbiguous;
 
         PlannedAction action = ConversionPolicy.Decide(
             sourceCharset,
@@ -808,19 +828,33 @@ internal static class ScanEngine
         // The optional BOM-less Unicode advisory below is added back for this pass.
         entry.Diagnostic = null;
 
+        // Reported whether or not the choice matches detection's estimate. Matching an
+        // estimate EC cannot prove is not corroboration, and staying silent for it left
+        // the one case most likely to be wrong - the caller repeating a wrong guess -
+        // indistinguishable from an ordinary conversion.
         if (action == PlannedAction.Convert &&
             entry.SourceEncodingWasSpecified &&
             automaticallyDetected is not null &&
             IsUtf16OrUtf32(automaticallyDetected) &&
             !entry.DetectedEncodingHasBom &&
-            automaticallyDetected.CodePage != sourceEncoding.CodePage)
+            (bomlessUtf16IsAmbiguous ||
+             automaticallyDetected.CodePage != sourceEncoding.CodePage))
         {
-            entry.ReasonCode =
-                ConversionReasonCodes.ExplicitSourceDiffersFromBomlessUnicodeEstimate;
-            entry.Diagnostic =
-                $"EC estimated BOM-less {automaticallyDetected.WebName}, but you selected "
-                + $"{sourceEncoding.WebName}. BOM-less Unicode can be ambiguous, so EC used "
-                + "your explicit selection and kept all strict conversion checks enabled.";
+            bool matchesEstimate =
+                automaticallyDetected.CodePage == sourceEncoding.CodePage;
+
+            entry.ReasonCode = matchesEstimate
+                ? ConversionReasonCodes.ExplicitSourceOnUnprovableBomlessUnicode
+                : ConversionReasonCodes.ExplicitSourceDiffersFromBomlessUnicodeEstimate;
+
+            entry.Diagnostic = matchesEstimate
+                ? $"This file's BOM-less {sourceEncoding.WebName} byte order could not be "
+                  + "established from its bytes. Your selection matches EC's estimate, but "
+                  + "that estimate is not evidence, so the order was taken on trust. EC kept "
+                  + "all strict conversion checks enabled."
+                : $"EC estimated BOM-less {automaticallyDetected.WebName}, but you selected "
+                  + $"{sourceEncoding.WebName}. BOM-less Unicode can be ambiguous, so EC used "
+                  + "your explicit selection and kept all strict conversion checks enabled.";
         }
 
         if (action != PlannedAction.Convert)
