@@ -118,6 +118,72 @@ public sealed class BomlessUtf16SafetyTests : IDisposable
     }
 
     [Fact]
+    public void ExplicitSourceMatchingTheEstimate_IsStillReportedAsUnprovable()
+    {
+        // The case that shipped silent. Detection prefers little-endian for these
+        // bytes and is wrong; a caller who repeats that guess destroys the file. EC
+        // had already refused it as unprovable, so it holds the one fact that would
+        // warn them - and reported nothing, because the choice agreed with the guess.
+        // Agreeing with an estimate EC cannot prove is not corroboration.
+        string authoritativeText = string.Concat(
+            Enumerable.Repeat("䄀਀䈀", 20));
+        var utf16Be = new UnicodeEncoding(
+            bigEndian: true, byteOrderMark: false, throwOnInvalidBytes: true);
+
+        ConversionReportEntry entry = Convert(
+            "matches-estimate.txt",
+            utf16Be.GetBytes(authoritativeText),
+            sourceEncoding: "utf-16");
+
+        Assert.Equal(ConversionRowResult.Converted, entry.Result);
+        Assert.Equal(
+            ConversionReasonCodes.ExplicitSourceOnUnprovableBomlessUnicode,
+            entry.ReasonCode);
+        Assert.Contains("could not be established", entry.Diagnostic);
+        Assert.Contains("taken on trust", entry.Diagnostic);
+    }
+
+    [Fact]
+    public void ExplicitSourceContradictingTheEstimate_KeepsItsOwnReasonCode()
+    {
+        // The two situations must stay distinguishable in the machine-readable field:
+        // one caller contradicted a guess, the other repeated it, and a script reading
+        // reports should be able to tell which.
+        string authoritativeText = string.Concat(
+            Enumerable.Repeat("䄀਀䈀", 20));
+        var utf16Be = new UnicodeEncoding(
+            bigEndian: true, byteOrderMark: false, throwOnInvalidBytes: true);
+
+        ConversionReportEntry entry = Convert(
+            "differs-from-estimate.txt",
+            utf16Be.GetBytes(authoritativeText),
+            sourceEncoding: "utf-16BE");
+
+        Assert.Equal(ConversionRowResult.Converted, entry.Result);
+        Assert.Equal(
+            ConversionReasonCodes.ExplicitSourceDiffersFromBomlessUnicodeEstimate,
+            entry.ReasonCode);
+    }
+
+    [Fact]
+    public void ExplicitSourceOnAProvableFile_IsNotReported()
+    {
+        // The advisory must not fire for every explicit UTF-16 choice, only where the
+        // byte order could not be established. U+00D8 byte-swaps to an unpaired
+        // surrogate, so big-endian is structurally impossible and the order is proven.
+        var utf16Le = new UnicodeEncoding(
+            bigEndian: false, byteOrderMark: false, throwOnInvalidBytes: true);
+
+        ConversionReportEntry entry = Convert(
+            "provable.txt",
+            utf16Le.GetBytes("Øhello world, this is provable little-endian"),
+            sourceEncoding: "utf-16");
+
+        Assert.Equal(ConversionRowResult.Converted, entry.Result);
+        Assert.Null(entry.ReasonCode);
+    }
+
+    [Fact]
     public void ExplicitUtf16SourceResolvesAnAmbiguousFileButKeepsEveryOtherSafetyCheck()
     {
         string authoritativeText = string.Concat(
