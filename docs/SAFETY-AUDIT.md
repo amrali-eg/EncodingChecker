@@ -130,6 +130,56 @@ Verified on the tagged commit: CI and the shared-detector parity job both pass, 
 
 The `Prepared`/`Completed` protocol still has no restore command to exercise it, so its recovery value rests on the record being readable by hand rather than on a tested recovery path, and `ExpectedOutputSha256` is recorded but nothing in EC consumes it yet.
 
+### v3.10.0 audited build
+
+v3.10.0 changes conversion policy, so it was measured against the four corpora from a clean checkout of the commit it was tagged at, and compared per file against v3.9.2.
+
+```
+commit    522eeb837b9ab843b20ad3e44dcc403493c3119d   (annotated tag v3.10.0)
+worktree  clean
+platform  .NET 10 - Windows 11 10.0.26200
+assembly  EncodingChecker.dll
+          19bcbe0958830847771e73fd48bcac5566e10fda1ca3814585667f5fd5e1aa35
+run       rel3100, compared against rel392 in audit/reports/rel392-vs-rel3100/
+```
+
+As with the earlier records, that digest identifies the managed assembly the audit loaded, not the apphost and not either release ZIP.
+
+**Exactly one file of 5,078 changed outcome, and it improved.**
+
+```
+changed=1  improved=1  regressed=0  lateral=0
+
+Misdetection      5 -> 4   (-1)
+RefusedByPolicy  29 -> 30  (+1)
+```
+
+A file that v3.9.2 misdetected and converted anyway is now refused. That is the entire measured effect of the release: not a trade of safety against capability, but one file that stopped being silently rewritten as characters its author never wrote.
+
+| Metric | v3.9.2 | v3.10.0 |
+|---|---|---|
+| Detection accuracy | 4640/4646 (99.87%) | 4640/4646 (99.87%) |
+| Strict-decoding correctness | 4695/4695 (100.00%) | 4694/4694 (100.00%) |
+| Codec conformance | 4592/4695 (97.81%) | 4591/4694 (97.81%) |
+| End-to-end text preservation | 4520/4623 (97.77%) | 4520/4623 (97.77%) |
+
+The denominators fall by one because a refused file is no longer scored: nothing was written, so there is nothing to compare. The distribution alarm did not fire — at 0.02 percentage points the movement is far below its one-point threshold. A larger shift was expected before the run; the audit established that the policy change reaches one file rather than a population, which is the kind of number an estimate cannot supply.
+
+Every other category is unchanged, including the 103 mapping differences and the 297 unscored files, and all four corpora recorded zero implementation defects, zero throws, and zero backup-integrity failures.
+
+**What the audit establishes here.** That a deliberate policy change did exactly what it intended and nothing else — one misdetected file refused, no other file's outcome disturbed.
+
+**What it does not.** The corpus supplies each file's reference codec through `-From`, so it never exercises the GUI source chooser this release added. That the chooser offers `utf-16le` and `utf-16be` for an ambiguous refusal was verified by manual GUI smoke phases D and E against the Release build, and by the orchestration regression tests — not by corpus measurement.
+
+#### What changed in v3.10.0
+
+- **BOM-less UTF-16 whose byte order cannot be proven is refused.** Without a BOM these bytes usually decode as valid text in both byte orders, and EC's content verification cannot catch a wrong choice because it decodes and re-encodes through the same codec, so both sides agree on the wrong reading. Conversion is refused when the opposite byte order also strictly decodes the complete file, with reason code `AmbiguousBomlessUtf16` and exit code 5, before any preview, metadata, backup, or write. A refusal leaves no `.bak` and no sidecar even when backups are enabled. Where the opposite order is structurally impossible the byte order is proven and conversion proceeds unchanged.
+- **The refusal is answerable rather than final.** `RequiresExplicitSourceChoice` covers this reason code alongside legacy text, so the GUI's source chooser offers `utf-16le` and `utf-16be` for these files and `-From` resolves them on the command line. An explicit choice replaces detection only; strict decoding, verification, backup checks and atomic installation all still apply.
+- `--version` reads the assembly rather than a literal, and the release workflow refuses to publish when the tag and assembly versions disagree.
+- The documentation is reorganised into focused pages under `docs/`.
+
+Verified on the tagged commit: CI and the shared-detector parity job both pass, the full suite passes 492/492 with zero warnings, and manual GUI smoke phases D and E pass against the Release build. `UnicodeDetector.cs` and `TextValidation.cs` are untouched, so parity with LineEndingNormalizer and CorpusTesters is unaffected.
+
 ## Known limits
 
 - No detector can recover an author's historical legacy encoding when the same bytes admit multiple plausible readings. EC refuses automatic legacy conversion instead of guessing.
