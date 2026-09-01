@@ -626,7 +626,7 @@ public sealed class ConversionPlanTests : IDisposable
             Line("Will convert:")
             + Line("Already in target encoding:")
             + Line("Encoding not identified:")
-            + Line("Needs legacy source choice:")
+            + Line("Needs source choice:")
             + Line("Refused, unreadable:"));
 
         Assert.Equal(plan.Files.Count, Line("Selected:"));

@@ -3,13 +3,33 @@
 Automated coverage is the first gate and is enforced by CI. What follows is what CI
 cannot answer.
 
+## Source and version
+
+- [ ] Working tree is clean.
+- [ ] `AssemblyInfo.cs` contains the intended version; CLI help and `--version` display it; README and release notes name it.
+- [ ] Release tag is exactly `v<project version>`.
+- [ ] `SemanticsVersion` changes only when conversion or classification behaviour changes.
+
 ## Automated
 
+- [ ] Release build succeeds with no warnings.
 - [ ] `dotnet test sources/EncodingChecker.Tests/EncodingChecker.Tests.csproj -c Release` — all green.
 - [ ] The scheduled **Shared Unicode detector parity** workflow is green. It compares
       the shared detector source in EncodingChecker, LineEndingNormalizer, and
       CorpusTesters after normalizing namespace, a redundant `using System` import,
       and line-ending differences.
+- [ ] Ambiguous BOM-less UTF-16 is refused without changing bytes or creating a backup.
+- [ ] Structurally provable BOM-less UTF-16 still converts correctly.
+- [ ] Explicit source selection still receives strict decoding and output verification.
+- [ ] A stale reviewed plan leaves every selected source unchanged.
+- [ ] Backup and recovery-sidecar hashes match the source bytes used for conversion.
+- [ ] CSV reports and JSON journals contain a stable reason code and useful diagnostic.
+
+For a release changing detection or conversion policy:
+
+- [ ] Run the four-corpus audit from a clean committed build.
+- [ ] Record the exact commit, assembly hash, audit configuration, and limitations.
+- [ ] Run the independent-oracle sentinel set when the release checklist requires it.
 
 ## Manual: the GUI smoke test
 
@@ -36,15 +56,17 @@ Get-FileHash -Algorithm SHA256 <path> | Select-Object -ExpandProperty Hash
 
 ### Core GUI smoke test
 
-[`tools/gui-smoke-test.py`](tools/gui-smoke-test.py) creates disposable folders on the
+[`tools/gui-smoke-test.py`](../tools/gui-smoke-test.py) creates disposable folders on the
 Desktop and verifies the resulting bytes. For every phase, set the printed folder as
 **Directory to check** and choose **utf-8** in **Convert to**. Then run each short phase
 with the Release build:
 
 ```powershell
-python tools/gui-smoke-test.py setup A
+$smoke = (Resolve-Path tools/gui-smoke-test.py)
+python $smoke setup A
 # perform the displayed GUI steps
-python tools/gui-smoke-test.py verify A
+python $smoke mark A
+python $smoke verify A
 ```
 
 | Phase | What the GUI check proves |
@@ -52,6 +74,8 @@ python tools/gui-smoke-test.py verify A
 | A | **View** lists the prepared files; Unicode and ASCII are ready, legacy files need a source choice; **Cancel** changes no bytes and creates no recovery files. |
 | B | Unicode and ASCII convert without a source choice and preserve their exact text. |
 | C | A chosen legacy source encoding applies only to the ticked files; unselected legacy files stay unchanged. |
+| D | Ambiguous BOM-less UTF-16 is refused; cancelling leaves its bytes and folder unchanged. |
+| E | An explicit BOM-less UTF-16 source choice converts the file exactly and creates its backup and recovery record. |
 
 The script verifies hashes and decoded output; status messages alone never count as evidence.
 Its `tools/smoke-state-*.json` files are local generated state and must not be committed.
@@ -81,16 +105,18 @@ Tester:
 Phase A (review + cancel):                  PASS / FAIL
 Phase B (Unicode + ASCII conversion):       PASS / FAIL
 Phase C (scoped legacy source choice):      PASS / FAIL
+Phase D (ambiguous BOM-less UTF-16 refusal): PASS / FAIL
+Phase E (explicit BOM-less UTF-16 choice):   PASS / FAIL
 
 Cases where observed differed from expected:
 
 Result: PASS / FAIL
 ```
 
-## Documentation
+## Documentation and publish
 
 - [ ] README figures match the current audit run; no stale counts.
-- [ ] Version bumped in `Program.cs` usage text and the README heading.
-- [ ] `SemanticsVersion` bumped **only** if conversion or classification behaviour
-      changed — it invalidates existing plans, and bumping it for a release that changed
-      neither teaches people to work around the check.
+- [ ] README and release notes describe every changed refusal or safety rule.
+- [ ] Publish framework-dependent and self-contained artifacts.
+- [ ] Verify archive names and GitHub SHA-256 digests.
+- [ ] Link audit evidence and state its limits in the release notes.

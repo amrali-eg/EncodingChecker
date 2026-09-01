@@ -286,7 +286,8 @@ internal sealed class ConversionOrchestrator
         foreach (ConversionReportEntry entry in entries)
         {
             if (entry.Action != PlannedAction.Refuse ||
-                entry.SourceInterpretation != SourceInterpretation.LegacyNeedsSourceChoice)
+                !ConversionPolicy.RequiresExplicitSourceChoice(
+                    entry.SourceInterpretation, entry.ReasonCode))
                 continue;
 
             if (scope is not null && !scope.Contains(entry.FilePath))

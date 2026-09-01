@@ -124,8 +124,11 @@ public sealed class ConversionOrchestrationTests : IDisposable
         List<ConversionReportEntry> entries = View();
 
         // Replace the bytes after View but before conversion planning. The plan must use
-        // the new big-endian interpretation and its matching hash, not View's old label.
-        File.WriteAllBytes(path, new UnicodeEncoding(true, false).GetBytes(text));
+        // the new BOM-confirmed big-endian interpretation and its matching hash, not
+        // View's old label. The BOM is intentional: this test proves snapshot binding,
+        // while BOM-less byte-order ambiguity is covered by BomlessUtf16SafetyTests.
+        var utf16Be = new UnicodeEncoding(true, true);
+        File.WriteAllBytes(path, [.. utf16Be.GetPreamble(), .. utf16Be.GetBytes(text)]);
         string replacementHash = ConversionMetadataStore.ComputeSha256(path);
 
         ConversionPlan? shown = null;
@@ -138,6 +141,7 @@ public sealed class ConversionOrchestrationTests : IDisposable
         Assert.NotNull(shown);
         PlannedFile file = Assert.Single(shown.Files);
         Assert.Equal(1201, file.SourceCodePage);
+        Assert.True(file.SourceHasBom);
         Assert.Equal(replacementHash, file.Sha256);
         Assert.Equal(OrchestrationOutcome.Converted, result.Outcome);
         Assert.Equal(text, Encoding.UTF8.GetString(File.ReadAllBytes(path)));
@@ -184,6 +188,50 @@ public sealed class ConversionOrchestrationTests : IDisposable
 
         Assert.Equal(OrchestrationOutcome.Converted, result.Outcome);
         Assert.Equal(before, File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void ExplicitUtf16Choice_ResolvesAnAmbiguousBomlessUtf16Refusal()
+    {
+        // The first plan must refuse because automatic detection cannot prove the byte
+        // order. Choosing UTF-16BE then rebuilds that same file as an explicit source;
+        // strict decoding and output verification still decide whether it can be written.
+        string text = string.Concat(Enumerable.Repeat("\u4100\u0A00\u4200", 20));
+        byte[] original = new UnicodeEncoding(
+            bigEndian: true,
+            byteOrderMark: false,
+            throwOnInvalidBytes: true).GetBytes(text);
+        string path = Path.Combine(_root, "ambiguous-utf16be.txt");
+        File.WriteAllBytes(path, original);
+
+        var plansShown = new List<ConversionPlan>();
+        var answered = false;
+
+        OrchestrationResult result = Convert(View(), plan =>
+        {
+            plansShown.Add(plan);
+
+            if (answered)
+                return ConfirmationResponse.Proceed;
+
+            answered = true;
+            return new ConfirmationResponse(
+                ConfirmationChoice.ChooseSourceEncoding, "utf-16be", [path]);
+        }, backup: true);
+
+        PlannedFile first = Assert.Single(plansShown[0].Files);
+        PlannedFile resolved = Assert.Single(plansShown[1].Files);
+
+        Assert.Equal(PlannedAction.Refuse, first.Action);
+        Assert.Equal(ConversionReasonCodes.AmbiguousBomlessUtf16, first.ReasonCode);
+        Assert.True(first.NeedsSourceChoice);
+        Assert.Equal(PlannedAction.Convert, resolved.Action);
+        Assert.Equal("utf-16be", resolved.SourceEncoding);
+        Assert.True(resolved.SourceWasSpecified);
+        Assert.Equal(OrchestrationOutcome.Converted, result.Outcome);
+        Assert.Equal(text, Encoding.UTF8.GetString(File.ReadAllBytes(path)));
+        Assert.Equal(original, File.ReadAllBytes(path + ".bak"));
+        Assert.True(File.Exists(ConversionMetadataStore.MetadataPathFor(path)));
     }
 
     [Fact]

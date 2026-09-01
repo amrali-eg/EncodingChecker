@@ -35,6 +35,9 @@ public sealed class ConversionConfirmationFormTests : IDisposable
         File.WriteAllBytes(
             Path.Combine(_root, name), Encoding.GetEncoding(charset).GetBytes(text));
 
+    private void WriteBytes(string name, byte[] bytes) =>
+        File.WriteAllBytes(Path.Combine(_root, name), bytes);
+
     /// <summary>A plan over whatever is currently in the directory.</summary>
     private ConversionPlan Plan(bool backup = true, string target = "utf-8")
     {
@@ -212,6 +215,40 @@ public sealed class ConversionConfirmationFormTests : IDisposable
     }
 
     [Fact]
+    public void ItOffersAnExplicitChoiceForAmbiguousBomlessUtf16()
+    {
+        // This is not legacy text: EC detects UTF-16LE, but the exact bytes also strictly
+        // decode as UTF-16BE. Automatic conversion must refuse, while the review must give
+        // the user the same explicit UTF-16/UTF-16BE choice that -From provides in CLI.
+        string text = string.Concat(Enumerable.Repeat("\u4100\u0A00\u4200", 20));
+        byte[] bytes = new UnicodeEncoding(
+            bigEndian: true,
+            byteOrderMark: false,
+            throwOnInvalidBytes: true).GetBytes(text);
+        WriteBytes("ambiguous-utf16be.txt", bytes);
+
+        ConversionPlan plan = Plan();
+        PlannedFile refused = Assert.Single(plan.Files);
+
+        Assert.Equal(ConversionReasonCodes.AmbiguousBomlessUtf16, refused.ReasonCode);
+        Assert.True(refused.NeedsSourceChoice);
+
+        UiTest.OnStaThread(() =>
+        {
+            using var form = new ConversionConfirmationForm(plan);
+            ComboBox chooser = Assert.Single(Descendants(form).OfType<ComboBox>());
+            ListView list = Assert.Single(Descendants(form).OfType<ListView>());
+
+            Assert.Contains("utf-16", chooser.Items.Cast<string>());
+            Assert.Contains("utf-16BE", chooser.Items.Cast<string>());
+            Assert.Contains(
+                "ambiguous-utf16be.txt",
+                list.Items.Cast<ListViewItem>().Select(item => item.Text));
+            Assert.Contains("cannot safely process", AllText(form));
+        });
+    }
+
+    [Fact]
     public void SourcePickerOffersOnlyRuntimeSupportedCanonicalEncodings()
     {
         Write("ambiguous.txt", "Le café était déjà prêt", "windows-1252");
@@ -265,7 +302,7 @@ public sealed class ConversionConfirmationFormTests : IDisposable
 
             Assert.Equal("Files requiring source encoding", list.AccessibleName);
             Assert.False(string.IsNullOrWhiteSpace(list.AccessibleDescription));
-            Assert.Equal("Source encoding for selected legacy files", source.AccessibleName);
+            Assert.Equal("Source encoding for selected files", source.AccessibleName);
             Assert.False(string.IsNullOrWhiteSpace(source.AccessibleDescription));
             Assert.Equal("Confirm selected source encoding", confirmSource.AccessibleName);
             Assert.False(string.IsNullOrWhiteSpace(confirmSource.AccessibleDescription));

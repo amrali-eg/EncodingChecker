@@ -5,7 +5,7 @@ namespace EncodingChecker;
 /// </summary>
 /// <remarks>
 /// This replaces the former candidate/ambiguity model. EC automatically converts only
-/// Unicode and ASCII; legacy text needs the user's explicit source choice.
+/// sources EC can identify safely; other files need the user's explicit source choice.
 /// </remarks>
 internal enum SourceInterpretation
 {

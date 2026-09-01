@@ -25,6 +25,9 @@ internal static class ConversionPolicy
     /// <param name="sourceWasSpecified">Whether the source encoding was explicitly specified by the user.</param>
     /// <param name="isUnicodeOrAscii">Whether the source encoding is Unicode or ASCII.</param>
     /// <param name="explicitSourceConflictsWithReliableDetection">Whether the explicitly specified source encoding conflicts with reliable detection.</param>
+    /// <param name="automaticBomlessUtf16IsAmbiguous">
+    /// Whether automatic BOM-less UTF-16 detection is valid under both byte orders.
+    /// </param>
     /// <returns>The planned action for the file.</returns>
     internal static PlannedAction Decide(
         string sourceCharset,
@@ -34,6 +37,7 @@ internal static class ConversionPolicy
         bool sourceWasSpecified,
         bool isUnicodeOrAscii,
         bool explicitSourceConflictsWithReliableDetection,
+        bool automaticBomlessUtf16IsAmbiguous,
         out SourceInterpretation sourceInterpretation,
         out string? reason)
     {
@@ -60,6 +64,14 @@ internal static class ConversionPolicy
             sourceInterpretation = SourceInterpretation.ExplicitSource;
             reason = "The selected source encoding conflicts with EC's reliable Unicode "
                      + "or ASCII detection and could change the text. No conversion was performed.";
+            return PlannedAction.Refuse;
+        }
+
+        if (!sourceWasSpecified && automaticBomlessUtf16IsAmbiguous)
+        {
+            sourceInterpretation = SourceInterpretation.AutomaticUnicodeOrAscii;
+            reason = "BOM-less UTF-16 needs a byte order that the bytes do not prove. "
+                     + "Choose the original source encoding explicitly before converting.";
             return PlannedAction.Refuse;
         }
 
@@ -91,4 +103,17 @@ internal static class ConversionPolicy
         PlannedAction.Refuse => ConversionRowResult.Refused,
         _ => ConversionRowResult.Converted,
     };
+
+    /// <summary>
+    /// Whether a refusal can be resolved by the user identifying the original source
+    /// encoding. Kept here so the GUI, plans, and CLI describe the same policy.
+    /// </summary>
+    internal static bool RequiresExplicitSourceChoice(
+        SourceInterpretation? sourceInterpretation,
+        string? reasonCode) =>
+        sourceInterpretation == SourceInterpretation.LegacyNeedsSourceChoice ||
+        string.Equals(
+            reasonCode,
+            ConversionReasonCodes.AmbiguousBomlessUtf16,
+            StringComparison.Ordinal);
 }

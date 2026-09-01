@@ -37,11 +37,11 @@ internal sealed record ConversionSemantics
     /// <summary>
     /// Changes only when the meaning of an existing plan's decisions changes.
     /// </summary>
-    internal const int Current = 4;
+    internal const int Current = 5;
 
     /// <summary>The guarantees of <see cref="Current"/> shown to the reader.</summary>
     internal const string Describes =
-        "source-bound detection, strict codecs, verified output, atomic install, explicit source required for legacy text";
+        "source-bound detection, strict codecs, verified output, atomic install, explicit source required for legacy text, proven BOM-less UTF-16 byte order";
 
     /// <summary>Malformed input is rejected rather than replaced.</summary>
     public bool StrictDecoding { get; init; } = true;
@@ -112,7 +112,8 @@ internal sealed record PlannedFile
 
     /// <summary>Whether automatic conversion needs the user to name the source codec.</summary>
     public bool NeedsSourceChoice =>
-        SourceInterpretation == SourceInterpretation.LegacyNeedsSourceChoice;
+        Action == PlannedAction.Refuse &&
+        ConversionPolicy.RequiresExplicitSourceChoice(SourceInterpretation, ReasonCode);
 }
 
 /// <summary>
@@ -456,7 +457,7 @@ internal sealed record ConversionPlan
             $"Will convert:                 {summary.ReadyToConvert}",
             $"Already in target encoding:   {summary.AlreadyTarget}",
             $"Encoding not identified:      {summary.NotIdentified}",
-            $"Needs legacy source choice:   {summary.NeedsSourceChoice}",
+            $"Needs source choice:          {summary.NeedsSourceChoice}",
             $"Refused, unreadable:          {summary.OtherRefusals}",
             string.Empty,
             $"Directory:                    {BaseDirectory}",

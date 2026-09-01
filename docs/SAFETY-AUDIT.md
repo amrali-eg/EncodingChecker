@@ -1,58 +1,11 @@
-# EncodingChecker safety and audit
+# Independent safety audit
 
-This document is the technical companion to the main [README](../README.md). It explains what EC's conversion pipeline guarantees, what it does not guarantee, and how those claims are checked independently.
+This document records the independent corpus evidence for released EC builds.
+For the current conversion rules, backups, recovery metadata, and known limits,
+see [Safety and recovery](SAFETY.md). For the user workflow, see
+[How conversion works](CONVERSION-WORKFLOW.md).
 
-## Conversion safety boundary
-
-For each file that EC is allowed to convert, the engine:
-
-1. strictly decodes the source encoding;
-2. strictly encodes the requested target encoding into a temporary file;
-3. strictly decodes that temporary output and compares the exact Unicode scalar sequence with the source text;
-4. if backups are enabled, creates and verifies `<file>.bak` plus recovery metadata;
-5. installs the verified temporary file atomically where the platform supports it.
-
-Any decode, encode, verification, backup, or write failure leaves the source file unchanged. No normalization, case folding, whitespace rewriting, or replacement-character fallback is used to make a conversion appear successful.
-
-The source is not rewritten in place. File attributes and timestamps are applied to the temporary output before installation. EC skips its own backups and temporary files on subsequent scans.
-
-## Source-encoding policy
-
-Encoding identification and text preservation are different questions. A sequence of legacy bytes often cannot prove which historical single-byte code page produced it.
-
-EC therefore has a simple policy. For a file that needs conversion:
-
-| Source interpretation | EC's action |
-| --- | --- |
-| Unicode or ASCII detected automatically | Convert if needed |
-| Legacy codec selected explicitly by the user | Convert if needed, subject to every safety check; refuse if the choice conflicts with fully validated UTF-8 or BOM-confirmed UTF-16/32 |
-| Legacy codec detected automatically | Refuse conversion until you choose or confirm the source codec |
-| Unknown or unreadable source | Do not convert |
-
-A file that already matches the target encoding and BOM is reported as **Unchanged** and
-is not decoded or rewritten. No source choice is needed because no conversion occurs.
-
-`-From` and the GUI source chooser replace detection only. They do not bypass strict decoding, output verification, backup verification, or atomic installation.
-
-## Plans, confirmation, and recovery
-
-`-Plan` writes a conversion plan without changing files. Detection and hashing read the same source snapshot. The plan contains those source hashes, paths relative to its declared root, target and BOM policy, source-selection mode, backup setting, and conversion-semantics version.
-
-`-Apply` rejects changed, missing, relocated, or incompatible planned work as a whole; it does not silently apply the remaining files. EC also rechecks the source hash immediately before installation. That narrows, but cannot eliminate, a narrow concurrent-writer TOCTOU window between the final check and replacement.
-
-The GUI uses the same policy and plan model. It displays a review before writing, and a changed source while that review is open invalidates the run.
-
-With backups enabled, each conversion has a portable `<file>.ecmeta.json` sidecar. The sidecar records the source codec actually used, whether it was detected or explicitly selected, source and backup hashes, the expected converted-file hash, target/BOM policy, preparation state, timestamp, and version. It is written as `Prepared` before installation and changed to `Completed` only after installation succeeds. If a run stops between those steps, the current file's hash shows whether it is still the original or the verified output. The backup and sidecar provide independently verifiable recovery metadata; EC does not currently provide a restore command.
-
-`-Journal` provides the batch-level record: EC's detected source, the source codec actually selected, whether that selection was explicit, any canonical-code-page disagreement between the two, the policy decision, planned action, actual outcome, stable reason code, diagnostic, and before/after hashes for every file—including skipped and refused ones. The GUI exports the immutable journal returned by the completed run rather than reconstructing history from mutable controls.
-
-## Strict-codec defect fixed in v3.6.0
-
-The independent audit found that assigning `Decoder.Fallback` or `Encoder.Fallback` after calling `GetDecoder()` or `GetEncoder()` does not reliably make .NET `CodePagesEncodingProvider` codecs strict. Some malformed legacy input could be silently substituted while EC's old downstream content check still reported success.
-
-EC now constructs strict code-page encodings with exception fallbacks at `Encoding.GetEncoding(...)` construction time. Permanent regression tests cover the previously permissive decoder and encoder paths.
-
-## Independent audit
+## Method
 
 [CorpusTesters](https://github.com/amrali-eg/CorpusTesters) is a separate, reproducible audit harness. It runs EC against four public corpora:
 
@@ -65,7 +18,7 @@ It operates on working copies, never source corpora. For each file with authorit
 
 The audit distinguishes detection identity, text-equivalent labels, unsupported or unscored material, mapping/profile differences, and end-to-end text preservation. It does **not** treat one runtime's legacy mapping table as a universal authority: its sampled independent-implementation comparison is recorded separately, and mapping differences remain explicitly qualified.
 
-Current raw artifacts, methodology revisions, and results are published with CorpusTesters. Historical corpus figures must be read in their recorded taxonomy and build context; they are not a substitute for the current product policy above.
+Current raw artifacts, methodology revisions, and results are published with CorpusTesters. Historical corpus figures must be read in their recorded taxonomy and build context; they are not a substitute for the current product policy in [Safety and recovery](SAFETY.md).
 
 ### v3.9.0 audited build
 
