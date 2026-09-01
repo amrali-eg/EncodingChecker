@@ -70,6 +70,12 @@ internal sealed class ConversionReportEntry
     internal bool DetectedEncodingHasBom { get; set; }
 
     /// <summary>
+    /// Whether a detected BOM-less UTF-16 source also strictly decodes under the opposite
+    /// byte order. Internal planning state; not in CSV.
+    /// </summary>
+    internal bool HasAmbiguousBomlessUtf16 { get; set; }
+
+    /// <summary>
     /// The SHA-256 this file must still have when installed, or <see langword="null"/>
     /// when no plan has committed to its contents. Internal state; not in CSV.
     /// </summary>
@@ -155,6 +161,7 @@ internal static class ConversionReasonCodes
         nameof(ExplicitSourceConflictsWithDetection);
     internal const string ExplicitSourceDiffersFromBomlessUnicodeEstimate =
         nameof(ExplicitSourceDiffersFromBomlessUnicodeEstimate);
+    internal const string AmbiguousBomlessUtf16 = BomlessUnicodeSafety.AmbiguousReasonCode;
     internal const string StrictValidationFailed = nameof(StrictValidationFailed);
     internal const string SourceSnapshotFailed = nameof(SourceSnapshotFailed);
     internal const string BackupFailed = nameof(BackupFailed);

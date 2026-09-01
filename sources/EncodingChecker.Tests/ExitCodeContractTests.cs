@@ -72,6 +72,28 @@ public sealed class ExitCodeContractTests : IDisposable
     }
 
     [Fact]
+    public void Version_PrintsTheAssemblyVersionAndExitsZero()
+    {
+        TextWriter originalOut = Console.Out;
+        TextWriter originalError = Console.Error;
+
+        try
+        {
+            using var output = new StringWriter();
+            Console.SetOut(output);
+            Console.SetError(new StringWriter());
+
+            Assert.Equal(ExpectedClean, Program.RunConsoleMode(["--version"]));
+            Assert.Equal(Program.GetDisplayVersion() + Environment.NewLine, output.ToString());
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+            Console.SetError(originalError);
+        }
+    }
+
+    [Fact]
     public void CleanDetectOnlyRun_ExitsZero()
     {
         WriteAscii("a.txt", "hello");

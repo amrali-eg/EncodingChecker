@@ -349,6 +349,7 @@ internal static class ScanEngine
                     entry.DetectedEncodingLabel = snapshot.DetectedEncoding?.WebName;
                     entry.DetectedEncodingHasBom = snapshot.DetectedEncodingHasBom;
                     entry.HasReliableUnicodeDetection = snapshot.HasReliableUnicodeDetection;
+                    entry.HasAmbiguousBomlessUtf16 = snapshot.HasAmbiguousBomlessUtf16;
                     entry.ExpectedSourceSha256 = snapshot.Sha256;
                     entry.ExpectedSourceSize = snapshot.Size;
                     entry.Action = snapshot.SourceEncoding is null
@@ -433,6 +434,7 @@ internal static class ScanEngine
         Encoding? automaticallyDetected = null;
         bool hasReliableUnicodeDetection = false;
         bool snapshotDetectedHasBom = false;
+        bool snapshotHasAmbiguousBomlessUtf16 = false;
         bool hasBom;
         string? sourceSha256 = null;
         long? sourceSize = null;
@@ -447,6 +449,7 @@ internal static class ScanEngine
             automaticallyDetected = snapshot.DetectedEncoding;
             hasReliableUnicodeDetection = snapshot.HasReliableUnicodeDetection;
             snapshotDetectedHasBom = snapshot.DetectedEncodingHasBom;
+            snapshotHasAmbiguousBomlessUtf16 = snapshot.HasAmbiguousBomlessUtf16;
             hasBom = snapshot.HasBom;
             sourceSha256 = snapshot.Sha256;
             sourceSize = snapshot.Size;
@@ -487,6 +490,8 @@ internal static class ScanEngine
                 hasReliableUnicodeDetection,
             DetectedEncodingHasBom = options.Action == ScanAction.Convert &&
                 snapshotDetectedHasBom,
+            HasAmbiguousBomlessUtf16 = options.Action == ScanAction.Convert &&
+                snapshotHasAmbiguousBomlessUtf16,
         };
 
         if (options.Action == ScanAction.Convert)
@@ -573,6 +578,7 @@ internal static class ScanEngine
         Encoding? SourceEncoding,
         bool HasReliableUnicodeDetection,
         bool DetectedEncodingHasBom,
+        bool HasAmbiguousBomlessUtf16,
         bool HasBom,
         string Sha256,
         long Size);
@@ -614,13 +620,15 @@ internal static class ScanEngine
         bool detectedHasBom = detectedEncoding != null && HasPreamble(stream, detectedEncoding);
         bool hasReliableUnicodeDetection = IsReliablyDetectedUnicode(
             stream, detectedEncoding, detectedHasBom);
+        bool hasAmbiguousBomlessUtf16 = BomlessUnicodeSafety.IsAmbiguous(
+            stream, detectedEncoding, detectedHasBom);
 
         stream.Position = 0;
         string hash = Convert.ToHexStringLower(SHA256.HashData(stream));
 
         return new SourceSnapshot(
             detectedEncoding, sourceEncoding, hasReliableUnicodeDetection,
-            detectedHasBom, hasBom, hash, stream.Length);
+            detectedHasBom, hasAmbiguousBomlessUtf16, hasBom, hash, stream.Length);
     }
 
     private static bool IsReliablyDetectedUnicode(
@@ -641,6 +649,29 @@ internal static class ScanEngine
 
             _ => false,
         };
+    }
+
+    /// <summary>
+    /// Checks the whole current source before a direct conversion that did not receive
+    /// a source-bound planning snapshot.
+    /// </summary>
+    private static bool IsAmbiguousBomlessUtf16(
+        string path,
+        Encoding sourceEncoding,
+        bool sourceHasBom)
+    {
+        if (sourceHasBom || sourceEncoding.CodePage is not (1200 or 1201))
+            return false;
+
+        using FileStream stream = new(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            64 * 1024,
+            FileOptions.SequentialScan);
+
+        return BomlessUnicodeSafety.IsAmbiguous(stream, sourceEncoding, sourceHasBom);
     }
 
     /// <summary>
@@ -735,6 +766,15 @@ internal static class ScanEngine
         if (entry.Action is null)
             DetectionCounters.RecordClassification();
 
+        // Source snapshots normally carry this result into the reviewed plan. Recheck
+        // here as well for callers of ConvertFiles that supply entries directly.
+        bool automaticBomlessUtf16IsAmbiguous =
+            !entry.SourceEncodingWasSpecified &&
+            (entry.HasAmbiguousBomlessUtf16 || IsAmbiguousBomlessUtf16(
+                path, sourceEncoding, sourceHasBom));
+
+        entry.HasAmbiguousBomlessUtf16 = automaticBomlessUtf16IsAmbiguous;
+
         PlannedAction action = ConversionPolicy.Decide(
             sourceCharset,
             sourceHasBom,
@@ -745,6 +785,7 @@ internal static class ScanEngine
             entry.SourceEncodingWasSpecified && entry.HasReliableUnicodeDetection &&
             automaticallyDetected is not null &&
             automaticallyDetected.CodePage != sourceEncoding.CodePage,
+            automaticBomlessUtf16IsAmbiguous,
             out SourceInterpretation sourceInterpretation,
             out string? policyReason);
 
@@ -753,6 +794,8 @@ internal static class ScanEngine
         entry.ReasonCode = action switch
         {
             PlannedAction.Skip => ConversionReasonCodes.UnknownEncoding,
+            PlannedAction.Refuse when automaticBomlessUtf16IsAmbiguous =>
+                ConversionReasonCodes.AmbiguousBomlessUtf16,
             PlannedAction.Refuse => entry.SourceEncodingWasSpecified &&
                 entry.HasReliableUnicodeDetection && automaticallyDetected is not null &&
                 automaticallyDetected.CodePage != sourceEncoding.CodePage
@@ -783,7 +826,9 @@ internal static class ScanEngine
         if (action != PlannedAction.Convert)
         {
             entry.Result = ConversionPolicy.ToRowResult(action);
-            entry.Diagnostic = policyReason;
+            entry.Diagnostic = automaticBomlessUtf16IsAmbiguous
+                ? BomlessUnicodeSafety.DescribeRefusal(sourceEncoding)
+                : policyReason;
             return;
         }
 

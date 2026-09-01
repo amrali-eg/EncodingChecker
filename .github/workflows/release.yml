@@ -23,11 +23,47 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      - name: Verify release version
+        shell: pwsh
+        run: |
+          $tagVersion = "${{ github.ref_name }}" -replace '^v', ''
+          $assemblyInfo = Get-Content "sources\EncodingChecker\Properties\AssemblyInfo.cs" -Raw
+
+          foreach ($attribute in @("AssemblyVersion", "AssemblyFileVersion")) {
+            $pattern = '(?m)^\s*\[assembly:\s*' + [regex]::Escape($attribute) + '\("(?<version>[^"]+)"\)\]'
+            $match = [regex]::Match($assemblyInfo, $pattern)
+
+            if (-not $match.Success) {
+              throw "Could not find [$attribute] in AssemblyInfo.cs."
+            }
+
+            $assemblyVersion = [Version]$match.Groups['version'].Value
+            $displayVersion = "$($assemblyVersion.Major).$($assemblyVersion.Minor).$([Math]::Max($assemblyVersion.Build, 0))"
+
+            if ($displayVersion -ne $tagVersion) {
+              throw "$attribute '$($assemblyVersion.ToString())' does not match release tag '${{ github.ref_name }}'."
+            }
+          }
+
       - name: Build
         run: dotnet build sources\EncodingChecker.sln --configuration Release
 
       - name: Test
         run: dotnet test sources\EncodingChecker.sln --configuration Release --no-build
+
+      - name: Verify built display version
+        shell: pwsh
+        run: |
+          $expected = "${{ github.ref_name }}" -replace '^v', ''
+          $actual = (& dotnet "sources\EncodingChecker\bin\Release\net10.0-windows\EncodingChecker.dll" --version).Trim()
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "EncodingChecker --version failed with exit code $LASTEXITCODE."
+          }
+
+          if ($actual -ne $expected) {
+            throw "Built EncodingChecker reports version '$actual', expected '$expected'."
+          }
 
       - name: Publish framework-dependent single-file executable
         run: dotnet publish sources\EncodingChecker\EncodingChecker.csproj -p:PublishProfile=FolderProfile
@@ -65,13 +101,15 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          Compress-Archive -Path "sources\EncodingChecker\bin\Release\net10.0-windows\publish\win-x64\*" -DestinationPath "EncodingChecker.zip"
-          Compress-Archive -Path "sources\EncodingChecker\bin\Release\net10.0-windows\publish\win-x64-selfcontained\*" -DestinationPath "EncodingChecker-selfcontained.zip"
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          Compress-Archive -Path "sources\EncodingChecker\bin\Release\net10.0-windows\publish\win-x64\*" -DestinationPath "EncodingChecker-$version-framework-dependent.zip"
+          Compress-Archive -Path "sources\EncodingChecker\bin\Release\net10.0-windows\publish\win-x64-selfcontained\*" -DestinationPath "EncodingChecker-$version-win-x64-self-contained.zip"
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
-          gh release create "${{ github.ref_name }}" EncodingChecker.zip EncodingChecker-selfcontained.zip
+          gh release create "${{ github.ref_name }}"
+          EncodingChecker-*-framework-dependent.zip EncodingChecker-*-win-x64-self-contained.zip
           --title "${{ github.ref_name }}"
           --generate-notes

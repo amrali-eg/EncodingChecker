@@ -165,6 +165,12 @@ internal static partial class Program
     // Internal so tests can pin the published CLI exit-code contract.
     internal static int RunConsoleMode(string[] args)
     {
+        if (args is ["--version"])
+        {
+            Console.Out.WriteLine(GetDisplayVersion());
+            return 0;
+        }
+
         if (args is ["/?" or "-?" or "/h" or "-h" or "--help"])
         {
             Console.Out.WriteLine(UsageText);

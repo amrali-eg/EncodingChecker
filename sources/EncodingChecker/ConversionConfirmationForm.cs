@@ -14,8 +14,8 @@ namespace EncodingChecker;
 /// Displays the conversion plan already decided by policy. The same entries are
 /// converted; no second detection pass can produce a different answer.
 /// <para>
-/// Unicode and ASCII detections can be converted automatically. Detected legacy text
-/// requires an explicit source choice, which never bypasses conversion safety checks.
+/// Files that EC cannot identify safely need an explicit source choice, which never
+/// bypasses conversion safety checks.
 /// </para>
 /// </remarks>
 internal sealed class ConversionConfirmationForm : Form
@@ -145,7 +145,7 @@ internal sealed class ConversionConfirmationForm : Form
             ("Directory", _plan.BaseDirectory),
             ("Source encoding",
              string.IsNullOrEmpty(_plan.ExplicitSourceEncoding)
-                 ? "Unicode and ASCII are automatic; legacy text needs your choice"
+                 ? "EC converts automatically only when it can identify the source safely"
                  : $"{_plan.ExplicitSourceEncoding} (chosen by you; strict checks still apply)"),
             ("Backups", _plan.BackupEnabled
                 ? "enabled — original as <file>.bak; record as <file>.ecmeta.json"
@@ -178,7 +178,7 @@ internal sealed class ConversionConfirmationForm : Form
             ForeColor = Color.FromArgb(150, 40, 0),
             Text =
                 $@"{refused.Count} file(s) require their source encoding to be identified or confirmed. "
-                + @"Encoding Checker detected legacy text, but cannot safely process these files until you specify or confirm their original encoding."
+                + @"Encoding Checker cannot safely process these files until you specify or confirm their original encoding."
                 + Environment.NewLine + Environment.NewLine
                 + @"Select only files that use the same source encoding, then choose or confirm that encoding. "
                 + @"Leave files with a different or unknown encoding unchecked; you can review them later.",
@@ -230,7 +230,7 @@ internal sealed class ConversionConfirmationForm : Form
         });
 
         _sourceChoice.DropDownStyle = ComboBoxStyle.DropDownList;
-        _sourceChoice.AccessibleName = "Source encoding for selected legacy files";
+        _sourceChoice.AccessibleName = "Source encoding for selected files";
         _sourceChoice.AccessibleDescription = "Choose the original encoding for the ticked files.";
         _sourceChoice.Width = 235;
         _sourceChoice.Items.Add("Choose or confirm source encoding…");

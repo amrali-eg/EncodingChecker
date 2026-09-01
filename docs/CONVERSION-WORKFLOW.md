@@ -7,7 +7,7 @@ This page explains what happens after you ask EncodingChecker to convert files. 
 1. **View** the folder to see what EC found.
 2. Select the files you want to handle and choose **Convert**.
 3. Read the review before any file is changed.
-4. For legacy text, choose the source encoding if you know it.
+4. If EC asks, choose the original source encoding if you know it.
 5. Confirm the reviewed conversion.
 
 The review tells you which files will convert, already match the target, need a legacy source choice, or cannot be processed. Cancelling leaves every source file unchanged.
@@ -16,18 +16,26 @@ The review tells you which files will convert, already match the target, need a 
 
 For a file that needs conversion, EC applies this policy:
 
-| Source interpretation | EC's action |
+| File type | Automatic action |
 | --- | --- |
-| Unicode or ASCII detected automatically | Convert if needed |
-| Legacy codec selected explicitly by the user | Convert if needed, subject to every safety check; refuse if the choice conflicts with fully validated UTF-8 or BOM-confirmed UTF-16/32 |
-| Legacy codec detected automatically | Refuse conversion until you choose or confirm the source codec |
-| Unknown or unreadable source | Do not convert |
+| ASCII, Unicode with a BOM, or text whose encoding EC can prove from its bytes | Convert automatically |
+| Legacy text or BOM-less Unicode whose encoding cannot be proven safely | Do not convert; ask you to choose the original encoding |
 
 A file that already matches the target encoding and BOM is reported as **Unchanged** and
 is not decoded or rewritten. No source choice is needed because no conversion occurs.
 
-Choosing a legacy encoding answers only “how should these bytes be read?” It does not
+If you choose a source encoding, EC uses it only to read the original bytes. It does not
 disable strict decoding, output verification, backup verification, or safe installation.
+
+### BOM-less UTF-16
+
+Without a byte-order mark, UTF-16 bytes are usually valid as both UTF-16LE and UTF-16BE.
+For example, byte-swapped Latin text often lands in a valid CJK range. A detector may prefer
+one order, but that preference cannot prove what the original file meant. EC therefore
+strictly decodes the complete source under the opposite order before automatic conversion.
+If both orders work, the file is reported as `Refused` with reason code
+`AmbiguousBomlessUtf16`; no preview says it would convert, and no backup, sidecar, or output
+file is created. Choose the source encoding explicitly if you know it.
 
 ## What EC does
 
@@ -155,4 +163,5 @@ For a known legacy source, supply the encoding explicitly:
 EncodingChecker.exe -BasePath "C:\Files" -Target utf-8 -From windows-1252 -Backup
 ```
 
-For the detailed guarantees and known limits, read [Safety and audit](SAFETY-AUDIT.md).
+For detailed conversion guarantees and known limits, read [Safety and recovery](SAFETY.md).
+For independent corpus evidence and its limits, read [Safety audit](SAFETY-AUDIT.md).

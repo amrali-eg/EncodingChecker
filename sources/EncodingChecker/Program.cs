@@ -116,18 +116,32 @@ internal static partial class Program
         internal bool Verbose;
     }
 
-    private const string UsageText = """
-        EncodingChecker v3.9.2
+    /// <summary>
+    /// Returns the release version embedded in the built assembly.
+    /// Keeping this here makes the banner and <c>--version</c> agree with the
+    /// executable that is actually running.
+    /// </summary>
+    internal static string GetDisplayVersion()
+    {
+        Version version =
+            typeof(Program).Assembly.GetName().Version ??
+            new Version(0, 0, 0);
+
+        return $"{version.Major}.{version.Minor}.{Math.Max(version.Build, 0)}";
+    }
+
+    private static readonly string UsageText = $"""
+        EncodingChecker v{GetDisplayVersion()}
 
         Common commands:
 
-          Preview a folder safely (recommended first use):
+          Create a reviewable plan for an important batch (safest workflow):
             EncodingChecker.exe -BasePath "C:\Files" -Target utf-8 -Plan plan.json
 
           Review that plan, then apply exactly it:
             EncodingChecker.exe -Apply plan.json
 
-          Convert a folder directly, keeping each original:
+          Convert an ordinary folder directly, keeping each original:
             EncodingChecker.exe -BasePath "C:\Files" -Target utf-8 -Backup
 
           Convert files whose original legacy encoding you know:
@@ -138,9 +152,10 @@ internal static partial class Program
 
         Automatic conversion rule:
 
-          EC converts Unicode and ASCII automatically. For legacy text, specify its
-          original encoding with -From. This replaces detection only; strict decoding,
-          output verification, backups, and atomic installation still apply.
+          EC converts ASCII, Unicode with a BOM, and text it can prove from its bytes.
+          Legacy text and BOM-less Unicode that cannot be proven safely are left
+          unchanged until you specify the original encoding with -From. That choice
+          does not bypass strict decoding, output verification, backups, or installation.
 
         Basic conversion:
 
@@ -206,7 +221,7 @@ internal static partial class Program
         reparse-point folders are not entered. Both counts are reported on stderr
         and are informational; they do not change the exit code.
 
-        Help: -?, /?, -h, /h, or --help.
+        Help: -?, /?, -h, /h, or --help. Version: --version.
 
         Exit codes: 0 = completed; 1 = invalid command; 2 = -FailOnChanges;
         3 = processing, plan, or report failure; 4 = cancelled (Ctrl+C);

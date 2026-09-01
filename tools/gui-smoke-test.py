@@ -22,6 +22,10 @@ JP = ("こんにちは世界。日本語のテキストです。", "shift_jis")
 RUSSIAN = ("Привет мир, это русский текст", "koi8-r")
 PLAIN = ("plain ascii, no high bytes at all", "ascii")
 
+# UTF-16BE text whose byte-swapped UTF-16LE reading is ordinary-looking A/LF/B.
+# Both byte orders strictly decode, so automatic conversion must be refused.
+AMBIGUOUS_UTF16_BE = ("\u4100\u0a00\u4200" * 4, "utf-16-be")
+
 # Deliberately carries 0x80.  In windows-1252 that is the euro sign; in iso-8859-1 it is
 # a C1 control.  It proves that the user's explicit choice, rather than a legacy guess,
 # controls the conversion.
@@ -80,6 +84,36 @@ PHASES = {
             },
         },
     },
+    "D": {
+        "title": "Ambiguous BOM-less UTF-16 is refused without writing",
+        "files": {"ambiguous-utf16be.txt": AMBIGUOUS_UTF16_BE},
+        "steps": [
+            "In the Release build, set 'Directory to check' to the folder shown above.",
+            "Choose utf-8 in 'Convert to', click View, tick the row, and click Convert.",
+            "The review must say that the BOM-less UTF-16 byte order cannot be proven safely.",
+            "Click Cancel. Do not choose a source encoding for this phase.",
+        ],
+        "unchanged": {
+            "ambiguous-utf16be.txt": "automatic BOM-less UTF-16 conversion was refused",
+        },
+        "no_artifacts": True,
+    },
+    "E": {
+        "title": "An explicit BOM-less UTF-16 source converts safely",
+        "files": {"ambiguous-utf16be.txt": AMBIGUOUS_UTF16_BE},
+        "steps": [
+            "In the Release build, set 'Directory to check' to the folder shown above.",
+            "Choose utf-8 in 'Convert to', click View, tick the row, and click Convert.",
+            "The review must refuse automatic conversion and offer a source-encoding chooser.",
+            "Choose utf-16BE and click 'Confirm for 1 file(s)'.",
+            "The refreshed review must show 1 file ready. Click 'Convert 1 file(s)'.",
+        ],
+        "converted": {"ambiguous-utf16be.txt": AMBIGUOUS_UTF16_BE[0]},
+        "artifacts": [
+            "ambiguous-utf16be.txt.bak",
+            "ambiguous-utf16be.txt.ecmeta.json",
+        ],
+    },
 }
 
 
@@ -89,6 +123,11 @@ def root(phase):
 
 def state_path(phase):
     return os.path.join(HERE, "smoke-state-" + phase + ".json")
+
+
+def powershell_quote(value):
+    """Returns a PowerShell single-quoted string for copy-and-paste instructions."""
+    return "'" + value.replace("'", "''") + "'"
 
 
 def sha256(path):
@@ -117,7 +156,10 @@ def setup(phase):
             handle.write(text.encode(encoding))
 
     with open(state_path(phase), "w", encoding="utf-8") as handle:
-        json.dump({"root": directory, "before": snapshot(directory)}, handle, indent=1)
+        json.dump(
+            {"root": directory, "before": snapshot(directory), "manual_complete": False},
+            handle,
+            indent=1)
 
     print("Phase " + phase + " - " + spec["title"])
     print("\n  folder: " + directory)
@@ -125,7 +167,31 @@ def setup(phase):
     print("\n  in the GUI:")
     for step in spec["steps"]:
         print("    " + step)
-    print("\n  then: python gui-smoke-test.py verify " + phase)
+    print("\n  PowerShell commands to copy and paste after the GUI steps:")
+    print("    $smoke = " + powershell_quote(os.path.abspath(__file__)))
+    print("    python $smoke mark " + phase)
+    print("    python $smoke verify " + phase)
+
+    next_phase = chr(ord(phase) + 1)
+    if next_phase in PHASES:
+        print("    python $smoke setup " + next_phase)
+
+    return 0
+
+
+def mark(phase):
+    """Records that the tester completed the displayed GUI steps for this phase."""
+    path = state_path(phase)
+
+    with open(path, encoding="utf-8") as handle:
+        state = json.load(handle)
+
+    state["manual_complete"] = True
+
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(state, handle, indent=1)
+
+    print("Phase " + phase + " marked ready for verification.")
     return 0
 
 
@@ -190,11 +256,25 @@ def check_text(spec, directory, ok, fail):
                 ok("%-18s %s" % (name, rule["why"]))
 
 
+def check_artifacts(spec, directory, ok, fail):
+    for name in spec.get("artifacts", []):
+        if not os.path.isfile(os.path.join(directory, name)):
+            fail(name + ": missing recovery artifact")
+        else:
+            ok("%-18s present" % name)
+
+
 def verify(phase):
     spec = PHASES[phase]
 
     with open(state_path(phase), encoding="utf-8") as handle:
         state = json.load(handle)
+
+    if not state.get("manual_complete"):
+        print("PHASE " + phase + ": NOT VERIFIED")
+        print("  Complete the displayed GUI steps first, then run:")
+        print("    python " + powershell_quote(os.path.abspath(__file__)) + " mark " + phase)
+        return 2
 
     directory = state["root"]
     before = state["before"]
@@ -210,6 +290,7 @@ def verify(phase):
     check_unchanged(spec, before, after, ok, fail)
     check_converted(spec, directory, after, ok, fail)
     check_text(spec, directory, ok, fail)
+    check_artifacts(spec, directory, ok, fail)
     if spec.get("no_artifacts"):
         strays = [
             n for n in os.listdir(directory)
@@ -234,11 +315,19 @@ def verify(phase):
 
 
 if __name__ == "__main__":
-    mode = sys.argv[1] if len(sys.argv) > 1 else "setup"
+    mode = sys.argv[1].lower() if len(sys.argv) > 1 else "setup"
     which = (sys.argv[2] if len(sys.argv) > 2 else "A").upper()
 
     if which not in PHASES:
         print("phases: " + ", ".join(PHASES))
         sys.exit(2)
 
-    sys.exit(setup(which) if mode == "setup" else verify(which))
+    if mode == "setup":
+        sys.exit(setup(which))
+    if mode == "mark":
+        sys.exit(mark(which))
+    if mode == "verify":
+        sys.exit(verify(which))
+
+    print("commands: setup, mark, verify")
+    sys.exit(2)
