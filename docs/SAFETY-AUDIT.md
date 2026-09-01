@@ -20,6 +20,29 @@ The audit distinguishes detection identity, text-equivalent labels, unsupported 
 
 Current raw artifacts, methodology revisions, and results are published with CorpusTesters. Historical corpus figures must be read in their recorded taxonomy and build context; they are not a substitute for the current product policy in [Safety and recovery](SAFETY.md).
 
+### Why a release record arrives after its own tag
+
+Each record below is committed after the release it describes, so a tagged tree
+contains every earlier release's record but not its own. That is forced, not an
+oversight.
+
+An audit measures a built binary, and the .NET SDK embeds the commit into the
+PDB while the assembly records that PDB's checksum. Committing the record
+therefore changes the assembly, even though only a Markdown file changed.
+Measured on this repository: commit `522eeb8` builds `19bcbe09...`, and
+`336c4f2` — which adds only 50 lines to this file — builds `7f5ced3d...`. The
+two are the same 487,424 bytes and differ in 72: the deterministic PE stamp, the
+MVID, and the PDB checksum. No compiled code differs. Two clean builds of one
+commit are byte-identical, so this is caused by the commit, not by build noise.
+
+Recording the audit before tagging would therefore publish artifacts built from
+a commit the audit never measured, and the record inside them would name a hash
+they do not contain. That trades a documentation gap for a false provenance
+claim, which is worse. The gap is the honest option.
+
+A release's own record is reachable two ways: its GitHub release page links
+directly to the section below, and CorpusTesters holds the per-file evidence.
+
 ### v3.9.0 audited build
 
 The v3.9.0 release was audited from a clean checkout of the commit it was tagged at, and the binary that was measured is the binary that was published.
