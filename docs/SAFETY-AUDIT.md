@@ -203,6 +203,48 @@ Every other category is unchanged, including the 103 mapping differences and the
 
 Verified on the tagged commit: CI and the shared-detector parity job both pass, the full suite passes 492/492 with zero warnings, and manual GUI smoke phases D and E pass against the Release build. `UnicodeDetector.cs` and `TextValidation.cs` are untouched, so parity with LineEndingNormalizer and CorpusTesters is unaffected.
 
+### v3.10.1 audited build
+
+v3.10.1 corrects an inversion in the v3.10.0 safety and was audited from a clean checkout of the commit it was tagged at.
+
+```
+commit    a224356   (annotated tag v3.10.1; audited as 8f373a7 before merge)
+worktree  clean
+platform  .NET 10 - Windows 11 10.0.26200
+assembly  EncodingChecker.dll
+          36b923814fb92dae468d45290a251de3871b3cdae24c883b48ff79c3f1ad253e
+run       rel3101, compared against rel3100 in audit/reports/rel3100-vs-rel3101/
+```
+
+**No file changed outcome.** `changed=0 improved=0 regressed=0 lateral=0`, and all four metrics are identical to v3.10.0: detection 4640/4646, strict decoding 4694/4694, codec conformance 4591/4694, text preservation 4520/4623.
+
+**This result was predicted before the run, and that is the point of recording it.** The corpus supplies each file's source codec from its own reference metadata, and those files are not ambiguous, so the path this release fixes never executes during a corpus run. `changed=0` therefore establishes that the fix did not disturb the conversion engine, and establishes nothing whatever about whether the fix works. That rests on three regression tests, each checked against a deliberately reintroduced bug.
+
+An audit that cannot reach the change it is run for is worth stating plainly rather than quoting as confirmation.
+
+#### What changed in v3.10.1
+
+v3.10.0 refuses BOM-less UTF-16 whose byte order cannot be established from the bytes, then allows the caller to supply one. It reported that choice only when the choice **contradicted** detection's estimate — so it spoke when the caller was right and stayed silent when they were wrong, and the silent case destroyed the file. Measured on a UTF-16BE file that detection reads as little-endian, `-From utf-16le` converted it to the letters `A` and `B` repeated, with an empty reason field and exit 0.
+
+The cause was one variable holding two things: `HasAmbiguousBomlessUtf16` named a fact about the file — this byte order cannot be proven — while being assigned the separate decision to refuse automatically. Supplying a source made the decision false, which erased the fact before the advisory could consult it.
+
+An explicit source given for an unprovable byte order is now always reported, whether or not it agrees with the estimate, because agreeing with an estimate EC cannot prove is not corroboration. The two cases carry different reason codes: `ExplicitSourceOnUnprovableBomlessUnicode` is new and additive, so a run that previously produced an empty reason field may now produce a value.
+
+Refusal without an explicit source, structurally provable byte orders, files carrying a byte-order mark, and non-UTF-16 sources are unchanged.
+
+#### First run of the full verification sequence
+
+Every gate the release checklist requires ran, in order, for the first time:
+
+```text
+coverage      both runs 4 corpora, 5,207 rows
+provenance    all four run.json name the audited commit, dirty=False, one assembly
+integrity     All invariants hold across 5078 rows          exit 0
+comparison    changed=0 improved=0 regressed=0 lateral=0    exit 0
+```
+
+`check_audit_integrity.py` had never before validated a fresh audit; every earlier use was against stored runs. It is listed in `audit/README.md` as the step to run after a run and was skipped for v3.9.0, v3.9.2 and v3.10.0, during which it was itself broken. It became a checklist item after that was found.
+
 ## Known limits
 
 - No detector can recover an author's historical legacy encoding when the same bytes admit multiple plausible readings. EC refuses automatic legacy conversion instead of guessing.
