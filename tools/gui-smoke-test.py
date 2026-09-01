@@ -143,6 +143,23 @@ def snapshot(directory):
     }
 
 
+def required_setup_steps(spec):
+    """GUI preconditions a phase's assertions depend on, derived from the spec."""
+    steps = []
+
+    if spec.get("artifacts"):
+        steps.append(
+            "Ensure 'Create backup' is TICKED before converting; this phase "
+            "verifies the .bak and .ecmeta.json recovery files.")
+
+    if spec.get("no_artifacts"):
+        steps.append(
+            "Leave 'Create backup' TICKED; this phase proves nothing is written "
+            "even when backups are enabled.")
+
+    return steps
+
+
 def setup(phase):
     spec = PHASES[phase]
     directory = root(phase)
@@ -165,6 +182,15 @@ def setup(phase):
     print("\n  folder: " + directory)
     print("  files : " + ", ".join(spec["files"]))
     print("\n  in the GUI:")
+    # Derived from the spec rather than written into each phase's steps. A phase
+    # that asserts .bak and .ecmeta.json depends on the backup checkbox, which the
+    # GUI persists between sessions: phase E once failed on "missing recovery
+    # artifact" because an earlier run had left it unticked, which says nothing
+    # about the behaviour under test. Deriving it means a phase that starts
+    # asserting artifacts cannot forget to ask for them.
+    for step in required_setup_steps(spec):
+        print("    " + step)
+
     for step in spec["steps"]:
         print("    " + step)
     print("\n  PowerShell commands to copy and paste after the GUI steps:")
