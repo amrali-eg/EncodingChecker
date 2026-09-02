@@ -347,6 +347,13 @@ internal static partial class Program
                 + "(hidden, system, or reparse point).");
         }
 
+        if (traversalCounters.FilesExcludedAsEcArtifact > 0)
+        {
+            Console.Error.WriteLine(
+                $"{traversalCounters.FilesExcludedAsEcArtifact} matching file(s) not examined "
+                + "(EC backup, recovery record, or temporary file).");
+        }
+
         if (traversalCounters.DirectoriesExcludedByAttribute > 0)
         {
             Console.Error.WriteLine(

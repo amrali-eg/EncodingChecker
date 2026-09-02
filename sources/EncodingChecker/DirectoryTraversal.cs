@@ -64,6 +64,7 @@ internal static class DirectoryTraversal
     {
         private int _filesExcludedByAttribute;
         private int _directoriesExcludedByAttribute;
+        private int _filesExcludedAsEcArtifact;
 
         /// <summary>Matching files skipped for being hidden, system, or reparse points.</summary>
         internal int FilesExcludedByAttribute => Volatile.Read(ref _filesExcludedByAttribute);
@@ -72,8 +73,16 @@ internal static class DirectoryTraversal
         internal int DirectoriesExcludedByAttribute =>
             Volatile.Read(ref _directoriesExcludedByAttribute);
 
+        /// <summary>
+        /// Matching files skipped for being EC's own backups, sidecars, or temporaries.
+        /// </summary>
+        internal int FilesExcludedAsEcArtifact => Volatile.Read(ref _filesExcludedAsEcArtifact);
+
         internal void CountFileExcludedByAttribute() =>
             Interlocked.Increment(ref _filesExcludedByAttribute);
+
+        internal void CountFileExcludedAsEcArtifact() =>
+            Interlocked.Increment(ref _filesExcludedAsEcArtifact);
 
         internal void CountDirectoryExcludedByAttribute() =>
             Interlocked.Increment(ref _directoriesExcludedByAttribute);
@@ -190,9 +199,6 @@ internal static class DirectoryTraversal
                 string file = info.FullName;
                 string fileName = info.Name;
 
-                if (IsAlwaysExcludedFile(fileName))
-                    continue;
-
                 // Compare full paths because the scan root may itself be relative.
                 if (excludedFullPaths is not null &&
                     excludedFullPaths.Contains(
@@ -210,8 +216,17 @@ internal static class DirectoryTraversal
                     MatchesAny(relativePath, excludePatterns))
                     continue;
 
-                // Count only matching files. Files outside the requested scope and EC's
-                // own artifacts must not inflate the incomplete-coverage warning.
+                // Both exclusions are tested after the patterns, so a file the caller
+                // never asked about cannot inflate the coverage counts - and one they
+                // did ask about cannot vanish from them. A backup or sidecar left by an
+                // earlier run is still skipped, but "-Include *.bak" now reports that it
+                // was skipped instead of answering with an empty, successful report.
+                if (IsAlwaysExcludedFile(fileName))
+                {
+                    counters?.CountFileExcludedAsEcArtifact();
+                    continue;
+                }
+
                 if ((info.Attributes & ExcludedFileAttributes) != 0)
                 {
                     counters?.CountFileExcludedByAttribute();

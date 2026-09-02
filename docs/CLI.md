@@ -30,11 +30,23 @@ A pattern without `/` or `\` matches file names at any depth. A pattern with a
 separator matches the path relative to `-BasePath`. `/` and `\` are equivalent.
 `*` and `?` are supported wildcards.
 
-EC always excludes its own `.bak`, `.ecmeta.json`, temporary, plan, journal,
-and report files, along with common metadata and build folders such as `.git`,
-`bin`, `obj`, and `node_modules`. Hidden, system, and reparse-point files are
-left alone. Hidden, system, and reparse-point folders are not entered. EC reports
-these coverage counts, but they do not change the exit code.
+EC always excludes files it can recognise as its own by name: `.bak` backups,
+`.ecmeta.json` recovery records, and `.unicodechecker.tmp` temporaries. It also
+excludes the plan, journal, and report files written by the current command.
+
+It does **not** exclude plans, journals, or reports left by earlier runs. You
+choose those file names, so EC cannot tell them from any other file, and a later
+conversion of the same folder will rewrite them like anything else. Keep exported
+plans, journals, and reports outside the folder you scan.
+
+Common metadata and build folders such as `.git`, `bin`, `obj`, and
+`node_modules` are skipped. Hidden, system, and reparse-point files are left
+alone, and hidden, system, and reparse-point folders are not entered.
+
+EC reports how many files each exclusion skipped, counting only files your
+patterns actually selected — so `-Include "*.bak"` reports that they were
+skipped instead of returning nothing at all. These counts do not change the
+exit code.
 
 ## Conversion
 

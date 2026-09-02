@@ -372,12 +372,18 @@ public partial class MainForm
         if (counters is null)
             return string.Empty;
 
-        var parts = new List<string>(2);
+        var parts = new List<string>(3);
 
         if (counters.FilesExcludedByAttribute > 0)
         {
             parts.Add(
                 $"{counters.FilesExcludedByAttribute} matching file(s) not examined");
+        }
+
+        if (counters.FilesExcludedAsEcArtifact > 0)
+        {
+            parts.Add(
+                $"{counters.FilesExcludedAsEcArtifact} EC backup/record file(s) not examined");
         }
 
         if (counters.DirectoriesExcludedByAttribute > 0)

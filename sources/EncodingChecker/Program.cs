@@ -218,8 +218,15 @@ internal static partial class Program
         Directories named .git, .svn, .hg, .vs, .idea, bin, obj, node_modules,
         packages, dist, build, and target are always skipped. Matching hidden,
         system, and reparse-point files are not examined. Hidden, system, and
-        reparse-point folders are not entered. Both counts are reported on stderr
-        and are informational; they do not change the exit code.
+        reparse-point folders are not entered.
+
+        EC's own .bak, .ecmeta.json, and .unicodechecker.tmp files are always
+        skipped, as are this command's own -Plan, -Journal, and -Report outputs.
+        Plans, journals, and reports from earlier runs are not recognized and are
+        scanned like any other file; keep them outside the folder you scan.
+
+        Every count above is reported on stderr for files your patterns selected,
+        and is informational; none of them change the exit code.
 
         Help: -?, /?, -h, /h, or --help. Version: --version.
 
