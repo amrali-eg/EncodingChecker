@@ -354,6 +354,15 @@ internal static partial class Program
                 + "(hidden, system, or reparse point); their contents were not counted.");
         }
 
+        // Unconditional, and on stderr, matching -Apply. A file that could not be read
+        // is why the run exits 3, so suppressing the reason under -Quiet leaves the
+        // caller with a failure and nothing to act on.
+        foreach (ConversionReportEntry entry in entries
+                     .Where(e => e.Result == ConversionRowResult.Error))
+        {
+            Console.Error.WriteLine($"Error: {entry.FilePath}: {entry.Diagnostic}");
+        }
+
         if (options.Verbose)
             PrintVerboseSummary(entries);
 
@@ -431,7 +440,15 @@ internal static partial class Program
                 Console.Out.WriteLine(plan.Summarize());
             }
 
-            // A refusal is an expected preflight result, not a failed preflight.
+            // A file the scan could not read is a failed preflight, and the published
+            // precedence puts 3 ahead of 2. Returning before this check let a plan run
+            // report success over files it never opened; the plan is still written and
+            // summarized first so the caller can see which ones.
+            if (entries.Any(e => e.Result == ConversionRowResult.Error))
+                return 3;
+
+            // A refusal, unlike an error, is an expected preflight result. Exit 5 is
+            // deliberately not returned here.
             if (options.FailOnChanges &&
                 plan.Files.Any(f => f.Action == PlannedAction.Convert))
             {

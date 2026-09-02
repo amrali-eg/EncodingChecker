@@ -337,10 +337,26 @@ internal sealed record ConversionPlan
             {
                 if (file is null ||
                     string.IsNullOrWhiteSpace(file.RelativePath) ||
-                    string.IsNullOrWhiteSpace(file.Sha256) ||
                     string.IsNullOrWhiteSpace(file.SourceEncoding))
                 {
-                    error = "The plan contains an incomplete file entry.";
+                    error = "The plan contains an incomplete file entry"
+                            + (file?.RelativePath is { Length: > 0 } named
+                                ? $": {named}."
+                                : ".");
+                    return null;
+                }
+
+                // A hash is required only where bytes will be written: it is what pins
+                // the conversion to the reviewed content. An entry that will not be
+                // written makes no such claim, and planning deliberately records an
+                // unreadable file as a refusal with no hash so it stays visible rather
+                // than vanishing from the plan. Demanding one here rejected that whole
+                // plan, taking every readable file with it.
+                if (file.Action == PlannedAction.Convert &&
+                    string.IsNullOrWhiteSpace(file.Sha256))
+                {
+                    error = $"The plan schedules '{file.RelativePath}' for conversion "
+                            + "without recording the contents it was reviewed against.";
                     return null;
                 }
             }
@@ -469,8 +485,15 @@ internal sealed record ConversionPlan
                     continue;
                 }
 
-                if (ConversionMetadataStore.ComputeSha256(path) != file.Sha256)
+                // An entry recorded without a hash could not be read when the plan was
+                // made, so there is nothing to compare against. It is a refusal, so no
+                // bytes are written either way; comparing would report every such file
+                // as changed and invalidate the plan for the files that are fine.
+                if (!string.IsNullOrWhiteSpace(file.Sha256) &&
+                    ConversionMetadataStore.ComputeSha256(path) != file.Sha256)
+                {
                     stale.Add($"{path} (contents changed since the plan was made)");
+                }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {

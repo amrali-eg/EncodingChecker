@@ -9,16 +9,8 @@ internal static partial class Program
     private static void PrintVerboseSummary(
         List<ConversionReportEntry> entries)
     {
-        foreach (ConversionReportEntry entry in entries)
-        {
-            if (entry.Result == ConversionRowResult.Error &&
-                !string.IsNullOrEmpty(entry.Diagnostic))
-            {
-                Console.Error.WriteLine(
-                    $"Error: {entry.FilePath}: {entry.Diagnostic}");
-            }
-        }
-
+        // Errors are reported unconditionally by the caller, so -Verbose adds only the
+        // breakdown rather than repeating them.
         var byResult =
             entries
                 .GroupBy(e => e.Result)
