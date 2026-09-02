@@ -44,16 +44,35 @@ internal static class BomlessUnicodeSafety
     {
         ArgumentNullException.ThrowIfNull(detectedEncoding);
 
-        string detectedName = detectedEncoding.CodePage == 1200
-            ? "UTF-16LE"
-            : "UTF-16BE";
-        string oppositeName = detectedEncoding.CodePage == 1200
-            ? "UTF-16BE"
-            : "UTF-16LE";
+        (string detectedName, string oppositeName) = Names(detectedEncoding);
 
         return $"EC detected BOM-less {detectedName}, but the same bytes are valid as both "
                + $"{detectedName} and {oppositeName}. EC cannot determine the byte order "
                + "safely, so no conversion was performed. Add a byte-order mark or choose "
                + $"the source encoding explicitly (for example, -From {detectedEncoding.WebName}).";
     }
+
+    /// <summary>
+    /// Describes the same fact for modes that convert nothing.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="DescribeRefusal"/> speaks of a conversion withheld, which would be
+    /// meaningless here. The fact reported is the same one.
+    /// </remarks>
+    internal static string DescribeUnprovableByteOrder(Encoding detectedEncoding)
+    {
+        ArgumentNullException.ThrowIfNull(detectedEncoding);
+
+        (string detectedName, string oppositeName) = Names(detectedEncoding);
+
+        return $"EC read this file as BOM-less {detectedName}, but the same bytes are "
+               + $"equally valid as {oppositeName}. Which one it is cannot be established "
+               + "from the file, so the encoding reported here is an estimate rather than "
+               + "a finding. Add a byte-order mark to settle it.";
+    }
+
+    private static (string Detected, string Opposite) Names(Encoding detectedEncoding) =>
+        detectedEncoding.CodePage == 1200
+            ? ("UTF-16LE", "UTF-16BE")
+            : ("UTF-16BE", "UTF-16LE");
 }

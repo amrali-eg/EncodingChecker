@@ -468,6 +468,13 @@ internal static class ScanEngine
             DetectionCounters.RecordDetection();
             detected = TextEncoding.DetectFromFile(path);
             hasBom = detected != null && HasPreamble(path, detected);
+
+            // The byte order is a fact about the file, so the read-only modes need it
+            // too; a mode that reports an unprovable order as settled contradicts the
+            // one that refuses it. Not computed for an explicit source: there `detected`
+            // is the answer being supplied, not evidence, so asking it always answers no.
+            snapshotHasAmbiguousBomlessUtf16 =
+                detected is not null && IsAmbiguousBomlessUtf16(path, detected, hasBom);
         }
 
         string sourceCharset =
@@ -490,8 +497,9 @@ internal static class ScanEngine
                 hasReliableUnicodeDetection,
             DetectedEncodingHasBom = options.Action == ScanAction.Convert &&
                 snapshotDetectedHasBom,
-            HasAmbiguousBomlessUtf16 = options.Action == ScanAction.Convert &&
-                snapshotHasAmbiguousBomlessUtf16,
+            // Not gated on Convert like the two above: those are policy inputs, this
+            // states what the bytes do and holds in every mode.
+            HasAmbiguousBomlessUtf16 = snapshotHasAmbiguousBomlessUtf16,
         };
 
         if (options.Action == ScanAction.Convert)
@@ -508,6 +516,14 @@ internal static class ScanEngine
                     entry.ReasonCode = ConversionReasonCodes.UnknownEncoding;
                     entry.Diagnostic =
                         "The file's encoding could not be identified from its contents.";
+                }
+                else if (entry.HasAmbiguousBomlessUtf16)
+                {
+                    // Detection found an estimate, not a reading. Nothing failed, so
+                    // the result stays Unchanged; the row must still say which it is.
+                    entry.ReasonCode = ConversionReasonCodes.AmbiguousBomlessUtf16;
+                    entry.Diagnostic =
+                        BomlessUnicodeSafety.DescribeUnprovableByteOrder(detected!);
                 }
 
                 break;
@@ -535,6 +551,20 @@ internal static class ScanEngine
                 {
                     entry.ReasonCode = ConversionReasonCodes.StrictValidationFailed;
                     entry.Diagnostic = validationDiagnostic;
+                }
+                else if (entry.Result == ConversionRowResult.Unchanged &&
+                         entry.HasAmbiguousBomlessUtf16)
+                {
+                    // The two byte orders are separate entries in the allowed set; the
+                    // label matched only because .NET names both "utf-16". Passing the
+                    // file would assert an identity EC cannot establish, and conversion
+                    // refuses that same file later.
+                    entry.Result = ConversionRowResult.Invalid;
+                    entry.ReasonCode = ConversionReasonCodes.AmbiguousBomlessUtf16;
+                    entry.Diagnostic =
+                        BomlessUnicodeSafety.DescribeUnprovableByteOrder(detected!)
+                        + $" The label '{label}' is in the allowed list, but EC cannot"
+                        + " confirm this file belongs to it.";
                 }
 
                 break;
