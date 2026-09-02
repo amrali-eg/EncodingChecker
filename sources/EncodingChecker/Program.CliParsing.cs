@@ -215,6 +215,18 @@ internal static partial class Program
             return false;
         }
 
+        // An option that arrives with nothing in it is a missing value, not an absent
+        // option. Every later test uses IsNullOrWhiteSpace, so an empty string read as
+        // "not supplied" and fell through to the most permissive behaviour: -Plan ""
+        // skipped the preview flag and converted for real, and -From "" silently
+        // reverted to automatic detection. Rejecting it here covers every value-taking
+        // option, including ones added later, rather than one validation rule each.
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            value = null;
+            return false;
+        }
+
         value = args[++i];
         return true;
     }

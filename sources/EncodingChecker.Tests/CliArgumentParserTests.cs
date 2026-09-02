@@ -138,6 +138,61 @@ public sealed class CliArgumentParserTests
         Assert.Equal($"{flag} requires a value.", error);
     }
 
+    [Theory]
+    [InlineData("-BasePath")]
+    [InlineData("-Include")]
+    [InlineData("-Exclude")]
+    [InlineData("-Target")]
+    [InlineData("-From")]
+    [InlineData("-Plan")]
+    [InlineData("-Apply")]
+    [InlineData("-Journal")]
+    [InlineData("-Validate")]
+    [InlineData("-Report")]
+    public void TryTakeValue_BlankValue_IsTreatedAsMissing(string flag)
+    {
+        // Every later test asks IsNullOrWhiteSpace, so a blank value used to read as
+        // "option not supplied" and fall through to the most permissive behaviour.
+        // -Plan "" skipped the preview flag and converted for real; -From "" reverted
+        // to automatic detection. The check belongs in the one place every option's
+        // value passes through, so an option added later cannot reintroduce it.
+        foreach (string blank in new[] { "", "   ", "\t" })
+        {
+            bool result = Program.TryParseArguments(
+                [flag, blank], out _, out string? error);
+
+            Assert.False(result);
+            Assert.Equal($"{flag} requires a value.", error);
+        }
+    }
+
+    [Fact]
+    public void TryTakeValue_BlankMaxParallelism_IsRejectedByItsOwnParseCheck()
+    {
+        // This one reads better as "requires a positive integer" than as a missing
+        // value, so it keeps its own message. What must not differ is the outcome.
+        bool result = Program.TryParseArguments(
+            ["-MaxParallelism", "  "], out _, out string? error);
+
+        Assert.False(result);
+        Assert.Equal("-MaxParallelism requires a positive integer.", error);
+    }
+
+    [Fact]
+    public void TryTakeValue_ValueOfOnlySeparators_IsNotBlankAndReachesValidation()
+    {
+        // The two rules are distinct: parsing rejects a value with nothing in it,
+        // validation rejects one whose content yields no usable pattern. Keeping them
+        // separate is what lets each report the accurate reason.
+        bool result = Program.TryParseArguments(
+            ["-Include", ",,,"], out Program.CliOptions options, out string? error);
+
+        Assert.True(result);
+        Assert.Null(error);
+        Assert.True(options.IncludeSpecified);
+        Assert.Empty(options.Include);
+    }
+
     [Fact]
     public void TryParseArguments_ValueLooksLikeAnotherKnownFlag_IsTreatedAsMissingValue()
     {
@@ -184,11 +239,14 @@ public sealed class CliArgumentParserTests
         return options;
     }
 
+    // Wholly blank values are now rejected one stage earlier, by TryTakeValue, and are
+    // covered by TryTakeValue_BlankValue_IsTreatedAsMissing below. What is left here is
+    // the case parsing cannot catch: a value with real characters in it that still
+    // splits to no pattern at all.
     [Theory]
-    [InlineData("")]
     [InlineData(",,,")]
-    [InlineData("   ")]
     [InlineData(",")]
+    [InlineData(", ,")]
     public void TryValidateOptions_IncludeGivenButUnusable_Fails(string pattern)
     {
         // A filter that parses to nothing must not mean "every file". This is the
@@ -207,8 +265,8 @@ public sealed class CliArgumentParserTests
     }
 
     [Theory]
-    [InlineData("")]
     [InlineData(",,,")]
+    [InlineData(", ,")]
     public void TryValidateOptions_ExcludeGivenButUnusable_Fails(string pattern)
     {
         Program.CliOptions options =
