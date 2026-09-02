@@ -809,6 +809,24 @@ internal static class ScanEngine
             out SourceInterpretation sourceInterpretation,
             out string? policyReason);
 
+        // A reviewed decision is a ceiling. Applying a plan re-decides rather than
+        // replays it, so a file that became unsafe after review is still refused - that
+        // direction is the point. The opposite direction never is: whatever the plan
+        // could not carry is simply absent here, and the policy then answers a question
+        // it has no evidence for. HasReliableUnicodeDetection is why this exists; the
+        // ceiling is what stops the next missing input from doing the same thing.
+        if (entry.Approved is { } approved &&
+            approved.Action is not PlannedAction.Convert &&
+            action is PlannedAction.Convert)
+        {
+            entry.Action = approved.Action;
+            entry.SourceInterpretation = approved.SourceInterpretation;
+            entry.Result = ConversionPolicy.ToRowResult(approved.Action);
+            entry.ReasonCode = approved.ReasonCode;
+            entry.Diagnostic = approved.Diagnostic;
+            return;
+        }
+
         entry.Action = action;
         entry.SourceInterpretation = sourceInterpretation;
         entry.ReasonCode = action switch

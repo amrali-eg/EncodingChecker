@@ -94,6 +94,17 @@ internal sealed class ConversionReportEntry
     internal PlannedAction? Action { get; set; }
 
     /// <summary>
+    /// What a reviewed plan decided for this file, or <see langword="null"/> when this
+    /// run is not carrying out a saved plan. Internal state; not in CSV.
+    /// </summary>
+    /// <remarks>
+    /// Present only for <c>-Apply</c>. The GUI re-decides in memory and deliberately
+    /// clears <see cref="Action"/> so that supplying a source can turn a refusal into a
+    /// conversion; a saved plan has no such conversation, so its refusals bind.
+    /// </remarks>
+    internal ApprovedDecision? Approved { get; set; }
+
+    /// <summary>
     /// The charset label the next conversion will use to read this file.
     /// </summary>
     /// <remarks>

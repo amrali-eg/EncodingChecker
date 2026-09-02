@@ -37,11 +37,11 @@ internal sealed record ConversionSemantics
     /// <summary>
     /// Changes only when the meaning of an existing plan's decisions changes.
     /// </summary>
-    internal const int Current = 5;
+    internal const int Current = 6;
 
     /// <summary>The guarantees of <see cref="Current"/> shown to the reader.</summary>
     internal const string Describes =
-        "source-bound detection, strict codecs, verified output, atomic install, explicit source required for legacy text, proven BOM-less UTF-16 byte order";
+        "source-bound detection, strict codecs, verified output, atomic install, explicit source required for legacy text, proven BOM-less UTF-16 byte order, a reviewed refusal is binding";
 
     /// <summary>Malformed input is rejected rather than replaced.</summary>
     public bool StrictDecoding { get; init; } = true;
@@ -101,6 +101,19 @@ internal sealed record PlannedFile
     /// <summary>Whether automatic detection found the encoding's BOM.</summary>
     public bool DetectedHasBom { get; init; }
 
+    /// <summary>
+    /// Whether detection was confirmed by a complete strict Unicode decode when this
+    /// plan was made.
+    /// </summary>
+    /// <remarks>
+    /// This is a policy input, not provenance: it is what lets an explicit source that
+    /// contradicts a proven Unicode or ASCII reading be refused. Recording it keeps the
+    /// decision reproducible when the plan is applied. Without it the veto had nothing
+    /// to fire on at apply time, and a refusal the reviewer approved became a silent
+    /// conversion.
+    /// </remarks>
+    public bool HasReliableUnicodeDetection { get; init; }
+
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public required SourceInterpretation SourceInterpretation { get; init; }
 
@@ -117,6 +130,22 @@ internal sealed record PlannedFile
 }
 
 /// <summary>
+/// The decision an approved plan recorded for one file, carried into the write pass.
+/// </summary>
+/// <remarks>
+/// A plan is re-decided rather than replayed, so that a file which became unsafe after
+/// review is still refused. That direction is the point; the opposite direction is not.
+/// This makes the reviewed decision a ceiling: applying a plan may refuse more than the
+/// review did, never less. Any policy input the plan schema does not carry is absent at
+/// apply time, and without the ceiling its refusal silently becomes a conversion.
+/// </remarks>
+internal sealed record ApprovedDecision(
+    PlannedAction Action,
+    SourceInterpretation SourceInterpretation,
+    string? ReasonCode,
+    string? Diagnostic);
+
+/// <summary>
 /// A conversion plan that can be reviewed before execution and then applied as approved.
 /// </summary>
 /// <remarks>
@@ -130,7 +159,7 @@ internal sealed record PlannedFile
 internal sealed record ConversionPlan
 {
     /// <summary>The plan file schema version.</summary>
-    internal const int CurrentPlanVersion = 4;
+    internal const int CurrentPlanVersion = 5;
 
     public int PlanVersion { get; init; } = CurrentPlanVersion;
 
@@ -232,6 +261,7 @@ internal sealed record ConversionPlan
                 DetectedEncoding = entry.DetectedEncodingLabel,
                 DetectedCodePage = detectedCodePage,
                 DetectedHasBom = entry.DetectedEncodingHasBom,
+                HasReliableUnicodeDetection = entry.HasReliableUnicodeDetection,
                 SourceInterpretation = entry.SourceInterpretation
                     ?? throw new InvalidOperationException(
                         $"'{entry.FilePath}' reached a conversion plan without being "

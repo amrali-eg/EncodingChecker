@@ -72,6 +72,18 @@ internal static partial class Program
                     ReasonCode = f.ReasonCode,
                     Diagnostic = f.Reason,
 
+                    // A policy input, not provenance: without it the explicit-source
+                    // veto cannot fire when the plan is applied.
+                    HasReliableUnicodeDetection = f.HasReliableUnicodeDetection,
+
+                    // The reviewed decision, kept intact so re-deciding below can only
+                    // refuse more than the review did, never less.
+                    Approved = new ApprovedDecision(
+                        f.Action,
+                        f.SourceInterpretation,
+                        f.ReasonCode,
+                        f.Reason),
+
                     // Rechecked at installation so a long conversion cannot install over
                     // bytes that changed after the initial stale-file check.
                     ExpectedSourceSha256 = f.Sha256,
