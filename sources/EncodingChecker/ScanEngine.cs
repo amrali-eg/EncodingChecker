@@ -1159,6 +1159,13 @@ internal static class ScanEngine
                 destination.Flush(flushToDisk: true);
             }
 
+            // Drop the previous record before its backup stops existing. Done in this
+            // order - after the replacement copy is safely on disk, immediately before
+            // it takes the .bak name - the worst interruption leaves a valid backup
+            // with no record, which can be inspected. The other order leaves a record
+            // insisting on a hash and a source codec for bytes that are gone.
+            ConversionMetadataStore.Invalidate(path);
+
             EncodingConverter.AtomicReplaceForBackup(tempPath, path + ".bak");
         }
         finally
