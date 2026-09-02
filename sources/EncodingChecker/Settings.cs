@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
 
 namespace EncodingChecker;
@@ -50,9 +52,58 @@ public sealed class WindowPosition
     public int Width = -1;
     public int Height = -1;
 
-    public void ApplyTo(Form form)
+    public void ApplyTo(Form form) =>
+        ApplyTo(form, Screen.AllScreens.Select(s => s.WorkingArea));
+
+    /// <summary>
+    /// Restores the saved bounds, but only onto a monitor that is actually there.
+    /// </summary>
+    /// <remarks>
+    /// The monitor list is a parameter so the decision can be tested against layouts
+    /// this machine does not have - a saved position is only ever wrong on a desktop
+    /// other than the one that saved it.
+    /// </remarks>
+    internal void ApplyTo(Form form, IEnumerable<Rectangle> workingAreas)
     {
-        if (Left >= 0 && Top >= 0 && Width > 0 && Height > 0)
-            form.SetBounds(Left, Top, Width, Height);
+        ArgumentNullException.ThrowIfNull(form);
+
+        if (Width <= 0 || Height <= 0)
+            return;
+
+        if (!IsReachable(new Rectangle(Left, Top, Width, Height), workingAreas))
+            return;
+
+        form.SetBounds(Left, Top, Width, Height);
+    }
+
+    /// <summary>
+    /// Whether enough of the window would land on a monitor to be usable.
+    /// </summary>
+    /// <remarks>
+    /// A position saved on a monitor that is no longer attached restores the window
+    /// where nothing can reach it, and there is no way back from inside the app.
+    /// <para>
+    /// Testing the screens is also what allows negative coordinates. Rejecting those
+    /// outright, as this used to, discarded perfectly good positions on any setup with
+    /// a monitor placed left of or above the primary one.
+    /// </para>
+    /// </remarks>
+    internal static bool IsReachable(Rectangle bounds, IEnumerable<Rectangle> workingAreas)
+    {
+        // Enough of the title bar to grab, rather than a single pixel of overlap.
+        const int MinimumVisible = 80;
+
+        foreach (Rectangle area in workingAreas)
+        {
+            Rectangle overlap = Rectangle.Intersect(area, bounds);
+
+            if (overlap.Width >= Math.Min(MinimumVisible, bounds.Width) &&
+                overlap.Height >= Math.Min(MinimumVisible, bounds.Height))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

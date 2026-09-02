@@ -105,11 +105,18 @@ internal static partial class Program
         ];
 
         using var cancellation = new CancellationTokenSource();
-        Console.CancelKeyPress += (_, e) =>
+
+        // Unsubscribed below, as the scan path already does. Left attached, the handler
+        // outlives the token source it captured, and a Ctrl+C after this method returns
+        // calls Cancel on a disposed one - an ObjectDisposedException raised on the
+        // console's own thread, where nothing is waiting to catch it.
+        ConsoleCancelEventHandler cancelHandler = (_, e) =>
         {
             e.Cancel = true;
             cancellation.Cancel();
         };
+
+        Console.CancelKeyPress += cancelHandler;
 
         try
         {
@@ -127,6 +134,10 @@ internal static partial class Program
         {
             Console.Error.WriteLine("Cancelled.");
             return 4;
+        }
+        finally
+        {
+            Console.CancelKeyPress -= cancelHandler;
         }
 
         List<ConversionReportEntry> completed =

@@ -8,24 +8,28 @@ public partial class MainForm
 {
     private void LoadSettings()
     {
-        string settingsFileName = GetSettingsFileName();
         Settings settings = new();
-
-        if (!File.Exists(settingsFileName))
-        {
-            ApplySettings(settings);
-            return;
-        }
 
         try
         {
-            using var settingsFile = new FileStream(
-                settingsFileName, FileMode.Open, FileAccess.Read, FileShare.Read);
-            var serializer = new XmlSerializer(typeof(Settings));
-            settings = serializer.Deserialize(settingsFile) as Settings ?? new Settings();
+            // Inside the try: this creates the settings directory, which fails on a
+            // profile that forbids it. Outside, that exception escaped OnFormLoad and
+            // the window would not open at all - over preferences EC can do without.
+            string settingsFileName = GetSettingsFileName();
+
+            if (File.Exists(settingsFileName))
+            {
+                using var settingsFile = new FileStream(
+                    settingsFileName, FileMode.Open, FileAccess.Read, FileShare.Read);
+                var serializer = new XmlSerializer(typeof(Settings));
+
+                settings = serializer.Deserialize(settingsFile) as Settings
+                           ?? new Settings();
+            }
         }
         catch (Exception ex) when (
-            ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+            ex is IOException or UnauthorizedAccessException or InvalidOperationException
+                or ArgumentException or NotSupportedException)
         {
             // Settings are optional; defaults keep the application usable.
             settings = new Settings();

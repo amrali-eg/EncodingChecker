@@ -16,7 +16,7 @@ public partial class MainForm
             return;
         }
 
-        var saveFileDialog = new SaveFileDialog
+        using var saveFileDialog = new SaveFileDialog
         {
             Title = @"Export to a Text File",
             Filter = @"Text files (*.txt)|*.txt",
@@ -75,7 +75,7 @@ public partial class MainForm
             return;
         }
 
-        var saveFileDialog = new SaveFileDialog
+        using var saveFileDialog = new SaveFileDialog
         {
             Title = @"Export Results as CSV",
             Filter = @"CSV files (*.csv)|*.csv",
@@ -103,7 +103,7 @@ public partial class MainForm
         if (_lastConversionJournal is null)
             return;
 
-        var saveFileDialog = new SaveFileDialog
+        using var saveFileDialog = new SaveFileDialog
         {
             Title = @"Export Conversion Journal",
             Filter = @"JSON files (*.json)|*.json",
