@@ -220,7 +220,13 @@ internal sealed record ConversionJournal
 
         foreach (ConversionReportEntry entry in entries)
         {
-            ConversionStatus status = entry.Result switch
+            ConversionStatus status = entry switch
+            {
+                // First, because the result still holds what the deciding pass expected
+                // rather than what happened - the run stopped before this file.
+                { NotAttempted: true } => ConversionStatus.NotAttempted,
+
+                _ => entry.Result switch
             {
                 // A preview records the decision, not a conversion that happened.
                 ConversionRowResult.Converted when preview
@@ -244,6 +250,7 @@ internal sealed record ConversionJournal
                 // which reports 3, and dressed an I/O error as a safety judgement.
                 ConversionRowResult.Error => ConversionStatus.Failed,
                 _ => ConversionStatus.NotAttempted,
+            },
             };
 
             // Record the encoding actually used to read the source file.

@@ -21,6 +21,16 @@ internal static partial class EncodingConverter
 
         /// <summary>Whether the target BOM state matched the requested policy.</summary>
         internal bool BomVerified { get; init; }
+
+        /// <summary>
+        /// The digest computed by decoding the installed output, present on success.
+        /// </summary>
+        /// <remarks>
+        /// Carried out so the recovery record can state a hash it actually measured.
+        /// Copying the source digest into both fields makes the record read as two
+        /// agreeing measurements when it holds one value written twice.
+        /// </remarks>
+        internal byte[]? OutputHash { get; init; }
     }
 
     // Used only for same-run content verification.
@@ -109,6 +119,7 @@ internal static partial class EncodingConverter
                     Success = true,
                     ScalarsCompared = sourceDigest.ScalarCount,
                     BomVerified = bomVerified,
+                    OutputHash = targetDigest.Hash,
                 };
             }
 

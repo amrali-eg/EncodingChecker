@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -504,6 +505,40 @@ internal sealed record ConversionPlan
         return stale;
     }
 
+    /// <summary>
+    /// How the source encoding was arrived at, read from the files rather than from
+    /// the run-level field, which cannot describe a batch that chose more than one.
+    /// </summary>
+    /// <remarks>
+    /// An explicit source replaces detection as the codec used, but detection still
+    /// runs and its result is recorded: it is what the conflicting-source refusal and
+    /// the BOM-less advisories are decided against. Calling that "bypassed" told the
+    /// reader the safety input was skipped, when its absence was the defect that let
+    /// an applied plan convert a file it had recorded as refused.
+    /// </remarks>
+    internal string DescribeSourceChoice()
+    {
+        string[] chosen =
+        [
+            .. Files.Where(f => f.SourceWasSpecified)
+                    .Select(f => f.SourceEncoding)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+        ];
+
+        if (chosen.Length == 0)
+            return "detected per file";
+
+        string detail = chosen.Length == 1
+            ? chosen[0]
+            : $"{chosen.Length} chosen per file ({string.Join(", ", chosen)})";
+
+        bool everyFile = Files.All(f => f.SourceWasSpecified);
+
+        return everyFile
+            ? $"{detail} (chosen by you; detection still ran and is recorded)"
+            : $"{detail} for some files, detected for the rest";
+    }
+
     /// <summary>The summary shown before the user decides.</summary>
     internal string Summarize()
     {
@@ -521,10 +556,7 @@ internal sealed record ConversionPlan
             string.Empty,
             $"Directory:                    {BaseDirectory}",
             $"Target:                       {ScanEngine.DescribeTarget(TargetEncoding, TargetHasBom)}",
-            "Source encoding:              "
-                + (string.IsNullOrEmpty(ExplicitSourceEncoding)
-                    ? "detected per file"
-                    : $"{ExplicitSourceEncoding} (specified; detection bypassed)"),
+            $"Source encoding:              {DescribeSourceChoice()}",
             $"Backups:                      {(BackupEnabled ? "enabled" : "DISABLED")}",
             $"Guarantees:                   {ConversionSemantics.Describes}",
             string.Empty,

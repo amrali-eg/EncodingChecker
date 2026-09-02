@@ -152,10 +152,12 @@ internal sealed class ConversionConfirmationForm : Form
         body.Controls.Add(Rows(
         [
             ("Directory", _plan.BaseDirectory),
+            // Read from the files, so a batch resolved with several encodings is not
+            // described as though one of them applied to all of it.
             ("Source encoding",
-             string.IsNullOrEmpty(_plan.ExplicitSourceEncoding)
-                 ? "EC converts automatically only when it can identify the source safely"
-                 : $"{_plan.ExplicitSourceEncoding} (chosen by you; strict checks still apply)"),
+             _plan.Files.Any(f => f.SourceWasSpecified)
+                 ? _plan.DescribeSourceChoice() + "; strict checks still apply"
+                 : "EC converts automatically only when it can identify the source safely"),
             ("Backups", _plan.BackupEnabled
                 ? "enabled — original as <file>.bak; record as <file>.ecmeta.json"
                 : "OFF — originals will not be kept"),

@@ -455,7 +455,19 @@ public sealed class ConversionPlanTests : IDisposable
 
         Assert.Equal("shift_jis", plan.ExplicitSourceEncoding);
         Assert.True(Assert.Single(plan.Files).SourceWasSpecified);
-        Assert.Contains("detection bypassed", plan.Summarize());
+
+        string summary = plan.Summarize();
+
+        Assert.Contains("shift_jis", summary);
+        Assert.Contains("chosen by you", summary);
+
+        // Detection is replaced as the codec used, not skipped: it still runs, and its
+        // result is what the conflicting-source refusal and the BOM-less advisories are
+        // decided against. Saying it was bypassed described the absence of the very
+        // input whose loss let an applied plan convert a file recorded as refused.
+        Assert.Contains("detection still ran", summary);
+        Assert.DoesNotContain("bypassed", summary);
+        Assert.NotNull(Assert.Single(plan.Files).DetectedEncoding);
     }
 
     [Fact]

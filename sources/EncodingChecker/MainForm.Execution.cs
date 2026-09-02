@@ -412,10 +412,13 @@ public partial class MainForm
         _convertWasPreview = false;
         _convertArgs = null;
 
-        // These outcomes leave all files untouched, so there are no result rows to update.
+        // These outcomes leave all files untouched, so there are no result rows to
+        // update. Interrupted is deliberately not among them: it means writing had
+        // already begun, and reporting it here would tell the user nothing changed.
         if (e.Error is null && !e.Cancelled && outcome is not null &&
             outcome.Outcome is not (OrchestrationOutcome.Converted
-                                    or OrchestrationOutcome.Previewed))
+                                    or OrchestrationOutcome.Previewed
+                                    or OrchestrationOutcome.Interrupted))
         {
             // Starting conversion temporarily clears this control's visual state. A
             // cancelled review keeps all rows selected, so restore the matching state.
@@ -495,7 +498,7 @@ public partial class MainForm
                   $"{unchangedCount} unchanged, {refusedCount} refused, {errorCount} failed"
                 : $"Preview complete: {convertedCount} file(s) would be converted, " +
                   $"{unchangedCount} unchanged, {refusedCount} refused, {errorCount} failed")
-            : (e.Cancelled
+            : (e.Cancelled || outcome?.Outcome == OrchestrationOutcome.Interrupted
                 ? $"Conversion cancelled: {convertedCount} converted, " +
                   $"{unchangedCount} unchanged, {refusedCount} refused, {errorCount} failed"
                 : $"Conversion complete: {convertedCount} converted, " +

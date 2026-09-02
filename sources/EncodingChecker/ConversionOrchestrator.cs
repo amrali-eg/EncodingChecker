@@ -51,6 +51,16 @@ internal enum OrchestrationOutcome
 
     /// <summary>The run could not be planned. Nothing was written.</summary>
     CouldNotPlan,
+
+    /// <summary>
+    /// Cancelled after writing began. Files already converted stay converted.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from <see cref="Cancelled"/>, which is the user declining before
+    /// anything is written. Collapsing the two reported a run that changed files as
+    /// one that changed nothing, and discarded the record of the writes that happened.
+    /// </remarks>
+    Interrupted,
 }
 
 /// <summary>The result of a run and the plan shown to the user.</summary>
@@ -153,10 +163,7 @@ internal sealed class ConversionOrchestrator
             {
                 plan = ConversionPlan.FromEntries(
                     entries, baseDirectory, targetCharset, targetWriteBom, backup,
-                    explicitSource: entries.All(e => e.SourceEncodingWasSpecified)
-                                    && entries.Count > 0
-                        ? entries[0].EffectiveSourceLabel
-                        : null);
+                    SingleExplicitSource(entries, e => e.EffectiveSourceLabel));
             }
             catch (InvalidOperationException ex)
             {
@@ -220,14 +227,54 @@ internal sealed class ConversionOrchestrator
             // Carry the approved hashes into the write pass to narrow the time-of-check gap.
             BindToPlannedBytes(entries, plan);
 
-            RunPass(
-                entries, targetCharset, targetWriteBom,
-                backup, whatIf: false, maxParallelism, onEntry, cancellationToken);
+            // Cancellation here is not "nothing happened": whatever finished before it
+            // is on disk. The journal is the only record of those writes, and letting
+            // the exception escape threw it away along with the run.
+            var reached = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            string? explicitSource = entries.All(e => e.SourceEncodingWasSpecified)
-                                     && entries.Count > 0
-                ? entries[0].ResolvedSourceLabel ?? entries[0].EffectiveSourceLabel
-                : null;
+            try
+            {
+                RunPass(
+                    entries, targetCharset, targetWriteBom,
+                    backup, whatIf: false, maxParallelism,
+                    entry =>
+                    {
+                        reached.Add(entry.FilePath);
+                        onEntry(entry);
+                    },
+                    cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                // Entries the run never got to still carry the deciding pass's result,
+                // which for a convertible file is Converted. Journaling that as-is would
+                // report files as converted that were never opened.
+                foreach (ConversionReportEntry entry in entries)
+                    entry.NotAttempted = !reached.Contains(entry.FilePath);
+
+                return new OrchestrationResult
+                {
+                    Outcome = OrchestrationOutcome.Interrupted,
+                    Plan = plan,
+                    Message =
+                        $"Cancelled after converting {reached.Count} of {entries.Count} "
+                        + "file(s). Files already converted were left converted; the rest "
+                        + "were not touched. Export the journal for the full record.",
+                    Journal = ConversionJournal.FromRun(
+                        entries,
+                        baseDirectory,
+                        targetCharset,
+                        targetWriteBom,
+                        backup,
+                        SingleExplicitSource(
+                            entries, e => e.ResolvedSourceLabel ?? e.EffectiveSourceLabel),
+                        surface: "Gui",
+                        startedUtc),
+                };
+            }
+
+            string? explicitSource = SingleExplicitSource(
+                entries, e => e.ResolvedSourceLabel ?? e.EffectiveSourceLabel);
 
             return new OrchestrationResult
             {
@@ -244,6 +291,35 @@ internal sealed class ConversionOrchestrator
                     startedUtc),
             };
         }
+    }
+
+    /// <summary>
+    /// The one source encoding chosen for this run, or <see langword="null"/> when
+    /// there is no single answer.
+    /// </summary>
+    /// <remarks>
+    /// The GUI scopes each choice to the files it was ticked for, so a batch resolved
+    /// in several rounds can end with every file explicit and no two agreeing. Taking
+    /// the first entry's label recorded one encoding for a run that used others.
+    /// <para>
+    /// Null covers both "nothing was chosen" and "several were"; the per-file source
+    /// and detection mode distinguish them, and only they can describe a mixed run
+    /// accurately.
+    /// </para>
+    /// </remarks>
+    private static string? SingleExplicitSource(
+        IReadOnlyList<ConversionReportEntry> entries,
+        Func<ConversionReportEntry, string> label)
+    {
+        if (entries.Count == 0 || !entries.All(e => e.SourceEncodingWasSpecified))
+            return null;
+
+        string[] distinct =
+        [
+            .. entries.Select(label).Distinct(StringComparer.OrdinalIgnoreCase)
+        ];
+
+        return distinct.Length == 1 ? distinct[0] : null;
     }
 
     private static void RunPass(

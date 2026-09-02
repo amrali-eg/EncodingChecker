@@ -154,6 +154,15 @@ internal sealed class ConversionReportEntry
     internal string? ReasonCode { get; set; }
 
     /// <summary>
+    /// Whether the run ended before it reached this file. Internal state; not in CSV.
+    /// </summary>
+    /// <remarks>
+    /// An entry keeps the deciding pass's result until the write pass overwrites it,
+    /// so a file the run never got to still reads as Converted. This says otherwise.
+    /// </remarks>
+    internal bool NotAttempted { get; set; }
+
+    /// <summary>
     /// Whether the converted file reached its destination, or <see langword="null"/>
     /// when the outcome is unknown or nothing was attempted.
     /// </summary>
