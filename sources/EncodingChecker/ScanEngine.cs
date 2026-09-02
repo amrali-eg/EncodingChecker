@@ -809,12 +809,8 @@ internal static class ScanEngine
             out SourceInterpretation sourceInterpretation,
             out string? policyReason);
 
-        // A reviewed decision is a ceiling. Applying a plan re-decides rather than
-        // replays it, so a file that became unsafe after review is still refused - that
-        // direction is the point. The opposite direction never is: whatever the plan
-        // could not carry is simply absent here, and the policy then answers a question
-        // it has no evidence for. HasReliableUnicodeDetection is why this exists; the
-        // ceiling is what stops the next missing input from doing the same thing.
+        // Revalidation may make an applied plan stricter, never broader. Preserve a
+        // reviewed non-writing action if the current policy would convert the file.
         if (entry.Approved is { } approved &&
             approved.Action is not PlannedAction.Convert &&
             action is PlannedAction.Convert)
@@ -1159,12 +1155,9 @@ internal static class ScanEngine
                 destination.Flush(flushToDisk: true);
             }
 
-            // Drop the previous record before its backup stops existing. Done in this
-            // order - after the replacement copy is safely on disk, immediately before
-            // it takes the .bak name - the worst interruption leaves a valid backup
-            // with no record, which can be inspected. The other order leaves a record
-            // insisting on a hash and a source codec for bytes that are gone.
-            ConversionMetadataStore.Invalidate(path);
+            // Remove the old record at the last safe moment. A crash may leave a backup
+            // without metadata, but never metadata describing a different backup.
+            ConversionMetadataStore.RemoveBeforeBackupReplacement(path);
 
             EncodingConverter.AtomicReplaceForBackup(tempPath, path + ".bak");
         }

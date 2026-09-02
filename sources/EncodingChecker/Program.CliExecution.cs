@@ -27,12 +27,8 @@ internal static partial class Program
             return 3;
         }
 
-        // -BasePath refuses a reparse-point root, so a plan can never have been made
-        // through one. Checking only that the directory still exists let the same input
-        // be rejected when planning and followed when applying: rename the root away,
-        // put a junction in its place, and the writes land in a tree the reviewer never
-        // saw. FindStaleFiles repeats this per path; naming the root here says which
-        // one thing changed instead of listing every file under it.
+        // A reparse point can redirect the approved path to an unreviewed tree while all
+        // file hashes still match. FindStaleFiles repeats this check for each entry.
         if (DirectoryTraversal.IsReparsePointDirectory(plan.BaseDirectory))
         {
             Console.Error.WriteLine(

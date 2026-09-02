@@ -102,15 +102,11 @@ internal sealed record PlannedFile
     public bool DetectedHasBom { get; init; }
 
     /// <summary>
-    /// Whether detection was confirmed by a complete strict Unicode decode when this
-    /// plan was made.
+    /// Whether the detected Unicode identity passed strict full-file validation.
     /// </summary>
     /// <remarks>
-    /// This is a policy input, not provenance: it is what lets an explicit source that
-    /// contradicts a proven Unicode or ASCII reading be refused. Recording it keeps the
-    /// decision reproducible when the plan is applied. Without it the veto had nothing
-    /// to fire on at apply time, and a refusal the reviewer approved became a silent
-    /// conversion.
+    /// This policy input must survive save/load so explicit-source conflict decisions
+    /// remain reproducible when the plan is applied.
     /// </remarks>
     public bool HasReliableUnicodeDetection { get; init; }
 
@@ -133,11 +129,8 @@ internal sealed record PlannedFile
 /// The decision an approved plan recorded for one file, carried into the write pass.
 /// </summary>
 /// <remarks>
-/// A plan is re-decided rather than replayed, so that a file which became unsafe after
-/// review is still refused. That direction is the point; the opposite direction is not.
-/// This makes the reviewed decision a ceiling: applying a plan may refuse more than the
-/// review did, never less. Any policy input the plan schema does not carry is absent at
-/// apply time, and without the ceiling its refusal silently becomes a conversion.
+/// Applying a plan may become stricter if a file is no longer safe, but it must never
+/// turn a reviewed non-writing action into a conversion.
 /// </remarks>
 internal sealed record ApprovedDecision(
     PlannedAction Action,
@@ -463,8 +456,8 @@ internal sealed record ConversionPlan
             if (DirectoryTraversal.HasReparsePointInPath(BaseDirectory, path))
             {
                 stale.Add(
-                    $"{path} (a directory in its path is now a symbolic link or " +
-                    "other reparse point)");
+                    $"{path} (the file or a directory in its path is now a symbolic " +
+                    "link, another reparse point, or could not be inspected)");
                 continue;
             }
 

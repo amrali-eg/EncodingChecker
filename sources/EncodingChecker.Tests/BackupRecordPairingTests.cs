@@ -137,7 +137,7 @@ public sealed class BackupRecordPairingTests : IDisposable
     }
 
     [Fact]
-    public void Invalidate_RemovesEvenAReadOnlyRecord()
+    public void RemoveBeforeBackupReplacement_RemovesEvenAReadOnlyRecord()
     {
         // The backup path clears ReadOnly before replacing; the record must match, or
         // a read-only sidecar would fail the backup instead of being replaced by it.
@@ -145,17 +145,17 @@ public sealed class BackupRecordPairingTests : IDisposable
         File.WriteAllText(RecordPath, "{}");
         File.SetAttributes(RecordPath, FileAttributes.ReadOnly);
 
-        ConversionMetadataStore.Invalidate(FilePath);
+        ConversionMetadataStore.RemoveBeforeBackupReplacement(FilePath);
 
         Assert.False(File.Exists(RecordPath));
     }
 
     [Fact]
-    public void Invalidate_WithNoRecordPresent_IsANoOp()
+    public void RemoveBeforeBackupReplacement_WithNoRecordPresent_IsANoOp()
     {
         File.WriteAllText(FilePath, "hello", new UTF8Encoding(false));
 
-        ConversionMetadataStore.Invalidate(FilePath);
+        ConversionMetadataStore.RemoveBeforeBackupReplacement(FilePath);
 
         Assert.False(File.Exists(RecordPath));
         Assert.True(File.Exists(FilePath));

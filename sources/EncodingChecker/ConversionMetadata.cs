@@ -150,25 +150,15 @@ internal static class ConversionMetadataStore
     internal static string MetadataPathFor(string filePath) => filePath + Suffix;
 
     /// <summary>
-    /// Removes any existing record for this file, so nothing describes a backup that is
-    /// about to be replaced.
+    /// Removes the recovery record immediately before its fixed-name backup is replaced.
     /// </summary>
     /// <remarks>
-    /// The backup and its record are one unit. A record is only meaningful next to the
-    /// exact backup it was written for, and <c>&lt;file&gt;.bak</c> is a fixed name, so
-    /// a second conversion replaces the first one's restore point. Leaving the first
-    /// record in place left it asserting a hash, a source codec and a completed
-    /// installation for bytes that no longer existed - not merely unverifiable, but
-    /// positively wrong about what the backup contained.
-    /// <para>
-    /// Failure is reported to the caller rather than swallowed: a backup that cannot be
-    /// separated from a stale record is not a restore point, and conversion must stop
-    /// instead of creating the pair this exists to prevent.
-    /// </para>
+    /// A record must not survive replacement of the backup it describes. Deletion
+    /// failures propagate so conversion stops instead of leaving a misleading pair.
     /// </remarks>
     /// <exception cref="IOException">The record exists and could not be removed.</exception>
     /// <exception cref="UnauthorizedAccessException">The record could not be removed.</exception>
-    internal static void Invalidate(string filePath)
+    internal static void RemoveBeforeBackupReplacement(string filePath)
     {
         string path = MetadataPathFor(filePath);
 

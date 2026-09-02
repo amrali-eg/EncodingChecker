@@ -164,6 +164,31 @@ public sealed class AppliedPlanPathIntegrityTests : IDisposable
     }
 
     [Fact]
+    public void HasReparsePointInPath_ChecksTheFinalPathComponent()
+    {
+        string real = Path.Combine(_root, "real");
+        string elsewhere = Path.Combine(_root, "elsewhere");
+        Directory.CreateDirectory(real);
+        Directory.CreateDirectory(elsewhere);
+
+        string link = Path.Combine(real, "planned-entry");
+        Assert.True(
+            TryCreateJunction(link, elsewhere),
+            "The junction fixture could not be created.");
+
+        try
+        {
+            // This checks the component passed as 'path', not merely its parent chain.
+            // File and directory links expose the same ReparsePoint attribute.
+            Assert.True(DirectoryTraversal.HasReparsePointInPath(real, link));
+        }
+        finally
+        {
+            Assert.True(RunCmd($"rmdir \"{link}\""));
+        }
+    }
+
+    [Fact]
     public void AnOrdinaryNestedPlanStillApplies()
     {
         // The control, and it needs no junction, so it runs in every environment. A
@@ -201,5 +226,18 @@ public sealed class AppliedPlanPathIntegrityTests : IDisposable
         // plan says nothing about - on some machines the temp path itself sits behind
         // a link, which would otherwise reject every plan.
         Assert.False(DirectoryTraversal.HasReparsePointInPath(deep, file));
+    }
+
+    [Fact]
+    public void HasReparsePointInPath_PathOutsideRoot_FailsClosed()
+    {
+        string root = Path.Combine(_root, "root");
+        string outside = Path.Combine(_root, "outside");
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(outside);
+        string file = Path.Combine(outside, "f.txt");
+        File.WriteAllText(file, "x");
+
+        Assert.True(DirectoryTraversal.HasReparsePointInPath(root, file));
     }
 }

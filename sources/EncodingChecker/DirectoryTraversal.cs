@@ -92,10 +92,13 @@ internal static class DirectoryTraversal
     /// Attribute-read failures are treated conservatively.
     /// </summary>
     internal static bool IsReparsePointDirectory(string dir)
+        => IsReparsePointOrUnreadable(dir);
+
+    private static bool IsReparsePointOrUnreadable(string path)
     {
         try
         {
-            return (File.GetAttributes(dir) & FileAttributes.ReparsePoint) != 0;
+            return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
         }
         catch (Exception ex) when (
             ex is IOException or UnauthorizedAccessException)
@@ -105,26 +108,23 @@ internal static class DirectoryTraversal
     }
 
     /// <summary>
-    /// Whether any directory from the file's own folder up to and including
-    /// <paramref name="root"/> is a reparse point.
+    /// Whether the planned file or any directory up to and including
+    /// <paramref name="root"/> is a reparse point or cannot be inspected.
     /// </summary>
     /// <remarks>
-    /// A scan never enters a reparse-point directory, so no planned path can legitimately
-    /// contain one. If one appears later, the tree the plan described has been replaced by
-    /// a different tree, and the recorded hashes cannot say so: two identical copies hash
-    /// identically. Attribute-read failures are treated conservatively, matching
-    /// <see cref="IsReparsePointDirectory"/>.
+    /// A link appearing after planning can redirect reads even when the target has the
+    /// same hash. Failure to reach the recorded root is also treated as stale.
     /// </remarks>
     internal static bool HasReparsePointInPath(string root, string path)
     {
         string normalizedRoot =
             Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
 
-        string? current = Path.GetDirectoryName(Path.GetFullPath(path));
+        string? current = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
 
         while (current is not null)
         {
-            if (IsReparsePointDirectory(current))
+            if (IsReparsePointOrUnreadable(current))
                 return true;
 
             // Stop at the root; what lies above it is not part of the plan's scope.
@@ -139,7 +139,8 @@ internal static class DirectoryTraversal
             current = Path.GetDirectoryName(current);
         }
 
-        return false;
+        // The path was not beneath the recorded root.
+        return true;
     }
 
     /// <summary>
