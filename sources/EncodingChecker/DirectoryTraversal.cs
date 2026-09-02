@@ -105,6 +105,44 @@ internal static class DirectoryTraversal
     }
 
     /// <summary>
+    /// Whether any directory from the file's own folder up to and including
+    /// <paramref name="root"/> is a reparse point.
+    /// </summary>
+    /// <remarks>
+    /// A scan never enters a reparse-point directory, so no planned path can legitimately
+    /// contain one. If one appears later, the tree the plan described has been replaced by
+    /// a different tree, and the recorded hashes cannot say so: two identical copies hash
+    /// identically. Attribute-read failures are treated conservatively, matching
+    /// <see cref="IsReparsePointDirectory"/>.
+    /// </remarks>
+    internal static bool HasReparsePointInPath(string root, string path)
+    {
+        string normalizedRoot =
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+
+        string? current = Path.GetDirectoryName(Path.GetFullPath(path));
+
+        while (current is not null)
+        {
+            if (IsReparsePointDirectory(current))
+                return true;
+
+            // Stop at the root; what lies above it is not part of the plan's scope.
+            if (string.Equals(
+                    Path.TrimEndingDirectorySeparator(current),
+                    normalizedRoot,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            current = Path.GetDirectoryName(current);
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Enumerates matching files while skipping excluded directories and reparse points.
     /// </summary>
     internal static IEnumerable<string> EnumerateFiles(

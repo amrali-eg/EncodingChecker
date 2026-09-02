@@ -455,6 +455,19 @@ internal sealed record ConversionPlan
                 continue;
             }
 
+            // A plan records paths, and a path is only as stable as the directories
+            // above it. Planning refuses a reparse-point root and traversal never enters
+            // one, so a reparse point appearing here means the tree being written to is
+            // no longer the tree that was reviewed. The hash cannot detect it: an
+            // identical copy behind a junction hashes identically.
+            if (DirectoryTraversal.HasReparsePointInPath(BaseDirectory, path))
+            {
+                stale.Add(
+                    $"{path} (a directory in its path is now a symbolic link or " +
+                    "other reparse point)");
+                continue;
+            }
+
             try
             {
                 if (!File.Exists(path))

@@ -27,6 +27,24 @@ internal static partial class Program
             return 3;
         }
 
+        // -BasePath refuses a reparse-point root, so a plan can never have been made
+        // through one. Checking only that the directory still exists let the same input
+        // be rejected when planning and followed when applying: rename the root away,
+        // put a junction in its place, and the writes land in a tree the reviewer never
+        // saw. FindStaleFiles repeats this per path; naming the root here says which
+        // one thing changed instead of listing every file under it.
+        if (DirectoryTraversal.IsReparsePointDirectory(plan.BaseDirectory))
+        {
+            Console.Error.WriteLine(
+                $"The plan's directory is now a symbolic link or other reparse point, " +
+                $"so it may no longer be the directory that was reviewed: " +
+                $"{plan.BaseDirectory}");
+            Console.Error.WriteLine();
+            Console.Error.WriteLine(
+                "Re-run -Plan against the real directory you intend to convert.");
+            return 3;
+        }
+
         // Apply the reviewed plan; do not re-detect and silently change its decisions.
         IReadOnlyList<string> stale = plan.FindStaleFiles();
 
