@@ -29,6 +29,27 @@ internal enum ConversionStatus
     Failed,
 
     /// <summary>
+    /// Rewritten and verified, but a step after installation failed.
+    /// </summary>
+    /// <remarks>
+    /// Installation is not the last step: the recovery record still has to be marked
+    /// complete and attributes restored. Reporting those as <see cref="Failed"/> told
+    /// the reader the file was not touched, when it had already been replaced.
+    /// </remarks>
+    ConvertedWithWarning,
+
+    /// <summary>
+    /// Installation failed in a way that left the file's state undetermined.
+    /// </summary>
+    /// <remarks>
+    /// Replacement can fail with the temporary file already gone, so EC cannot tell
+    /// whether the destination was replaced. Both <see cref="Failed"/> and
+    /// <see cref="ConvertedWithWarning"/> would assert something no one established;
+    /// this says only what is known, which is that the file needs inspecting.
+    /// </remarks>
+    InstallationUnknown,
+
+    /// <summary>
     /// Decided but deliberately not carried out, such as in a preview or after an earlier
     /// failure stopped the run.
     /// </summary>
@@ -208,8 +229,19 @@ internal sealed record ConversionJournal
                 ConversionRowResult.Unchanged => ConversionStatus.Unchanged,
                 ConversionRowResult.Skipped => ConversionStatus.Skipped,
                 ConversionRowResult.Refused => ConversionStatus.Refused,
-                ConversionRowResult.Error when entry.Action == PlannedAction.Refuse
-                    => ConversionStatus.Refused,
+
+                // What the file is, not what was intended for it. A run that replaced
+                // the file and then failed a later step has changed it, and one that
+                // could not determine the outcome has established nothing either way.
+                ConversionRowResult.Error when entry.ReplacementCommitted == true
+                    => ConversionStatus.ConvertedWithWarning,
+                ConversionRowResult.Error when entry.ReplacementCommitted is null &&
+                                               entry.Action == PlannedAction.Convert
+                    => ConversionStatus.InstallationUnknown,
+
+                // A file EC could not open is a failure, not a policy decision. Mapping
+                // it to Refused made the journal disagree with the run's own exit code,
+                // which reports 3, and dressed an I/O error as a safety judgement.
                 ConversionRowResult.Error => ConversionStatus.Failed,
                 _ => ConversionStatus.NotAttempted,
             };
@@ -233,10 +265,22 @@ internal sealed record ConversionJournal
                                ?? entry.ExpectedSourceSha256
                                ?? Hash(entry.FilePath),
 
-                // Only a completed conversion needs an after-hash.
-                Sha256After = status == ConversionStatus.Converted
-                    ? Hash(entry.FilePath)
-                    : null,
+                // Any status that changed the file needs an after-hash, including one
+                // whose later step failed. Prefer the hash verification passed: it is
+                // what this run installed, where re-reading records whatever is on disk
+                // once the whole batch has finished.
+                //
+                // Undetermined installation is the exception. The verified hash would
+                // claim those bytes were installed, which is the open question; reading
+                // the file says what is actually there, which is what a reader has to
+                // go on.
+                Sha256After = status switch
+                {
+                    ConversionStatus.Converted or ConversionStatus.ConvertedWithWarning
+                        => entry.OutputSha256 ?? Hash(entry.FilePath),
+                    ConversionStatus.InstallationUnknown => Hash(entry.FilePath),
+                    _ => null,
+                },
 
                 DetectionMode = entry.SourceEncodingWasSpecified ? "Explicit" : "Detected",
                 DetectedEncoding = entry.DetectedEncodingLabel,

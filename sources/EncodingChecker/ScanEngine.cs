@@ -1018,6 +1018,11 @@ internal static class ScanEngine
             entry.CurrentCharsetLabel = UnknownCharset;
         }
 
+        // Kept rather than consumed for the charset label alone: a failure after the
+        // file was replaced still changed it, and the journal must not call that
+        // untouched.
+        entry.ReplacementCommitted = result.ReplacementCommitted;
+
         entry.Result =
             result.Success
                 ? ConversionRowResult.Converted
@@ -1066,6 +1071,10 @@ internal static class ScanEngine
 
         if (hashError is not null)
             return hashError;
+
+        // The hash of the bytes verification passed, so the journal can record what this
+        // run installed rather than whatever is on disk when it is written.
+        entry.OutputSha256 = record.OutputSha256;
 
         var prepared = new ConversionMetadata
         {

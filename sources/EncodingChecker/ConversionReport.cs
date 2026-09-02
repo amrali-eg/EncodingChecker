@@ -153,6 +153,27 @@ internal sealed class ConversionReportEntry
     /// <summary>Stable machine-readable reason for a non-success outcome.</summary>
     internal string? ReasonCode { get; set; }
 
+    /// <summary>
+    /// Whether the converted file reached its destination, or <see langword="null"/>
+    /// when the outcome is unknown or nothing was attempted.
+    /// </summary>
+    /// <remarks>
+    /// Conversion can fail after installation succeeds - completing the recovery record
+    /// or restoring attributes. Without this the journal reported such a file as
+    /// untouched, which is the opposite of what happened.
+    /// </remarks>
+    internal bool? ReplacementCommitted { get; set; }
+
+    /// <summary>
+    /// SHA-256 of the exact bytes verified before installation, when a recovery record
+    /// was written. Internal state; not in CSV.
+    /// </summary>
+    /// <remarks>
+    /// Preferred over re-reading the file afterwards, which records whatever is on disk
+    /// at journal time rather than what this run verified and installed.
+    /// </remarks>
+    internal string? OutputSha256 { get; set; }
+
     /// <summary>The backup created by this run, even if conversion later failed.</summary>
     internal string? BackupPath { get; set; }
 
