@@ -80,12 +80,17 @@ internal sealed class ConversionConfirmationForm : Form
         ConversionPlanSummary summary = _plan.Summary;
         int convert = summary.ReadyToConvert;
         List<PlannedFile> refused = Refused;
+        // Both reason codes. Agreeing with an estimate EC has already called unprovable
+        // is not corroboration, so the matching case needs saying at least as much as
+        // the contradicting one.
         List<PlannedFile> advisories =
         [
             .. _plan.Files.Where(f =>
                 f.Action == PlannedAction.Convert &&
-                f.ReasonCode == ConversionReasonCodes
-                    .ExplicitSourceDiffersFromBomlessUnicodeEstimate)
+                (f.ReasonCode == ConversionReasonCodes
+                     .ExplicitSourceDiffersFromBomlessUnicodeEstimate ||
+                 f.ReasonCode == ConversionReasonCodes
+                     .ExplicitSourceOnUnprovableBomlessUnicode))
         ];
 
         body.Controls.Add(Heading(
@@ -131,10 +136,14 @@ internal sealed class ConversionConfirmationForm : Form
                 MaximumSize = new Size(660, 0),
                 Padding = new Padding(0, 8, 0, 8),
                 ForeColor = Color.FromArgb(150, 80, 0),
+                // Neutral wording: each file's own reason says which case it is, and
+                // "differs from your choice" is untrue for the agreeing one.
                 Text =
-                    $"{advisories.Count} file(s) have a BOM-less Unicode estimate that "
-                    + "differs from your source choice. EC will use your choice, but review "
-                    + "these files carefully:" + Environment.NewLine + examples,
+                    $"{advisories.Count} file(s) have a BOM-less byte order EC could not "
+                    + "prove from their bytes. EC will use the source encoding you chose "
+                    + "and every strict check still applies, but the byte order itself is "
+                    + "being taken on trust. Review these files:"
+                    + Environment.NewLine + examples,
             });
         }
 
