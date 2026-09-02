@@ -177,7 +177,7 @@ public sealed class PlanPreflightReportingTests : IDisposable
         Assert.NotNull(plan);
 
         PlannedFile unreadable =
-            Assert.Single(plan!.Files.Where(f => f.RelativePath == "locked.txt"));
+            Assert.Single(plan!.Files, f => f.RelativePath == "locked.txt");
 
         // Recorded, visible, and making no claim about bytes it could not read.
         Assert.Equal(PlannedAction.Refuse, unreadable.Action);
