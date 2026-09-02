@@ -229,6 +229,40 @@ public sealed class AppliedPlanPathIntegrityTests : IDisposable
     }
 
     [Fact]
+    public void ADeletedPlannedFileIsReportedAsMissingRatherThanAsALink()
+    {
+        // The link check treats an unreadable path as suspect, which is right, but a
+        // deleted file is unreadable for an ordinary reason. Running it before the
+        // existence check made "(no longer exists)" unreachable and told the user their
+        // file might be a symbolic link, which is both wrong and alarming.
+        string real = Path.Combine(_root, "real");
+        Directory.CreateDirectory(real);
+        WriteWithBom(Path.Combine(real, "keep.txt"));
+        WriteWithBom(Path.Combine(real, "gone.txt"));
+
+        string planPath = Path.Combine(_root, "plan.json");
+
+        Assert.Equal(
+            ExpectedClean,
+            Run("-BasePath", real, "-Target", "utf-8", "-Plan", planPath, "-Quiet"));
+
+        File.Delete(Path.Combine(real, "gone.txt"));
+
+        ConversionPlan plan = ConversionPlan.Load(planPath, out string? error)!;
+
+        Assert.Null(error);
+
+        string reason = Assert.Single(plan.FindStaleFiles());
+
+        Assert.Contains("no longer exists", reason);
+        Assert.DoesNotContain("symbolic link", reason);
+
+        // Still refused, which is the part that must not change.
+        Assert.Equal(ExpectedProcessingErrors, Run("-Apply", planPath));
+        Assert.True(StillHasBom(Path.Combine(real, "keep.txt")));
+    }
+
+    [Fact]
     public void HasReparsePointInPath_PathOutsideRoot_FailsClosed()
     {
         string root = Path.Combine(_root, "root");
