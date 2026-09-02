@@ -258,6 +258,15 @@ internal static partial class Program
             return false;
         }
 
+        // Silently letting one win means the caller who asked for detail gets a summary
+        // and no indication that the request was dropped.
+        if (options is { Quiet: true, Verbose: true })
+        {
+            error = "-Quiet and -Verbose ask for opposite amounts of output; "
+                    + "supply only one.";
+            return false;
+        }
+
         if (!string.IsNullOrWhiteSpace(options.PlanPath) &&
             !string.IsNullOrWhiteSpace(options.ApplyPath))
         {
@@ -375,6 +384,27 @@ internal static partial class Program
             error =
                 "-Validate cannot be combined with -Target.";
             return false;
+        }
+
+        // The read-only modes write nothing, so an option that only affects writing
+        // cannot be honoured. Accepting and ignoring it lets a script that meant to
+        // convert read a clean detect run as though the conversion had happened.
+        if (options.DetectOnly || options.ValidateCharsets is not null)
+        {
+            string mode = options.DetectOnly ? "-DetectOnly" : "-Validate";
+
+            string? ignored =
+                options.Target is not null ? "-Target"
+                : options.WhatIf ? "-WhatIf"
+                : options.Backup ? "-Backup"
+                : null;
+
+            if (ignored is not null)
+            {
+                error = $"{mode} cannot be combined with {ignored}; it reports what the "
+                        + "detector finds and changes nothing.";
+                return false;
+            }
         }
 
         if (options.ValidateCharsets is not null &&

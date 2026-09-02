@@ -46,10 +46,14 @@ internal static class BomlessUnicodeSafety
 
         (string detectedName, string oppositeName) = Names(detectedEncoding);
 
+        // Both orders are named, and EC's own estimate is not singled out. WebName is
+        // "utf-16" for either one, so suggesting it steered the caller straight back
+        // into the reading this refusal exists to question - under a name that cannot
+        // express the choice being made.
         return $"EC detected BOM-less {detectedName}, but the same bytes are valid as both "
                + $"{detectedName} and {oppositeName}. EC cannot determine the byte order "
-               + "safely, so no conversion was performed. Add a byte-order mark or choose "
-               + $"the source encoding explicitly (for example, -From {detectedEncoding.WebName}).";
+               + "safely, so no conversion was performed. Add a byte-order mark, or say "
+               + "which order the file uses with -From utf-16le or -From utf-16be.";
     }
 
     /// <summary>
