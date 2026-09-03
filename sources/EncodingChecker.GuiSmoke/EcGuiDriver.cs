@@ -120,6 +120,65 @@ internal sealed class EcGuiDriver : IDisposable
     internal bool ReviewContainsControl(AutomationElement review, string automationId) =>
         FindById(review, automationId) is not null;
 
+    /// <summary>Every piece of text the review is showing, joined.</summary>
+    /// <remarks>
+    /// The advisory is a plain label with no identifier, and giving it one would only
+    /// prove the label exists. What matters is the wording a reader actually sees, so
+    /// this reads the rendered text rather than a control's presence.
+    /// </remarks>
+    internal string ReviewText(AutomationElement review) =>
+        string.Join(
+            "\n",
+            review.FindAll(TreeScope.Descendants, Condition.TrueCondition)
+                .Cast<AutomationElement>()
+                .Select(element => element.Current.Name)
+                .Where(name => !string.IsNullOrWhiteSpace(name)));
+
+    /// <summary>Every piece of text the main window is showing, joined.</summary>
+    /// <remarks>
+    /// The status line is a ToolStripStatusLabel, which is not a window and carries no
+    /// automation id, so it cannot be found the way ordinary controls are. Reading the
+    /// window's rendered text finds it without depending on how the toolstrip chooses
+    /// to expose its items.
+    /// </remarks>
+    internal string StatusText() =>
+        string.Join(
+            "\n",
+            MainWindow.FindAll(TreeScope.Descendants, Condition.TrueCondition)
+                .Cast<AutomationElement>()
+                .Select(element => element.Current.Name)
+                .Where(name => !string.IsNullOrWhiteSpace(name)));
+
+    /// <summary>
+    /// Starts the conversion and cancels it once the status bar shows progress.
+    /// </summary>
+    /// <remarks>
+    /// Cancelling is timed against EC's own reported progress rather than a sleep, so
+    /// the phase does not depend on how fast the machine converts. It deliberately does
+    /// not assert how many files were written: that is the run's to decide, and the
+    /// checks afterwards compare whatever it reports against the bytes on disk.
+    /// </remarks>
+    internal void ProceedThenCancel(AutomationElement review, Func<bool> writingHasBegun)
+    {
+        int handle = review.Current.NativeWindowHandle;
+        Invoke(review, "btnProceedConversion");
+        WaitUntil(() => !WindowExists(handle), "The conversion review did not close.");
+
+        // Timed against real progress rather than a sleep, so the phase does not depend
+        // on how fast the machine converts. Cancelling before the first write would
+        // exercise the declined-review path instead, which phase A already covers.
+        WaitUntil(
+            () => writingHasBegun() || IsEnabled(MainWindow, "btnView"),
+            "The conversion did not begin writing.");
+
+        // A run short enough to finish first is not a failure; the phase then checks a
+        // completed run instead, and its assertions still hold.
+        if (!IsEnabled(MainWindow, "btnView"))
+            Invoke(MainWindow, "btnCancel");
+
+        WaitForMainReady();
+    }
+
     private void WaitForMainReady() =>
         WaitUntil(
             () => IsEnabled(MainWindow, "btnView") && FindReviewWindow() is null,

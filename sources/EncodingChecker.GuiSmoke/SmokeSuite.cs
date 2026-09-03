@@ -57,6 +57,8 @@ internal sealed class SmokeSuite
         RunIf("E", "Explicit BOM-less UTF-16 converts safely", PhaseE);
         RunIf("F", "A stale reviewed file stops the whole run", PhaseF);
         RunIf("G", "Backup failure leaves the source unchanged", PhaseG);
+        RunIf("H", "A source choice matching an unprovable estimate is flagged", PhaseH);
+        RunIf("I", "An interrupted run reports what it actually wrote", PhaseI);
 
         return new SmokeReport
         {
@@ -275,6 +277,137 @@ internal sealed class SmokeSuite
             "The conflicting backup directory was unexpectedly removed.");
         Check(!File.Exists(path + ".ecmeta.json"),
             "Recovery metadata was written for a conversion that did not install.");
+    }
+
+    /// <summary>
+    /// The advisory for a source choice that agrees with an unprovable estimate.
+    /// </summary>
+    /// <remarks>
+    /// This is the one behaviour whose entire purpose is what a reader sees. v3.10.1
+    /// recorded the case in the reason codes and the review dialog never displayed it,
+    /// so the warning appeared for the choice that contradicted EC and stayed silent for
+    /// the choice that repeated its guess - the more dangerous of the two. Every unit
+    /// test passed throughout, because the filter that dropped it is not the logic they
+    /// cover. Only rendering the dialog catches that.
+    /// </remarks>
+    private void PhaseH(PhaseContext phase)
+    {
+        string directory = phase.Directory;
+        const string text = "Hello World, this is plain text here.";
+        string path = Path.Combine(directory, "matching.txt");
+
+        // Latin text in BOM-less UTF-16LE: byte-swapped it is valid CJK, so both orders
+        // decode and EC cannot prove which it is. Choosing utf-16le agrees with EC.
+        Write(directory, "matching.txt", text, Encoding.Unicode, writeBom: false);
+
+        using var gui = new EcGuiDriver(_app);
+        System.Windows.Automation.AutomationElement review = gui.OpenReview(directory, 1);
+
+        Check(
+            gui.ReviewContainsControl(review, "lstRefusedFiles"),
+            "The ambiguous file was not offered a source-encoding choice.");
+
+        review = gui.ConfirmSource(review, "utf-16");
+
+        string shown = gui.ReviewText(review);
+
+        Check(
+            shown.Contains("could not prove", StringComparison.OrdinalIgnoreCase) ||
+            shown.Contains("taken on trust", StringComparison.OrdinalIgnoreCase),
+            "The review did not warn that the byte order was taken on trust:\n" + shown);
+
+        Check(
+            shown.Contains("not evidence", StringComparison.OrdinalIgnoreCase),
+            "The review did not say that agreeing with the estimate is not evidence.");
+
+        // Untrue when the choice agrees, and the wording the old advisory used.
+        Check(
+            !shown.Contains("differs from your source choice", StringComparison.OrdinalIgnoreCase),
+            "The review claimed the estimate differs from a choice that matches it.");
+
+        gui.Proceed(review);
+
+        AssertUtf8(path, text);
+    }
+
+    /// <summary>
+    /// Cancelling a run that has already written files still reports what it did.
+    /// </summary>
+    /// <remarks>
+    /// The record of those writes used to be discarded with the exception that carried
+    /// the cancellation. The trap underneath is that every file reaches the write pass
+    /// already marked converted by the deciding pass, so a run that trusted that would
+    /// report the whole batch as done however early it stopped. The status line is
+    /// therefore checked against the bytes on disk rather than taken at its word.
+    /// </remarks>
+    private void PhaseI(PhaseContext phase)
+    {
+        string directory = phase.Directory;
+        const int count = 400;
+        string body = string.Concat(Enumerable.Repeat("Ligne accentuee: cafe resume. ", 200));
+
+        for (int i = 1; i <= count; i++)
+            Write(directory, $"file-{i:D3}.txt", body, new UTF8Encoding(true), writeBom: true);
+
+        using var gui = new EcGuiDriver(_app);
+        System.Windows.Automation.AutomationElement review = gui.OpenReview(directory, count);
+
+        gui.ProceedThenCancel(review, () => RewrittenCount(directory) >= 5);
+
+        string status = gui.StatusText();
+        int rewritten = RewrittenCount(directory);
+        int untouched = count - rewritten;
+
+        Check(
+            status.Contains($"{rewritten} converted", StringComparison.Ordinal),
+            $"The status line disagrees with the {rewritten} file(s) actually rewritten: {status}");
+
+        // Present whenever the run stopped early, and the count that used to vanish.
+        if (untouched > 0)
+        {
+            Check(
+                status.Contains("stopped", StringComparison.OrdinalIgnoreCase),
+                $"An interrupted run was not reported as stopped: {status}");
+
+            Check(
+                status.Contains($"{untouched} not attempted", StringComparison.Ordinal),
+                $"The {untouched} unreached file(s) are missing from the status: {status}");
+        }
+    }
+
+    /// <summary>Files whose byte-order mark has been stripped, so they were written.</summary>
+    private static int RewrittenCount(string directory) =>
+        Directory.EnumerateFiles(directory, "file-*.txt")
+            .Count(path => !StartsWithUtf8Bom(path));
+
+    /// <summary>
+    /// Whether the file still carries its byte-order mark, counting a file EC currently
+    /// holds as untouched.
+    /// </summary>
+    /// <remarks>
+    /// This runs while the conversion is in flight, so a file being replaced right now
+    /// cannot be opened. Treating that as "not yet written" only delays the trigger by a
+    /// moment, and the counts that decide the assertions are taken after the run, when
+    /// nothing is locked.
+    /// </remarks>
+    private static bool StartsWithUtf8Bom(string path)
+    {
+        try
+        {
+            using FileStream stream = File.OpenRead(path);
+            Span<byte> head = stackalloc byte[3];
+
+            return stream.ReadAtLeast(head, 3, throwOnEndOfStream: false) == 3 &&
+                   head.SequenceEqual(Encoding.UTF8.GetPreamble());
+        }
+        catch (IOException)
+        {
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return true;
+        }
     }
 
     private static Encoding CodePage(string name) =>
