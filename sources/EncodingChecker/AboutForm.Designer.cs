@@ -120,7 +120,7 @@ partial class AboutForm
         this.lblLicense.Size = new System.Drawing.Size(229, 18);
         this.lblLicense.TabIndex = 4;
         this.lblLicense.TabStop = true;
-        this.lblLicense.Text = "Licensed under the Mozilla Public License 1.1";
+        this.lblLicense.Text = "Licensed under the Mozilla Public License 2.0";
         this.lblLicense.UseCompatibleTextRendering = true;
         this.lblLicense.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.OnLinkClicked);
         // 
