@@ -245,6 +245,83 @@ comparison    changed=0 improved=0 regressed=0 lateral=0    exit 0
 
 `check_audit_integrity.py` had never before validated a fresh audit; every earlier use was against stored runs. It is listed in `audit/README.md` as the step to run after a run and was skipped for v3.9.0, v3.9.2 and v3.10.0, during which it was itself broken. It became a checklist item after that was found.
 
+### v3.11.0 audited build
+
+v3.11.0 closes thirty-five findings from two independent reviews and was audited from a clean checkout of the commit it was tagged at.
+
+```
+commit    303c74bd829376b7bb1686a13f4f9bc9f065128f   (annotated tag v3.11.0)
+worktree  clean
+platform  .NET 10 - Windows 11 10.0.26200
+assembly  EncodingChecker.dll
+          55f80df09ae17e8a1ee9ceb22225a55287ad1b599c254ce9450945af8986a08f
+run       rel3110, compared against rel3101 in audit/reports/
+```
+
+**No file changed outcome.** `changed=0 improved=0 regressed=0 lateral=0`, and all four metrics are identical to v3.10.1: detection 4640/4646, strict decoding 4694/4694, codec conformance 4591/4694, text preservation 4520/4623. `check_audit_integrity.py` reports all invariants holding across 5,078 rows.
+
+**This result was predicted before the run and recorded before the numbers existed.** The corpus supplies each file's source codec from its own reference metadata on files that are not ambiguous, so a corpus run reaches none of what this release changes: the plan boundary, the command-line validation, the journal status table, or the GUI. `changed=0` therefore establishes that the release disturbed nothing the corpus can see, and establishes nothing whatever about whether the fixes work.
+
+That rests on 633 tests, on each fix being mutation-checked in isolation — the change reverted, the intended test required to fail, the file restored byte-identical — and on the manual GUI smoke test below.
+
+A release whose audit cannot reach it is worth stating plainly rather than quoting as confirmation. This is the second consecutive release for which that is true.
+
+#### What changed in v3.11.0
+
+Two reviewers read v3.10.1 independently and found thirty-five defects between them, overlapping on two. Neither found the other's most severe.
+
+**Applying a plan could convert a file the plan recorded as refused.** A UTF-8 file converted with `-From windows-1252` is refused directly, because the explicit source contradicts a proven Unicode reading. The plan recorded that refusal. Applying it converted the file, exited 0, and wrote a journal saying the action had been `Convert`. The output is valid UTF-8 holding characters nobody wrote, so content verification cannot catch it: both sides decode through the same wrong codec. `PlannedFile` carried the detected codec but not `HasReliableUnicodeDetection`, which is a policy input rather than provenance, so the veto had nothing to fire on at apply time. The plan now records it, and a reviewed decision is a ceiling: re-deciding may refuse more than the review did, never less. Plan schema moves to 5 and semantics to 6, so earlier plans are refused.
+
+**A blank option value was read as an absent option.** `-Plan ""` skipped the preview flag and performed a live conversion. Rejected now, along with seven other options, in the one place every option's value passes through.
+
+**Applying a plan followed a root that had become a reparse point**, writing into a tree the reviewer never saw, while planning refused the same input. **A second conversion destroyed the first backup and left a recovery record positively describing it.** **A journal could overwrite the backup its own run had just created:** `-Backup -Journal <source>.bak` converted the file, verified the backup, replaced it with JSON, and exited 0.
+
+**Read-only modes contradicted conversion.** `-DetectOnly` and `-Validate` reported a BOM-less UTF-16 byte order with full confidence that `-Target` refused seconds later; `-Validate` now reports it as `Invalid`, so `-FailOnChanges` returns 2 where it returned 0.
+
+**The journal was wrong in both directions.** A file EC never opened was recorded as a policy refusal while the run exited 3; a file already replaced was recorded as untouched. Both corrected, with `ConvertedWithWarning` and `InstallationUnknown` added, and `NotAttempted` now reachable outside previews.
+
+**Cancelling a conversion that had already written files left no record of those writes at all.**
+
+Also: the GUI review dialog now shows the advisory v3.10.1 added for a source choice that *matches* an unprovable estimate — it had reached the CSV, the plan and the journal but never the screen, so it warned about the safer choice and stayed silent for the riskier; the refusal message names `utf-16le` and `utf-16be` rather than the ambiguous alias it had just declined to justify; EC's own backups and records are counted when a caller's patterns select them, so `-Include "*.bak"` no longer returns an empty successful report; and six documented-invalid option combinations are rejected instead of ignored.
+
+#### Detector parity is now enforced rather than asserted
+
+Every record from v3.9.0 onward states that parity held at the tagged commit. Those statements were true; nothing made them true. The job ran on pushes to `master` and weekly, so parity was verified only after a change had landed and never as a condition of a tag. It now runs on pull requests, and the release workflow will not publish without it — v3.11.0 is the first release to pass through that gate.
+
+It also now covers `TextValidation.cs`, which these records name as shared but no workflow had ever compared. The two files are identical across all three repositories; that was luck rather than enforcement.
+
+Two ways the comparison could have reported a difference that was not in the code were found and fixed while adding the second file. It read files using the host's default encoding, and one copy carries a non-ASCII character in a comment, so a host defaulting to the system codepage silently mangled the BOM-less copy. And it stripped a leading `using System;` before the byte-order mark rather than after, though one copy begins with a mark immediately followed by that line. Both were latent: the job passes under `pwsh` 7, whose defaults happen to be right. Running the same logic under Windows PowerShell 5.1 reported a divergence that does not exist, which is how they surfaced. A parity check for an encoding detector should not itself depend on an encoding default.
+
+#### The integrity check reported more than it had verified
+
+The first run of `check_audit_integrity.py` for this release printed `All invariants hold across 5078 rows` and exited 0 with **coverage and independent-hash sampling never having executed**. `CORPUS_ROOT` was unset, and the skip appeared only as a `note:` line among the passing sections. The statement was true and materially weaker than it read: coverage is the check the tool lists first, in its own words ordered by how badly a failure would mislead.
+
+Re-run with the corpus root set, coverage passes 1,367 / 478 / 67 / chardet and independent hashes 150 / 150 / 150 / 64. The figures above are from that second run.
+
+This is the fourth defect of this shape recorded here, and the second in the integrity checker itself. The pattern holds: a green result whose scope is narrower than its wording, visible only by reading what did not run.
+
+#### Two of the fixes introduced defects that review caught
+
+Codex reviewed the branch and found nine further defects, two of which this release had itself introduced.
+
+The interrupted-run journal collected completions in a `HashSet` from a callback that `Parallel.ForEach` invokes concurrently — a data race in the code whose purpose is producing a truthful record. And a backup that failed before anything was written reached the new `InstallationUnknown` status, which had been added to stop the journal asserting what nobody had established, and asserted exactly that for a file nothing had touched.
+
+Both were found by re-deriving invariants rather than by a failing test, and neither had a test that could have caught it before the fix.
+
+#### The GUI smoke test
+
+Phases A through E of the checklist passed, plus two added for this release.
+
+Phase F covers the advisory for a source choice matching an unprovable estimate — the one behaviour in this release whose entire purpose is what appears on screen, and which no automated test can observe.
+
+Phase G cancels a 600-file conversion partway. The exported journal was reconciled against the bytes on disk by filename, not by count: the 411 entries recorded `Converted` are exactly the 411 files whose byte-order mark was stripped, the 189 recorded `NotAttempted` are exactly the 189 left intact, every file appears once, and no `NotAttempted` entry carries an after-hash. That also exercises the concurrent completion tracking at real parallelism, which the automated test pins to one worker for determinism.
+
+#### Known limits specific to this release
+
+- Window-position restore is covered by unit tests against synthetic monitor layouts. It has not been exercised against a real display change.
+- EC's journal, plan and recovery sidecar escape every non-ASCII character to `\uXXXX`. This is valid JSON that round-trips exactly, so nothing is lost or misstated, but these are records meant to be read by a person and EC's domain is non-ASCII text. Deferred to v3.11.1 rather than changing three writers after the audit had run.
+- The recovery sidecar's `SourceTextSha256` and `OutputTextSha256` now come from two separate measurements rather than one value written twice. No test can tell the difference, because verification has already established the two are equal; a mutation copying the source digest back into the field passes the whole suite. That was confirmed rather than assumed. The fallback was replaced with a throw, so a silent revert is impossible.
+
 ## Known limits
 
 - No detector can recover an author's historical legacy encoding when the same bytes admit multiple plausible readings. EC refuses automatic legacy conversion instead of guessing.
