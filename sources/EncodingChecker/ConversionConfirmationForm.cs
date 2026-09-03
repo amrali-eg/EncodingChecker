@@ -21,8 +21,8 @@ namespace EncodingChecker;
 internal sealed class ConversionConfirmationForm : Form
 {
     private readonly ConversionPlan _plan;
-    private readonly ComboBox _sourceChoice = new();
-    private readonly Button _resolve = new();
+    private readonly ComboBox _sourceChoice = new() { Name = "lstSourceEncoding" };
+    private readonly Button _resolve = new() { Name = "btnConfirmSourceEncoding" };
     private ListView? _refusedList;
 
     /// <summary>
@@ -48,6 +48,7 @@ internal sealed class ConversionConfirmationForm : Form
     {
         _plan = plan;
 
+        Name = "ConversionConfirmationForm";
         Text = @"Review conversion";
         FormBorderStyle = FormBorderStyle.Sizable;
         StartPosition = FormStartPosition.CenterParent;
@@ -193,6 +194,7 @@ internal sealed class ConversionConfirmationForm : Form
 
         var list = new ListView
         {
+            Name = "lstRefusedFiles",
             AccessibleName = "Files requiring source encoding",
             AccessibleDescription = "Select files that share the source encoding chosen below.",
             View = View.Details,
@@ -326,6 +328,7 @@ internal sealed class ConversionConfirmationForm : Form
 
         var cancel = new Button
         {
+            Name = "btnCancelConversionReview",
             AccessibleDescription = "Close this review without changing files.",
             Text = "Cancel",
             DialogResult = DialogResult.Cancel,
@@ -337,6 +340,7 @@ internal sealed class ConversionConfirmationForm : Form
 
         var proceed = new Button
         {
+            Name = "btnProceedConversion",
             AccessibleDescription = "Convert only the files marked ready in this review.",
             Text = convert == 0
                 ? "Nothing ready to convert"

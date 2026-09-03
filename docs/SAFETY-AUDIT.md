@@ -316,6 +316,10 @@ Phase F covers the advisory for a source choice matching an unprovable estimate 
 
 Phase G cancels a 600-file conversion partway. The exported journal was reconciled against the bytes on disk by filename, not by count: the 411 entries recorded `Converted` are exactly the 411 files whose byte-order mark was stripped, the 189 recorded `NotAttempted` are exactly the 189 left intact, every file appears once, and no `NotAttempted` entry carries an after-hash. That also exercises the concurrent completion tracking at real parallelism, which the automated test pins to one worker for determinism.
 
+**Correction, after this record was published.** Both checks were described here as phases F and G. Those were working letters used while running them by hand, and they name nothing durable: the checklist at the time defined only A through E, and the automated suite that has since superseded it uses F and G for two different checks — a stale reviewed file, and a backup failure. The two described above are now phases **H** and **I** of that suite, documented in [GUI-SMOKE-TEST.md](GUI-SMOKE-TEST.md).
+
+The wording above also said the advisory was something no automated test could observe. That was true when written and is no longer: phase H asserts on the review's rendered text. It is corrected here rather than edited away, because what a record claimed at the time is part of what the record is for.
+
 #### Known limits specific to this release
 
 - Window-position restore is covered by unit tests against synthetic monitor layouts. It has not been exercised against a real display change.
