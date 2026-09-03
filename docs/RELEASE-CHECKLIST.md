@@ -56,29 +56,26 @@ Get-FileHash -Algorithm SHA256 <path> | Select-Object -ExpandProperty Hash
 
 ### Core GUI smoke test
 
-[`tools/gui-smoke-test.py`](../tools/gui-smoke-test.py) creates disposable folders on the
-Desktop and verifies the resulting bytes. For every phase, set the printed folder as
-**Directory to check** and choose **utf-8** in **Convert to**. Then run each short phase
-with the Release build:
+Nine phases drive the built executable through Windows UI Automation and verify the
+resulting bytes. They replace the manual walkthrough this section used to describe.
 
 ```powershell
-$smoke = (Resolve-Path tools/gui-smoke-test.py)
-python $smoke setup A
-# perform the displayed GUI steps
-python $smoke mark A
-python $smoke verify A
+dotnet build sources/EncodingChecker.sln -c Release
+sources/EncodingChecker.GuiSmoke/bin/Release/net10.0-windows/EncodingChecker.GuiSmoke.exe
 ```
 
-| Phase | What the GUI check proves |
-|---|---|
-| A | **View** lists the prepared files; Unicode and ASCII are ready, legacy files need a source choice; **Cancel** changes no bytes and creates no recovery files. |
-| B | Unicode and ASCII convert without a source choice and preserve their exact text. |
-| C | A chosen legacy source encoding applies only to the ticked files; unselected legacy files stay unchanged. |
-| D | Ambiguous BOM-less UTF-16 is refused; cancelling leaves its bytes and folder unchanged. |
-| E | An explicit BOM-less UTF-16 source choice converts the file exactly and creates its backup and recovery record. |
+Exit 0 is a pass. Each run writes `gui-smoke-report.json` and `gui-smoke-report.md`
+carrying the EC version, the executable and managed-assembly hashes, and every phase's
+before and after file hashes. Keep that evidence with the release.
 
-The script verifies hashes and decoded output; status messages alone never count as evidence.
-Its `tools/smoke-state-*.json` files are local generated state and must not be committed.
+**[What each of the nine phases proves, and what it would catch →](GUI-SMOKE-TEST.md)**
+
+An interactive Windows desktop is required; the runner exits 2 rather than reporting a
+pass it did not earn. Whether a GitHub-hosted runner provides one is not yet
+established, so run this locally before tagging.
+
+Status messages are never evidence on their own. Every phase checks files, and phase I
+checks the status line *against* the bytes on disk rather than trusting it.
 
 ### Accessibility spot check
 
