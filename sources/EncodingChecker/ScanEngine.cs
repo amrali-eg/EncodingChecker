@@ -252,14 +252,17 @@ internal static class ScanEngine
             getPath: entry => entry.FilePath,
             processItem: entry =>
             {
-                // A failed planning snapshot is already a terminal refusal. Do not let a
-                // later pass reinterpret it as an ordinary unknown-encoding skip.
+                entry.ResetAttemptEvidence();
+
+                // A failed planning snapshot is already a terminal error.
                 if (entry is
                     {
                         Action: PlannedAction.Refuse,
                         ReasonCode: ConversionReasonCodes.SourceSnapshotFailed
                     })
                 {
+                    entry.Result = ConversionRowResult.Error;
+                    entry.ReplacementCommitted = false;
                     return entry;
                 }
 
@@ -374,7 +377,8 @@ internal static class ScanEngine
                 {
                     entry.Action = PlannedAction.Refuse;
                     entry.SourceInterpretation = SourceInterpretation.NotApplicable;
-                    entry.Result = ConversionRowResult.Refused;
+                    entry.Result = ConversionRowResult.Error;
+                    entry.ReplacementCommitted = false;
                     entry.ReasonCode = ConversionReasonCodes.SourceSnapshotFailed;
                     entry.Diagnostic =
                         $"The source could not be read consistently for planning: {ex.Message}";
@@ -469,10 +473,7 @@ internal static class ScanEngine
             detected = TextEncoding.DetectFromFile(path);
             hasBom = detected != null && HasPreamble(path, detected);
 
-            // The byte order is a fact about the file, so the read-only modes need it
-            // too; a mode that reports an unprovable order as settled contradicts the
-            // one that refuses it. Not computed for an explicit source: there `detected`
-            // is the answer being supplied, not evidence, so asking it always answers no.
+            // Read-only modes must disclose the same unprovable byte order conversion refuses.
             snapshotHasAmbiguousBomlessUtf16 =
                 detected is not null && IsAmbiguousBomlessUtf16(path, detected, hasBom);
         }
@@ -796,16 +797,7 @@ internal static class ScanEngine
         if (entry.Action is null)
             DetectionCounters.RecordClassification();
 
-        // Whether this file's byte order can be established from its bytes is a fact
-        // about the file, not a decision about what to do. Folding the two together
-        // erased the fact whenever a source was supplied: the entry then reached the
-        // advisory below with nothing left to consult but detection's own estimate,
-        // which is the very thing an ambiguous file proves nothing about.
-        //
-        // Source snapshots normally carry this in. Recheck for callers of ConvertFiles
-        // that supply entries directly, testing what detection saw - with an explicit
-        // source, sourceEncoding is the answer being offered, not evidence about the
-        // file, and asking it would always answer no.
+        // With an explicit source, test detection's estimate rather than the supplied answer.
         Encoding? bomlessCandidate = entry.SourceEncodingWasSpecified
             ? automaticallyDetected
             : sourceEncoding;
@@ -872,10 +864,7 @@ internal static class ScanEngine
         // The optional BOM-less Unicode advisory below is added back for this pass.
         entry.Diagnostic = null;
 
-        // Reported whether or not the choice matches detection's estimate. Matching an
-        // estimate EC cannot prove is not corroboration, and staying silent for it left
-        // the one case most likely to be wrong - the caller repeating a wrong guess -
-        // indistinguishable from an ordinary conversion.
+        // Matching an unprovable estimate still means the byte order was taken on trust.
         if (action == PlannedAction.Convert &&
             entry.SourceEncodingWasSpecified &&
             automaticallyDetected is not null &&
@@ -926,6 +915,9 @@ internal static class ScanEngine
             entry.Result = ConversionRowResult.Converted; // "would be converted"
             return;
         }
+
+        // No replacement has happened yet; failures before the converter are known safe.
+        entry.ReplacementCommitted = false;
 
         if (backup)
         {
@@ -1018,9 +1010,7 @@ internal static class ScanEngine
             entry.CurrentCharsetLabel = UnknownCharset;
         }
 
-        // Kept rather than consumed for the charset label alone: a failure after the
-        // file was replaced still changed it, and the journal must not call that
-        // untouched.
+        // The journal needs the installation state even when a later step failed.
         entry.ReplacementCommitted = result.ReplacementCommitted;
 
         entry.Result =
@@ -1072,8 +1062,7 @@ internal static class ScanEngine
         if (hashError is not null)
             return hashError;
 
-        // The hash of the bytes verification passed, so the journal can record what this
-        // run installed rather than whatever is on disk when it is written.
+        // Record the verified output rather than a later reread of the path.
         entry.OutputSha256 = record.OutputSha256;
 
         var prepared = new ConversionMetadata
@@ -1194,8 +1183,7 @@ internal static class ScanEngine
                 destination.Flush(flushToDisk: true);
             }
 
-            // Remove the old record at the last safe moment. A crash may leave a backup
-            // without metadata, but never metadata describing a different backup.
+            // Never leave old metadata describing a newly replaced backup.
             ConversionMetadataStore.RemoveBeforeBackupReplacement(path);
 
             EncodingConverter.AtomicReplaceForBackup(tempPath, path + ".bak");
@@ -1258,17 +1246,32 @@ internal static class ScanEngine
                     ArgumentException or
                     NotSupportedException)
                 {
-                    entry = new ConversionReportEntry
+                    if (item is ConversionReportEntry existing)
                     {
-                        FilePath = getPath(item),
-                        SourceEncoding = "(Error)",
-                        TargetEncoding = "(Error)",
-                        Result = ConversionRowResult.Error,
-                        Action = PlannedAction.Refuse,
-                        SourceInterpretation = SourceInterpretation.NotApplicable,
-                        ReasonCode = ConversionReasonCodes.ScanFailed,
-                        Diagnostic = ex.Message,
-                    };
+                        // Keep the caller's entry authoritative when conversion fails.
+                        existing.Result = ConversionRowResult.Error;
+                        existing.Action = PlannedAction.Refuse;
+                        existing.SourceInterpretation = SourceInterpretation.NotApplicable;
+                        existing.ReplacementCommitted = false;
+                        existing.ReasonCode = ConversionReasonCodes.ScanFailed;
+                        existing.Diagnostic = ex.Message;
+                        entry = existing;
+                    }
+                    else
+                    {
+                        entry = new ConversionReportEntry
+                        {
+                            FilePath = getPath(item),
+                            SourceEncoding = "(Error)",
+                            TargetEncoding = "(Error)",
+                            Result = ConversionRowResult.Error,
+                            Action = PlannedAction.Refuse,
+                            SourceInterpretation = SourceInterpretation.NotApplicable,
+                            ReplacementCommitted = false,
+                            ReasonCode = ConversionReasonCodes.ScanFailed,
+                            Diagnostic = ex.Message,
+                        };
+                    }
                 }
 
                 if (entry is not null)

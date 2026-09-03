@@ -190,6 +190,18 @@ internal sealed class ConversionReportEntry
     /// The recovery sidecar prepared by this run. Its state says whether installation completed.
     /// </summary>
     internal string? RecoveryMetadataPath { get; set; }
+
+    /// <summary>Clears evidence that belongs only to the previous conversion attempt.</summary>
+    internal void ResetAttemptEvidence()
+    {
+        ResolvedSourceLabel = null;
+        JournalSourceSha256 = null;
+        NotAttempted = false;
+        ReplacementCommitted = null;
+        OutputSha256 = null;
+        BackupPath = null;
+        RecoveryMetadataPath = null;
+    }
 }
 
 /// <summary>Stable reason codes written to reports and journals.</summary>

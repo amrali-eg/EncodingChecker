@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -52,14 +53,7 @@ internal enum OrchestrationOutcome
     /// <summary>The run could not be planned. Nothing was written.</summary>
     CouldNotPlan,
 
-    /// <summary>
-    /// Cancelled after writing began. Files already converted stay converted.
-    /// </summary>
-    /// <remarks>
-    /// Distinct from <see cref="Cancelled"/>, which is the user declining before
-    /// anything is written. Collapsing the two reported a run that changed files as
-    /// one that changed nothing, and discarded the record of the writes that happened.
-    /// </remarks>
+    /// <summary>Stopped after writing began; completed files remain converted.</summary>
     Interrupted,
 }
 
@@ -81,14 +75,7 @@ internal sealed record OrchestrationResult
 /// <summary>
 /// Decides, confirms, and carries out exactly the confirmed conversion plan.
 /// </summary>
-/// <remarks>
-/// The orchestration is kept separate from the UI so the complete sequence can be tested
-/// independently of any form or event handler.
-/// <para>
-/// Classification and conversion use the same entries. The UI only confirms the decided
-/// plan; it does not perform another detection pass.
-///</para>
-/// </remarks>
+/// <remarks>The UI confirms these decisions; it never detects the files again.</remarks>
 internal sealed class ConversionOrchestrator
 {
     private readonly Func<ConversionPlan, ConfirmationResponse> _confirm;
@@ -132,9 +119,12 @@ internal sealed class ConversionOrchestrator
 
         DateTime startedUtc = DateTime.UtcNow;
 
-        // View is informational. Re-detect the selected automatic-source files while
-        // hashing the same locked bytes, so the plan never combines stale detection with
-        // a newer source hash. Explicit choices are hashed but not detected.
+        // Rows survive between GUI runs; write evidence must not survive with them.
+        foreach (ConversionReportEntry entry in entries)
+            entry.ResetAttemptEvidence();
+
+        // Detection and hashing share one read, so the plan cannot mix different bytes.
+        // Detection still runs for explicit choices to preserve provenance and safety vetoes.
         ScanEngine.RefreshSourceSnapshots(
             entries,
             maxParallelism,
@@ -227,10 +217,9 @@ internal sealed class ConversionOrchestrator
             // Carry the approved hashes into the write pass to narrow the time-of-check gap.
             BindToPlannedBytes(entries, plan);
 
-            // Cancellation here is not "nothing happened": whatever finished before it
-            // is on disk. The journal is the only record of those writes, and letting
-            // the exception escape threw it away along with the run.
-            var reached = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            // Callbacks are concurrent, so completion tracking must be thread-safe.
+            var reached = new ConcurrentDictionary<string, byte>(
+                StringComparer.OrdinalIgnoreCase);
 
             try
             {
@@ -239,27 +228,25 @@ internal sealed class ConversionOrchestrator
                     backup, whatIf: false, maxParallelism,
                     entry =>
                     {
-                        reached.Add(entry.FilePath);
+                        reached.TryAdd(entry.FilePath, 0);
                         onEntry(entry);
                     },
                     cancellationToken);
             }
             catch (OperationCanceledException)
             {
-                // Entries the run never got to still carry the deciding pass's result,
-                // which for a convertible file is Converted. Journaling that as-is would
-                // report files as converted that were never opened.
+                // The preview result remains on files the write pass never reached.
                 foreach (ConversionReportEntry entry in entries)
-                    entry.NotAttempted = !reached.Contains(entry.FilePath);
+                    entry.NotAttempted = !reached.ContainsKey(entry.FilePath);
 
                 return new OrchestrationResult
                 {
                     Outcome = OrchestrationOutcome.Interrupted,
                     Plan = plan,
                     Message =
-                        $"Cancelled after converting {reached.Count} of {entries.Count} "
-                        + "file(s). Files already converted were left converted; the rest "
-                        + "were not touched. Export the journal for the full record.",
+                        $"Conversion stopped after processing {reached.Count} of "
+                        + $"{entries.Count} file(s). Completed writes remain in place; "
+                        + "export the journal for details.",
                     Journal = ConversionJournal.FromRun(
                         entries,
                         baseDirectory,
@@ -293,20 +280,7 @@ internal sealed class ConversionOrchestrator
         }
     }
 
-    /// <summary>
-    /// The one source encoding chosen for this run, or <see langword="null"/> when
-    /// there is no single answer.
-    /// </summary>
-    /// <remarks>
-    /// The GUI scopes each choice to the files it was ticked for, so a batch resolved
-    /// in several rounds can end with every file explicit and no two agreeing. Taking
-    /// the first entry's label recorded one encoding for a run that used others.
-    /// <para>
-    /// Null covers both "nothing was chosen" and "several were"; the per-file source
-    /// and detection mode distinguish them, and only they can describe a mixed run
-    /// accurately.
-    /// </para>
-    /// </remarks>
+    /// <summary>The common explicit source, or null for none or a mixed batch.</summary>
     private static string? SingleExplicitSource(
         IReadOnlyList<ConversionReportEntry> entries,
         Func<ConversionReportEntry, string> label)
@@ -341,9 +315,7 @@ internal sealed class ConversionOrchestrator
             onEntry,
             cancellationToken);
 
-    /// <summary>
-    /// Replaces detection with the user's source encoding for the refused files in scope.
-    /// </summary>
+    /// <summary>Uses the chosen source for the refused files in scope.</summary>
     /// <returns><see langword="false"/> when no refused file matched the scope.</returns>
     private static bool ApplyChosenSource(
         string? charset,
@@ -369,7 +341,7 @@ internal sealed class ConversionOrchestrator
             if (scope is not null && !scope.Contains(entry.FilePath))
                 continue;
 
-            // Use the existing source override so conversion reads the chosen encoding.
+            // Detection stays recorded; only the effective source changes.
             entry.CurrentCharsetLabel = charset;
             entry.SourceEncodingWasSpecified = true;
             entry.Diagnostic = null;

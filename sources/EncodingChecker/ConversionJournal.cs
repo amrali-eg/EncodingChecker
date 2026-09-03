@@ -28,25 +28,13 @@ internal enum ConversionStatus
     /// <summary>Conversion was attempted but did not complete; not touched.</summary>
     Failed,
 
-    /// <summary>
-    /// Rewritten and verified, but a step after installation failed.
-    /// </summary>
-    /// <remarks>
-    /// Installation is not the last step: the recovery record still has to be marked
-    /// complete and attributes restored. Reporting those as <see cref="Failed"/> told
-    /// the reader the file was not touched, when it had already been replaced.
-    /// </remarks>
+    /// <summary>Rewritten and verified, but a later bookkeeping step failed.</summary>
     ConvertedWithWarning,
 
     /// <summary>
     /// Installation failed in a way that left the file's state undetermined.
     /// </summary>
-    /// <remarks>
-    /// Replacement can fail with the temporary file already gone, so EC cannot tell
-    /// whether the destination was replaced. Both <see cref="Failed"/> and
-    /// <see cref="ConvertedWithWarning"/> would assert something no one established;
-    /// this says only what is known, which is that the file needs inspecting.
-    /// </remarks>
+    /// <remarks>The file must be inspected because EC cannot prove either outcome.</remarks>
     InstallationUnknown,
 
     /// <summary>
@@ -56,10 +44,7 @@ internal enum ConversionStatus
     NotAttempted,
 }
 
-/// <summary>
-///
-/// One file's journal entry: what EC believed, decided, and actually wrote.
-/// </summary>
+/// <summary>One file's journal entry: what EC believed, decided, and actually wrote.</summary>
 internal sealed record JournalEntry
 {
     public required string RelativePath { get; init; }
@@ -222,8 +207,7 @@ internal sealed record ConversionJournal
         {
             ConversionStatus status = entry switch
             {
-                // First, because the result still holds what the deciding pass expected
-                // rather than what happened - the run stopped before this file.
+                // This overrides the preview result left by the deciding pass.
                 { NotAttempted: true } => ConversionStatus.NotAttempted,
 
                 _ => entry.Result switch
@@ -236,18 +220,14 @@ internal sealed record ConversionJournal
                 ConversionRowResult.Skipped => ConversionStatus.Skipped,
                 ConversionRowResult.Refused => ConversionStatus.Refused,
 
-                // What the file is, not what was intended for it. A run that replaced
-                // the file and then failed a later step has changed it, and one that
-                // could not determine the outcome has established nothing either way.
+                // Replacement state outranks the general error result.
                 ConversionRowResult.Error when entry.ReplacementCommitted == true
                     => ConversionStatus.ConvertedWithWarning,
                 ConversionRowResult.Error when entry.ReplacementCommitted is null &&
                                                entry.Action == PlannedAction.Convert
                     => ConversionStatus.InstallationUnknown,
 
-                // A file EC could not open is a failure, not a policy decision. Mapping
-                // it to Refused made the journal disagree with the run's own exit code,
-                // which reports 3, and dressed an I/O error as a safety judgement.
+                // Read failures are processing errors, not policy refusals.
                 ConversionRowResult.Error => ConversionStatus.Failed,
                 _ => ConversionStatus.NotAttempted,
             },
@@ -272,15 +252,7 @@ internal sealed record ConversionJournal
                                ?? entry.ExpectedSourceSha256
                                ?? Hash(entry.FilePath),
 
-                // Any status that changed the file needs an after-hash, including one
-                // whose later step failed. Prefer the hash verification passed: it is
-                // what this run installed, where re-reading records whatever is on disk
-                // once the whole batch has finished.
-                //
-                // Undetermined installation is the exception. The verified hash would
-                // claim those bytes were installed, which is the open question; reading
-                // the file says what is actually there, which is what a reader has to
-                // go on.
+                // Use the verified output hash unless installation itself is uncertain.
                 Sha256After = status switch
                 {
                     ConversionStatus.Converted or ConversionStatus.ConvertedWithWarning

@@ -39,11 +39,7 @@ internal static class DirectoryTraversal
         IgnoreInaccessible = false,
     };
 
-    // Files are enumerated without an attribute filter so the excluded ones can be
-    // counted rather than vanishing. AttributesToSkip drops them inside the OS
-    // enumeration, which left a scan unable to distinguish "this folder is clean"
-    // from "this folder holds files I never looked at". The same attributes are
-    // still excluded below; they are now counted first.
+    // Enumerate all files so excluded attributes remain visible in coverage counts.
     private static readonly EnumerationOptions FileWalkOptions = new()
     {
         AttributesToSkip = FileAttributes.None,
@@ -56,10 +52,7 @@ internal static class DirectoryTraversal
     /// <summary>
     /// Counts files a scan never examined, so a report can say so.
     /// </summary>
-    /// <remarks>
-    /// Incremented while <see cref="Parallel.ForEach"/> pulls from the traversal, so
-    /// the increments are interlocked rather than assumed to be serialized.
-    /// </remarks>
+    /// <remarks>Parallel traversal requires interlocked counters.</remarks>
     internal sealed class TraversalCounters
     {
         private int _filesExcludedByAttribute;
@@ -91,10 +84,10 @@ internal static class DirectoryTraversal
     /// <summary>
     /// Files always excluded from scans, regardless of include patterns.
     /// </summary>
-    private static bool IsAlwaysExcludedFile(string fileName) =>
-        fileName.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) ||
-        fileName.EndsWith(ConversionMetadataStore.Suffix, StringComparison.OrdinalIgnoreCase) ||
-        fileName.EndsWith("." + EncodingConverter.TempFileSuffix, StringComparison.OrdinalIgnoreCase);
+    internal static bool HasReservedArtifactSuffix(string path) =>
+        path.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith(ConversionMetadataStore.Suffix, StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith("." + EncodingConverter.TempFileSuffix, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Returns true for symlink, junction, or other reparse-point directories.
@@ -116,14 +109,7 @@ internal static class DirectoryTraversal
         }
     }
 
-    /// <summary>
-    /// Whether the planned file or any directory up to and including
-    /// <paramref name="root"/> is a reparse point or cannot be inspected.
-    /// </summary>
-    /// <remarks>
-    /// A link appearing after planning can redirect reads even when the target has the
-    /// same hash. Failure to reach the recorded root is also treated as stale.
-    /// </remarks>
+    /// <summary>Whether the planned path can still be trusted to reach its recorded root.</summary>
     internal static bool HasReparsePointInPath(string root, string path)
     {
         string normalizedRoot =
@@ -216,12 +202,8 @@ internal static class DirectoryTraversal
                     MatchesAny(relativePath, excludePatterns))
                     continue;
 
-                // Both exclusions are tested after the patterns, so a file the caller
-                // never asked about cannot inflate the coverage counts - and one they
-                // did ask about cannot vanish from them. A backup or sidecar left by an
-                // earlier run is still skipped, but "-Include *.bak" now reports that it
-                // was skipped instead of answering with an empty, successful report.
-                if (IsAlwaysExcludedFile(fileName))
+                // Count only excluded artifacts that the caller's patterns selected.
+                if (HasReservedArtifactSuffix(fileName))
                 {
                     counters?.CountFileExcludedAsEcArtifact();
                     continue;

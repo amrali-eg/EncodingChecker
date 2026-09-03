@@ -67,7 +67,8 @@ public sealed class InterruptedRunJournalTests : IDisposable
     private OrchestrationResult RunCancellingAfter(
         int stopAfter,
         List<ConversionReportEntry> entries,
-        out List<string> converted)
+        out List<string> converted,
+        int maxParallelism = 1)
     {
         using var cancellation = new CancellationTokenSource();
         var written = new List<string>();
@@ -82,8 +83,7 @@ public sealed class InterruptedRunJournalTests : IDisposable
             targetWriteBom: false,
             backup: false,
             preview: false,
-            // One file at a time, so "cancel after N" is exact rather than a race.
-            maxParallelism: 1,
+            maxParallelism,
             onEntry: entry =>
             {
                 lock (gate)
@@ -161,6 +161,45 @@ public sealed class InterruptedRunJournalTests : IDisposable
     }
 
     [Fact]
+    public void ParallelCancellationAccountsForEveryCompletedCallback()
+    {
+        // ConvertFiles invokes callbacks concurrently. Completion tracking must therefore
+        // remain complete even when several workers finish while cancellation propagates.
+        for (int i = 1; i <= 64; i++)
+            Write($"parallel-{i:D2}.txt");
+
+        List<ConversionReportEntry> entries = Scan();
+
+        OrchestrationResult result =
+            RunCancellingAfter(2, entries, out List<string> converted, maxParallelism: 8);
+
+        Assert.Equal(OrchestrationOutcome.Interrupted, result.Outcome);
+        Assert.NotEmpty(converted);
+
+        ConversionJournal journal = result.Journal!;
+        Assert.Equal(entries.Count, journal.Entries.Count);
+
+        HashSet<string> convertedNames =
+        [
+            .. converted.Select(path => Path.GetFileName(path)!)
+        ];
+
+        foreach (JournalEntry item in journal.Entries)
+        {
+            if (convertedNames.Contains(item.RelativePath))
+            {
+                Assert.Equal(ConversionStatus.Converted, item.Status);
+                Assert.False(StillHasBom(Path.Combine(_root, item.RelativePath)));
+            }
+            else
+            {
+                Assert.Equal(ConversionStatus.NotAttempted, item.Status);
+                Assert.True(StillHasBom(Path.Combine(_root, item.RelativePath)));
+            }
+        }
+    }
+
+    [Fact]
     public void AnUninterruptedRunIsStillReportedAsConverted()
     {
         // The control. Returning Interrupted unconditionally, or marking everything
@@ -183,6 +222,36 @@ public sealed class InterruptedRunJournalTests : IDisposable
         Assert.Equal(ConversionStatus.Converted, recorded.Status);
         Assert.NotNull(recorded.Sha256After);
         Assert.False(StillHasBom(Path.Combine(_root, "only.txt")));
+    }
+
+    [Fact]
+    public void RetryingAnInterruptedRunDoesNotKeepNotAttemptedStatuses()
+    {
+        // The same rows remain in the GUI after interruption. A retry must replace the
+        // first run's NotAttempted markers with what the second run actually did.
+        for (int i = 1; i <= 6; i++)
+            Write($"retry-{i}.txt");
+
+        List<ConversionReportEntry> entries = Scan();
+
+        OrchestrationResult interrupted =
+            RunCancellingAfter(2, entries, out _);
+
+        Assert.Equal(OrchestrationOutcome.Interrupted, interrupted.Outcome);
+        Assert.Contains(entries, entry => entry.NotAttempted);
+
+        var retry = new ConversionOrchestrator(_ => ConfirmationResponse.Proceed);
+
+        OrchestrationResult completed = retry.Run(
+            entries, _root, "utf-16", targetWriteBom: true, backup: false,
+            preview: false, maxParallelism: 1, onEntry: _ => { },
+            CancellationToken.None);
+
+        Assert.Equal(OrchestrationOutcome.Converted, completed.Outcome);
+        Assert.All(entries, entry => Assert.False(entry.NotAttempted));
+        Assert.All(
+            completed.Journal!.Entries,
+            entry => Assert.Equal(ConversionStatus.Converted, entry.Status));
     }
 
     [Fact]

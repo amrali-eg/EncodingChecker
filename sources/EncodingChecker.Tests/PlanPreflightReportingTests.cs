@@ -186,7 +186,7 @@ public sealed class PlanPreflightReportingTests : IDisposable
         // The hashless refusal must not be reported as changed content.
         Assert.Empty(plan.FindStaleFiles());
 
-        Assert.Equal(ExpectedSafeRefusal, Run("-Apply", planPath));
+        Assert.Equal(ExpectedProcessingErrors, Run("-Apply", planPath));
 
         Assert.False(StillHasBom(good));
         Assert.True(StillHasBom(locked));
@@ -217,6 +217,40 @@ public sealed class PlanPreflightReportingTests : IDisposable
         Assert.Null(ConversionPlan.Load(planPath, out string? error));
         Assert.Contains("good.txt", error);
         Assert.Equal(ExpectedUsageError, Run("-Apply", planPath));
+    }
+
+    [Fact]
+    public void AFileLostDuringPlanMaterializationBecomesAnExplainedError()
+    {
+        // This is the narrow race after the deciding pass but before FromEntries reads
+        // the source. The plan must remain complete without claiming a policy refusal.
+        string path = Path.Combine(_root, "vanished.txt");
+
+        var entry = new ConversionReportEntry
+        {
+            FilePath = path,
+            SourceEncoding = "utf-8",
+            SourceHasBom = true,
+            TargetEncoding = "utf-8",
+            TargetHasBom = false,
+            Action = PlannedAction.Convert,
+            SourceInterpretation = SourceInterpretation.AutomaticUnicodeOrAscii,
+            Result = ConversionRowResult.Converted,
+        };
+
+        ConversionPlan plan = ConversionPlan.FromEntries(
+            [entry], _root, "utf-8", targetHasBom: false,
+            backupEnabled: false, explicitSource: null);
+
+        PlannedFile planned = Assert.Single(plan.Files);
+        Assert.Equal(PlannedAction.Refuse, planned.Action);
+        Assert.Equal(string.Empty, planned.Sha256);
+        Assert.Equal(ConversionReasonCodes.SourceSnapshotFailed, planned.ReasonCode);
+
+        Assert.Equal(ConversionRowResult.Error, entry.Result);
+        Assert.Equal(PlannedAction.Refuse, entry.Action);
+        Assert.Equal(SourceInterpretation.NotApplicable, entry.SourceInterpretation);
+        Assert.Contains("could not be read consistently", entry.Diagnostic);
     }
 
     [Fact]

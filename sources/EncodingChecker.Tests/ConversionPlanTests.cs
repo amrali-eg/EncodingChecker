@@ -403,6 +403,37 @@ public sealed class ConversionPlanTests : IDisposable
         Assert.Equal(1, Run("-Apply", Path.Combine(_root, "absent.json")));
     }
 
+    [Fact]
+    public void ApplyRejectsAJournalPathThatIsAlsoAPlannedSource()
+    {
+        string source = Path.Combine(_root, "journal-source.json");
+        File.WriteAllText(source, "source text", new UTF8Encoding(true));
+        byte[] before = File.ReadAllBytes(source);
+
+        Assert.Equal(0, Plan());
+        Assert.Equal(1, Run("-Apply", PlanPath, "-Journal", source));
+
+        Assert.Equal(before, File.ReadAllBytes(source));
+    }
+
+    [Fact]
+    public void JournalCannotOverwriteTheBackupItAskedEcToCreate()
+    {
+        string source = Path.Combine(_root, "source.txt");
+        File.WriteAllText(source, "source text", new UTF8Encoding(true));
+        byte[] before = File.ReadAllBytes(source);
+
+        Assert.Equal(1, Run(
+            "-BasePath", _root,
+            "-Target", "utf-8",
+            "-Backup",
+            "-Journal", source + ".bak",
+            "-Quiet"));
+
+        Assert.Equal(before, File.ReadAllBytes(source));
+        Assert.False(File.Exists(source + ".bak"));
+    }
+
     [Theory]
     [InlineData("-DetectOnly")]
     [InlineData("-Validate", "utf-8")]

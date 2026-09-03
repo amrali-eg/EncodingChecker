@@ -198,6 +198,31 @@ public sealed class JournalOutcomeFidelityTests : IDisposable
     }
 
     [Fact]
+    public void ARealBackupFailureIsRecordedAsFailedNotInstallationUnknown()
+    {
+        // A directory at the fixed backup path makes backup creation fail before the
+        // converter starts. The journal must not imply that installation may have run.
+        string path = Path.Combine(_root, "backup-fails.txt");
+        File.WriteAllText(path, "plain text", new UTF8Encoding(true));
+        byte[] before = File.ReadAllBytes(path);
+        Directory.CreateDirectory(path + ".bak");
+
+        string journalPath = Path.Combine(_root, "backup-failure-journal.json");
+
+        Assert.Equal(
+            ExpectedProcessingErrors,
+            Run("-BasePath", _root, "-Include", "backup-fails.txt", "-Target", "utf-8",
+                "-Backup", "-Journal", journalPath, "-Quiet"));
+
+        JournalEntry recorded = Assert.Single(ReadJournal(journalPath).Entries);
+
+        Assert.Equal(ConversionStatus.Failed, recorded.Status);
+        Assert.Equal(ConversionReasonCodes.BackupFailed, recorded.ReasonCode);
+        Assert.Null(recorded.Sha256After);
+        Assert.Equal(before, File.ReadAllBytes(path));
+    }
+
+    [Fact]
     public void TheAfterHashIsTheOneVerificationPassed()
     {
         // The journal is written after the whole batch, so re-reading records whatever

@@ -35,6 +35,7 @@ public partial class MainForm
             settings = new Settings();
         }
 
+        settings.NormalizeAfterLoad();
         ApplySettings(settings);
     }
 
@@ -101,7 +102,8 @@ public partial class MainForm
             settingsFile.Flush();
         }
         catch (Exception ex) when (
-            ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+            ex is IOException or UnauthorizedAccessException or InvalidOperationException
+                or ArgumentException or NotSupportedException)
         {
             // Closing the application must not depend on saving preferences.
         }

@@ -136,13 +136,10 @@ internal sealed class ConversionConfirmationForm : Form
                 MaximumSize = new Size(660, 0),
                 Padding = new Padding(0, 8, 0, 8),
                 ForeColor = Color.FromArgb(150, 80, 0),
-                // Neutral wording: each file's own reason says which case it is, and
-                // "differs from your choice" is untrue for the agreeing one.
                 Text =
-                    $"{advisories.Count} file(s) have a BOM-less byte order EC could not "
-                    + "prove from their bytes. EC will use the source encoding you chose "
-                    + "and every strict check still applies, but the byte order itself is "
-                    + "being taken on trust. Review these files:"
+                    $"For {advisories.Count} file(s), EC cannot prove the byte order of "
+                    + "the BOM-less Unicode source. EC will use your choice while keeping "
+                    + "strict decoding and output verification enabled. Review these files:"
                     + Environment.NewLine + examples,
             });
         }
@@ -152,8 +149,7 @@ internal sealed class ConversionConfirmationForm : Form
         body.Controls.Add(Rows(
         [
             ("Directory", _plan.BaseDirectory),
-            // Read from the files, so a batch resolved with several encodings is not
-            // described as though one of them applied to all of it.
+            // The per-file choices are authoritative for mixed batches.
             ("Source encoding",
              _plan.Files.Any(f => f.SourceWasSpecified)
                  ? _plan.DescribeSourceChoice() + "; strict checks still apply"

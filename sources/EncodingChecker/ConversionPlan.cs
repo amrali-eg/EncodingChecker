@@ -102,13 +102,7 @@ internal sealed record PlannedFile
     /// <summary>Whether automatic detection found the encoding's BOM.</summary>
     public bool DetectedHasBom { get; init; }
 
-    /// <summary>
-    /// Whether the detected Unicode identity passed strict full-file validation.
-    /// </summary>
-    /// <remarks>
-    /// This policy input must survive save/load so explicit-source conflict decisions
-    /// remain reproducible when the plan is applied.
-    /// </remarks>
+    /// <summary>Whether strict full-file validation confirmed the detected Unicode codec.</summary>
     public bool HasReliableUnicodeDetection { get; init; }
 
     [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -126,13 +120,7 @@ internal sealed record PlannedFile
         ConversionPolicy.RequiresExplicitSourceChoice(SourceInterpretation, ReasonCode);
 }
 
-/// <summary>
-/// The decision an approved plan recorded for one file, carried into the write pass.
-/// </summary>
-/// <remarks>
-/// Applying a plan may become stricter if a file is no longer safe, but it must never
-/// turn a reviewed non-writing action into a conversion.
-/// </remarks>
+/// <summary>A reviewed decision that revalidation may tighten but never broaden.</summary>
 internal sealed record ApprovedDecision(
     PlannedAction Action,
     SourceInterpretation SourceInterpretation,
@@ -220,10 +208,17 @@ internal sealed record ConversionPlan
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // Keep unreadable files visible in the plan rather than silently dropping them.
+                // Keep the file visible and make the failed snapshot a terminal result.
                 hash = string.Empty;
                 size = 0;
                 action = PlannedAction.Refuse;
+                entry.Action = PlannedAction.Refuse;
+                entry.SourceInterpretation = SourceInterpretation.NotApplicable;
+                entry.Result = ConversionRowResult.Error;
+                entry.ReplacementCommitted = false;
+                entry.ReasonCode = ConversionReasonCodes.SourceSnapshotFailed;
+                entry.Diagnostic =
+                    $"The source could not be read consistently for planning: {ex.Message}";
             }
 
             // Record the encoding the conversion will actually use.
@@ -347,12 +342,7 @@ internal sealed record ConversionPlan
                     return null;
                 }
 
-                // A hash is required only where bytes will be written: it is what pins
-                // the conversion to the reviewed content. An entry that will not be
-                // written makes no such claim, and planning deliberately records an
-                // unreadable file as a refusal with no hash so it stays visible rather
-                // than vanishing from the plan. Demanding one here rejected that whole
-                // plan, taking every readable file with it.
+                // Only writes need a hash; hashless refusals remain visible and harmless.
                 if (file.Action == PlannedAction.Convert &&
                     string.IsNullOrWhiteSpace(file.Sha256))
                 {
@@ -388,7 +378,8 @@ internal sealed record ConversionPlan
         {
             full = Path.GetFullPath(Path.Combine(root, file.RelativePath));
         }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+        catch (Exception ex) when (
+            ex is IOException or ArgumentException or NotSupportedException)
         {
             return null;
         }
@@ -467,17 +458,14 @@ internal sealed record ConversionPlan
 
             try
             {
-                // Existence first: a missing file makes every path component
-                // uninspectable, and the link check would then report it as one.
+                // Check existence first so a missing file is not mislabeled as a link.
                 if (!File.Exists(path))
                 {
                     stale.Add($"{path} (no longer exists)");
                     continue;
                 }
 
-                // A path is only as stable as the components above it, and the hash
-                // cannot see the difference: an identical copy behind a link hashes
-                // identically.
+                // A matching hash cannot reveal that a link redirected the path.
                 if (DirectoryTraversal.HasReparsePointInPath(BaseDirectory, path))
                 {
                     stale.Add(
@@ -486,10 +474,7 @@ internal sealed record ConversionPlan
                     continue;
                 }
 
-                // An entry recorded without a hash could not be read when the plan was
-                // made, so there is nothing to compare against. It is a refusal, so no
-                // bytes are written either way; comparing would report every such file
-                // as changed and invalidate the plan for the files that are fine.
+                // Hashless entries are non-writing errors already recorded by the plan.
                 if (!string.IsNullOrWhiteSpace(file.Sha256) &&
                     ConversionMetadataStore.ComputeSha256(path) != file.Sha256)
                 {
@@ -505,17 +490,7 @@ internal sealed record ConversionPlan
         return stale;
     }
 
-    /// <summary>
-    /// How the source encoding was arrived at, read from the files rather than from
-    /// the run-level field, which cannot describe a batch that chose more than one.
-    /// </summary>
-    /// <remarks>
-    /// An explicit source replaces detection as the codec used, but detection still
-    /// runs and its result is recorded: it is what the conflicting-source refusal and
-    /// the BOM-less advisories are decided against. Calling that "bypassed" told the
-    /// reader the safety input was skipped, when its absence was the defect that let
-    /// an applied plan convert a file it had recorded as refused.
-    /// </remarks>
+    /// <summary>Describes per-file source choices accurately for mixed batches.</summary>
     internal string DescribeSourceChoice()
     {
         string[] chosen =

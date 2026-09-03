@@ -163,7 +163,7 @@ public sealed class ConversionConfirmationFormTests : IDisposable
             using var form = new ConversionConfirmationForm(plan);
             string text = AllText(form);
 
-            Assert.Contains("could not", text);
+            Assert.Contains("cannot prove", text);
             Assert.Contains("bomless.txt", text);
             Assert.Contains("not evidence", text);
             Assert.Contains("Convert 1 file(s)", text);
@@ -245,7 +245,7 @@ public sealed class ConversionConfirmationFormTests : IDisposable
             // Wording is now shared by both advisory cases, so the assertion pins the
             // per-file reason - which is what distinguishes them - rather than the
             // heading that no longer mentions disagreement.
-            Assert.Contains("BOM-less byte order EC could not prove", text);
+            Assert.Contains("cannot prove the byte order", text);
             Assert.Contains("bomless.txt", text);
             Assert.Contains("but you selected windows-1252", text);
             Assert.Contains("Convert 1 file(s)", text);

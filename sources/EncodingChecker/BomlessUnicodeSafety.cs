@@ -46,34 +46,29 @@ internal static class BomlessUnicodeSafety
 
         (string detectedName, string oppositeName) = Names(detectedEncoding);
 
-        // Both orders are named, and EC's own estimate is not singled out. WebName is
-        // "utf-16" for either one, so suggesting it steered the caller straight back
-        // into the reading this refusal exists to question - under a name that cannot
-        // express the choice being made.
-        return $"EC detected BOM-less {detectedName}, but the same bytes are valid as both "
-               + $"{detectedName} and {oppositeName}. EC cannot determine the byte order "
-               + "safely, so no conversion was performed. Add a byte-order mark, or say "
-               + "which order the file uses with -From utf-16le or -From utf-16be.";
+        return Describe(detectedName, oppositeName, conversionRefused: true);
     }
 
-    /// <summary>
-    /// Describes the same fact for modes that convert nothing.
-    /// </summary>
-    /// <remarks>
-    /// <see cref="DescribeRefusal"/> speaks of a conversion withheld, which would be
-    /// meaningless here. The fact reported is the same one.
-    /// </remarks>
+    /// <summary>Describes the ambiguity without implying that conversion was attempted.</summary>
     internal static string DescribeUnprovableByteOrder(Encoding detectedEncoding)
     {
         ArgumentNullException.ThrowIfNull(detectedEncoding);
 
         (string detectedName, string oppositeName) = Names(detectedEncoding);
 
-        return $"EC read this file as BOM-less {detectedName}, but the same bytes are "
-               + $"equally valid as {oppositeName}. Which one it is cannot be established "
-               + "from the file, so the encoding reported here is an estimate rather than "
-               + "a finding. Add a byte-order mark to settle it.";
+        return Describe(detectedName, oppositeName, conversionRefused: false);
     }
+
+    private static string Describe(
+        string detectedName,
+        string oppositeName,
+        bool conversionRefused) =>
+        $"EC estimates BOM-less {detectedName}, but these bytes are also valid "
+        + $"{oppositeName}. The byte order cannot be proven from the file. "
+        + (conversionRefused
+            ? "No conversion was performed. Add a byte-order mark, or specify "
+              + "-From utf-16le or -From utf-16be."
+            : "Add a byte-order mark to identify it.");
 
     private static (string Detected, string Opposite) Names(Encoding detectedEncoding) =>
         detectedEncoding.CodePage == 1200

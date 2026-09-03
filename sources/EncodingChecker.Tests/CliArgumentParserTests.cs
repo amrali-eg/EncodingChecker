@@ -321,6 +321,43 @@ public sealed class CliArgumentParserTests
     }
 
     [Fact]
+    public void TryValidateOptions_CommandOutputsMustUseDifferentFiles()
+    {
+        string root = Directory.CreateTempSubdirectory("ec-output-paths-").FullName;
+
+        try
+        {
+            string shared = Path.Combine(root, "result.json");
+            Program.CliOptions options = ParsedOptions(
+                "-BasePath", root, "-Target", "utf-8",
+                "-Plan", shared, "-Journal", shared);
+
+            Assert.False(Program.TryValidateOptions(options, out string? error));
+            Assert.Contains("resolve to the same file", error);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("-Plan", "review.bak")]
+    [InlineData("-Plan", "review.bak.")]
+    [InlineData("-Journal", "run.ecmeta.json")]
+    [InlineData("-Journal", "run.ecmeta.json ")]
+    [InlineData("-Report", "report.unicodechecker.tmp")]
+    public void TryValidateOptions_CommandOutputsCannotUseRecoveryArtifactSuffixes(
+        string option, string path)
+    {
+        Program.CliOptions options = ParsedOptions(
+            "-BasePath", ".", "-Target", "utf-8", option, path);
+
+        Assert.False(Program.TryValidateOptions(options, out string? error));
+        Assert.Contains("reserved", error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void TryValidateOptions_MissingBasePath_Fails()
     {
         Program.CliOptions options = ParsedOptions("-Target", "utf-8");

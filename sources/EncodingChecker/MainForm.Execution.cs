@@ -462,7 +462,15 @@ public partial class MainForm
 
             UpdateResultItem(item, entry, targetLabel, wasPreview);
 
-            tally.Count(entry.Result);
+            if (wasPreview || outcome?.Journal is null)
+                tally.Count(entry.Result);
+        }
+
+        // Completed runs use the journal's terminal outcomes, including interrupted files.
+        if (!wasPreview && outcome?.Journal is { } journal)
+        {
+            foreach (JournalEntry entry in journal.Entries)
+                tally.Count(entry.Status);
         }
 
         lstResults.Sort();
@@ -500,6 +508,9 @@ public partial class MainForm
         internal int Skipped { get; private set; }
         internal int Refused { get; private set; }
         internal int Failed { get; private set; }
+        internal int ConvertedWithWarning { get; private set; }
+        internal int InstallationUnknown { get; private set; }
+        internal int NotAttempted { get; private set; }
 
         internal void Count(ConversionRowResult result)
         {
@@ -519,20 +530,45 @@ public partial class MainForm
             }
         }
 
+        internal void Count(ConversionStatus status)
+        {
+            switch (status)
+            {
+                case ConversionStatus.Converted: Converted++; break;
+                case ConversionStatus.Unchanged: Unchanged++; break;
+                case ConversionStatus.Skipped: Skipped++; break;
+                case ConversionStatus.Refused: Refused++; break;
+                case ConversionStatus.Failed: Failed++; break;
+                case ConversionStatus.ConvertedWithWarning: ConvertedWithWarning++; break;
+                case ConversionStatus.InstallationUnknown: InstallationUnknown++; break;
+                case ConversionStatus.NotAttempted: NotAttempted++; break;
+            }
+        }
+
         internal string Describe(bool wasPreview, bool stopped)
         {
             string headline = (wasPreview, stopped) switch
             {
                 (true, true) => "Preview cancelled",
                 (true, false) => "Preview complete",
-                (false, true) => "Conversion cancelled",
+                (false, true) => "Conversion stopped",
                 (false, false) => "Conversion complete",
             };
 
             string verb = wasPreview ? "would be converted" : "converted";
 
+            string details = ConvertedWithWarning > 0
+                ? $", {ConvertedWithWarning} converted with warning"
+                : string.Empty;
+
+            if (InstallationUnknown > 0)
+                details += $", {InstallationUnknown} installation unknown";
+
+            if (NotAttempted > 0)
+                details += $", {NotAttempted} not attempted";
+
             return $"{headline}: {Converted} {verb}, {Unchanged} unchanged, "
-                   + $"{Skipped} skipped, {Refused} refused, {Failed} failed";
+                   + $"{Skipped} skipped, {Refused} refused, {Failed} failed{details}";
         }
     }
 

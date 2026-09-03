@@ -72,7 +72,7 @@ public sealed class StatusAndWindowRestoreTests
     [Theory]
     [InlineData(true, true, "Preview cancelled")]
     [InlineData(true, false, "Preview complete")]
-    [InlineData(false, true, "Conversion cancelled")]
+    [InlineData(false, true, "Conversion stopped")]
     [InlineData(false, false, "Conversion complete")]
     public void TheHeadlineSaysWhichKindOfRunEndedAndHow(
         bool wasPreview, bool stopped, string expected)
@@ -86,6 +86,24 @@ public sealed class StatusAndWindowRestoreTests
         Assert.Contains(
             "would be converted",
             Describe(wasPreview: true, stopped: false, ConversionRowResult.Converted));
+    }
+
+    [Fact]
+    public void JournalOutcomesKeepInterruptedTotalsComplete()
+    {
+        var tally = new MainForm.ConversionTally();
+
+        tally.Count(ConversionStatus.Converted);
+        tally.Count(ConversionStatus.ConvertedWithWarning);
+        tally.Count(ConversionStatus.InstallationUnknown);
+        tally.Count(ConversionStatus.NotAttempted);
+
+        string status = tally.Describe(wasPreview: false, stopped: true);
+
+        Assert.StartsWith("Conversion stopped", status);
+        Assert.Contains("1 converted with warning", status);
+        Assert.Contains("1 installation unknown", status);
+        Assert.Contains("1 not attempted", status);
     }
 
     // ---- CX-12: restoring the window
@@ -128,6 +146,16 @@ public sealed class StatusAndWindowRestoreTests
     {
         // A few pixels of overlap is not a window you can grab hold of.
         var saved = new Rectangle(1900, 1060, 900, 700);
+
+        Assert.False(WindowPosition.IsReachable(saved, [Primary]));
+    }
+
+    [Fact]
+    public void AWindowWithOnlyItsBottomEdgeVisibleIsUnreachable()
+    {
+        // Restoring this rectangle would show part of the client area, but its title bar
+        // would remain off-screen and the user could not drag it back.
+        var saved = new Rectangle(100, -620, 900, 700);
 
         Assert.False(WindowPosition.IsReachable(saved, [Primary]));
     }

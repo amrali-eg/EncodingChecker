@@ -26,6 +26,18 @@ public sealed class Settings
     public string FileMasks = string.Empty;
     public string[] ValidCharsets = [];
 
+    /// <summary>Repairs nullable values accepted by XML deserialization.</summary>
+    internal void NormalizeAfterLoad()
+    {
+        WindowPosition ??= new WindowPosition();
+        RecentDirectories ??= [];
+        RecentDirectories.RemoveAll(string.IsNullOrWhiteSpace);
+        FileMasks ??= string.Empty;
+        ValidCharsets = ValidCharsets?
+            .Where(static charset => !string.IsNullOrWhiteSpace(charset))
+            .ToArray() ?? [];
+    }
+
     /// <summary>
     /// Adds a directory to the front of the most-recently-used list, removing any existing
     /// occurrence and trimming the list to the 10 most recent entries.
@@ -76,29 +88,25 @@ public sealed class WindowPosition
         form.SetBounds(Left, Top, Width, Height);
     }
 
-    /// <summary>
-    /// Whether enough of the window would land on a monitor to be usable.
-    /// </summary>
-    /// <remarks>
-    /// A position saved on a monitor that is no longer attached restores the window
-    /// where nothing can reach it, and there is no way back from inside the app.
-    /// <para>
-    /// Testing the screens is also what allows negative coordinates. Rejecting those
-    /// outright, as this used to, discarded perfectly good positions on any setup with
-    /// a monitor placed left of or above the primary one.
-    /// </para>
-    /// </remarks>
+    /// <summary>Whether enough of the title bar remains reachable on a monitor.</summary>
     internal static bool IsReachable(Rectangle bounds, IEnumerable<Rectangle> workingAreas)
     {
-        // Enough of the title bar to grab, rather than a single pixel of overlap.
-        const int MinimumVisible = 80;
+        const int titleBarHeight = 32;
+        const int minimumVisibleWidth = 80;
+        const int minimumVisibleHeight = 8;
+
+        var titleBar = new Rectangle(
+            bounds.Left,
+            bounds.Top,
+            bounds.Width,
+            Math.Min(titleBarHeight, bounds.Height));
 
         foreach (Rectangle area in workingAreas)
         {
-            Rectangle overlap = Rectangle.Intersect(area, bounds);
+            Rectangle overlap = Rectangle.Intersect(area, titleBar);
 
-            if (overlap.Width >= Math.Min(MinimumVisible, bounds.Width) &&
-                overlap.Height >= Math.Min(MinimumVisible, bounds.Height))
+            if (overlap.Width >= Math.Min(minimumVisibleWidth, titleBar.Width) &&
+                overlap.Height >= Math.Min(minimumVisibleHeight, titleBar.Height))
             {
                 return true;
             }

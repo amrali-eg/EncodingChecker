@@ -74,7 +74,7 @@ public sealed class BomlessUtf16SafetyTests : IDisposable
         Assert.Equal(ConversionRowResult.Refused, entry.Result);
         Assert.Equal(PlannedAction.Refuse, entry.Action);
         Assert.Equal(ConversionReasonCodes.AmbiguousBomlessUtf16, entry.ReasonCode);
-        Assert.Contains("valid as both UTF-16LE and UTF-16BE", entry.Diagnostic);
+        Assert.Contains("these bytes are also valid UTF-16BE", entry.Diagnostic);
         Assert.Equal(original, File.ReadAllBytes(entry.FilePath));
         Assert.Equal(authoritativeText, utf16Be.GetString(File.ReadAllBytes(entry.FilePath)));
         Assert.False(File.Exists(entry.FilePath + ".bak"));

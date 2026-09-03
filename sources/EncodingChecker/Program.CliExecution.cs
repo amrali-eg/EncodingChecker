@@ -27,8 +27,7 @@ internal static partial class Program
             return 3;
         }
 
-        // A reparse point can redirect the approved path to an unreviewed tree while all
-        // file hashes still match. FindStaleFiles repeats this check for each entry.
+        // A matching hash cannot reveal that a link redirected the reviewed path.
         if (DirectoryTraversal.IsReparsePointDirectory(plan.BaseDirectory))
         {
             Console.Error.WriteLine(
@@ -39,6 +38,23 @@ internal static partial class Program
             Console.Error.WriteLine(
                 "Re-run -Plan against the real directory you intend to convert.");
             return 3;
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.JournalPath))
+        {
+            string journalPath = Path.GetFullPath(options.JournalPath);
+            PlannedFile? collision = plan.Files.FirstOrDefault(file =>
+                string.Equals(
+                    plan.ResolvePath(file), journalPath,
+                    StringComparison.OrdinalIgnoreCase));
+
+            if (collision is not null)
+            {
+                Console.Error.WriteLine(
+                    $"The journal path is also a planned source file: {collision.RelativePath}");
+                Console.Error.WriteLine("Choose another -Journal path; nothing was converted.");
+                return 1;
+            }
         }
 
         // Apply the reviewed plan; do not re-detect and silently change its decisions.
@@ -86,12 +102,10 @@ internal static partial class Program
                     ReasonCode = f.ReasonCode,
                     Diagnostic = f.Reason,
 
-                    // A policy input, not provenance: without it the explicit-source
-                    // veto cannot fire when the plan is applied.
+                    // Preserve the Unicode-veto input used by the reviewed decision.
                     HasReliableUnicodeDetection = f.HasReliableUnicodeDetection,
 
-                    // The reviewed decision, kept intact so re-deciding below can only
-                    // refuse more than the review did, never less.
+                    // Revalidation may tighten this decision, never broaden it.
                     Approved = new ApprovedDecision(
                         f.Action,
                         f.SourceInterpretation,
@@ -106,10 +120,7 @@ internal static partial class Program
 
         using var cancellation = new CancellationTokenSource();
 
-        // Unsubscribed below, as the scan path already does. Left attached, the handler
-        // outlives the token source it captured, and a Ctrl+C after this method returns
-        // calls Cancel on a disposed one - an ObjectDisposedException raised on the
-        // console's own thread, where nothing is waiting to catch it.
+        // Detach this handler before its token source is disposed.
         ConsoleCancelEventHandler cancelHandler = (_, e) =>
         {
             e.Cancel = true;
@@ -348,9 +359,7 @@ internal static partial class Program
             ConversionReport.WriteCsv(entries, Console.Out);
         }
 
-        // Coverage, not a result: a caller reading only the rows cannot tell a clean
-        // folder from one holding files the scan never opened. Written to stderr so it
-        // survives -Quiet and stays out of the machine-readable report on stdout.
+        // Keep coverage warnings on stderr and outside the CSV stream.
         if (traversalCounters.FilesExcludedByAttribute > 0)
         {
             Console.Error.WriteLine(
@@ -372,9 +381,7 @@ internal static partial class Program
                 + "(hidden, system, or reparse point); their contents were not counted.");
         }
 
-        // Unconditional, and on stderr, matching -Apply. A file that could not be read
-        // is why the run exits 3, so suppressing the reason under -Quiet leaves the
-        // caller with a failure and nothing to act on.
+        // Quiet mode must not hide the reason for exit code 3.
         foreach (ConversionReportEntry entry in entries
                      .Where(e => e.Result == ConversionRowResult.Error))
         {
