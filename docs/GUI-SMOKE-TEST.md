@@ -111,6 +111,20 @@ An interactive Windows desktop. UI Automation cannot drive a window that no sess
 owns, so the runner refuses to start with exit `2` rather than reporting a pass it did
 not earn.
 
-Whether a GitHub-hosted Windows runner provides such a session is **not yet
-established**. Until it is, this is a local gate run before tagging, and the manual
-procedure it replaces is recorded in this file's history rather than in the checklist.
+A GitHub-hosted `windows-latest` runner **does** provide one. Measured, not assumed:
+`Environment.UserInteractive` is `True` under the `runneradmin` account, and phase A
+opened the review, cancelled it, and verified the bytes on disk.
+
+The exit code alone would not have shown that. A `--phase` matching nothing also
+exits `0`, because every phase in an empty set passes. The evidence the run uploaded
+is what settles it: one phase recorded, `A`, with five files hashed before and five
+after. Read the artifact, not the tick.
+
+**It now gates the release.** `release.yml` runs all nine phases against the signed,
+published executable, after signing and before packaging, so what is verified is the
+bytes that ship rather than a rebuild of the same commit. A failure fails the job and
+no release is created. The report is uploaded as a `gui-smoke-evidence` artifact.
+
+It does not run on every push. A GUI regression is caught at release time, which is
+late for a contributor and early enough for a user — moving it earlier is a separate
+decision about what every pull request should pay for.

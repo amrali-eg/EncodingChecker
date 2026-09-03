@@ -368,6 +368,8 @@ Nine phases pass against the Release build, with `EcVersion 3.11.1.0` recorded i
 
 - **No corpus measurement backs this release.** The v3.11.0 result establishes that the conversion engine was undisturbed *as of that commit*; it says nothing about this one. What supports v3.11.1 is the unit suite, the GUI suite, and the parity check — not a measurement over 5,078 files.
 - **The GUI suite ran locally, not in CI.** Whether a GitHub-hosted Windows runner gives UI Automation an interactive window station is still unestablished, so this gate depends on a person running it before tagging.
+
+  *Corrected after this record was written.* A hosted `windows-latest` runner does provide such a session: `Environment.UserInteractive` is `True`, and phase A drove the review to completion on one. The limit above stands as written for v3.11.1 — the suite did run locally for this release, and no CI gate existed — but the question it calls open is now answered, and a later release can be gated on it.
 - **The About box was verified by reading it, not by a test.** No automated check asserts its wording, and each corrected label is a `LinkLabel` whose clickable span is a character range: a later text edit can move a link onto the wrong words without failing anything.
 
 ## Known limits
