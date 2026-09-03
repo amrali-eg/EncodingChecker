@@ -9,7 +9,13 @@ permissions:
   contents: write
 
 jobs:
+  # A release must not be able to claim detector parity that was never checked at
+  # the commit being tagged.
+  parity:
+    uses: ./.github/workflows/detector-parity.yml
+
   release:
+    needs: parity
     runs-on: windows-latest
 
     env:

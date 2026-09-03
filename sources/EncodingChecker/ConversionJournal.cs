@@ -28,6 +28,15 @@ internal enum ConversionStatus
     /// <summary>Conversion was attempted but did not complete; not touched.</summary>
     Failed,
 
+    /// <summary>Rewritten and verified, but a later bookkeeping step failed.</summary>
+    ConvertedWithWarning,
+
+    /// <summary>
+    /// Installation failed in a way that left the file's state undetermined.
+    /// </summary>
+    /// <remarks>The file must be inspected because EC cannot prove either outcome.</remarks>
+    InstallationUnknown,
+
     /// <summary>
     /// Decided but deliberately not carried out, such as in a preview or after an earlier
     /// failure stopped the run.
@@ -35,10 +44,7 @@ internal enum ConversionStatus
     NotAttempted,
 }
 
-/// <summary>
-///
-/// One file's journal entry: what EC believed, decided, and actually wrote.
-/// </summary>
+/// <summary>One file's journal entry: what EC believed, decided, and actually wrote.</summary>
 internal sealed record JournalEntry
 {
     public required string RelativePath { get; init; }
@@ -199,7 +205,12 @@ internal sealed record ConversionJournal
 
         foreach (ConversionReportEntry entry in entries)
         {
-            ConversionStatus status = entry.Result switch
+            ConversionStatus status = entry switch
+            {
+                // This overrides the preview result left by the deciding pass.
+                { NotAttempted: true } => ConversionStatus.NotAttempted,
+
+                _ => entry.Result switch
             {
                 // A preview records the decision, not a conversion that happened.
                 ConversionRowResult.Converted when preview
@@ -208,10 +219,18 @@ internal sealed record ConversionJournal
                 ConversionRowResult.Unchanged => ConversionStatus.Unchanged,
                 ConversionRowResult.Skipped => ConversionStatus.Skipped,
                 ConversionRowResult.Refused => ConversionStatus.Refused,
-                ConversionRowResult.Error when entry.Action == PlannedAction.Refuse
-                    => ConversionStatus.Refused,
+
+                // Replacement state outranks the general error result.
+                ConversionRowResult.Error when entry.ReplacementCommitted == true
+                    => ConversionStatus.ConvertedWithWarning,
+                ConversionRowResult.Error when entry.ReplacementCommitted is null &&
+                                               entry.Action == PlannedAction.Convert
+                    => ConversionStatus.InstallationUnknown,
+
+                // Read failures are processing errors, not policy refusals.
                 ConversionRowResult.Error => ConversionStatus.Failed,
                 _ => ConversionStatus.NotAttempted,
+            },
             };
 
             // Record the encoding actually used to read the source file.
@@ -233,10 +252,14 @@ internal sealed record ConversionJournal
                                ?? entry.ExpectedSourceSha256
                                ?? Hash(entry.FilePath),
 
-                // Only a completed conversion needs an after-hash.
-                Sha256After = status == ConversionStatus.Converted
-                    ? Hash(entry.FilePath)
-                    : null,
+                // Use the verified output hash unless installation itself is uncertain.
+                Sha256After = status switch
+                {
+                    ConversionStatus.Converted or ConversionStatus.ConvertedWithWarning
+                        => entry.OutputSha256 ?? Hash(entry.FilePath),
+                    ConversionStatus.InstallationUnknown => Hash(entry.FilePath),
+                    _ => null,
+                },
 
                 DetectionMode = entry.SourceEncodingWasSpecified ? "Explicit" : "Detected",
                 DetectedEncoding = entry.DetectedEncodingLabel,

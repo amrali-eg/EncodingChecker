@@ -44,16 +44,34 @@ internal static class BomlessUnicodeSafety
     {
         ArgumentNullException.ThrowIfNull(detectedEncoding);
 
-        string detectedName = detectedEncoding.CodePage == 1200
-            ? "UTF-16LE"
-            : "UTF-16BE";
-        string oppositeName = detectedEncoding.CodePage == 1200
-            ? "UTF-16BE"
-            : "UTF-16LE";
+        (string detectedName, string oppositeName) = Names(detectedEncoding);
 
-        return $"EC detected BOM-less {detectedName}, but the same bytes are valid as both "
-               + $"{detectedName} and {oppositeName}. EC cannot determine the byte order "
-               + "safely, so no conversion was performed. Add a byte-order mark or choose "
-               + $"the source encoding explicitly (for example, -From {detectedEncoding.WebName}).";
+        return Describe(detectedName, oppositeName, conversionRefused: true);
     }
+
+    /// <summary>Describes the ambiguity without implying that conversion was attempted.</summary>
+    internal static string DescribeUnprovableByteOrder(Encoding detectedEncoding)
+    {
+        ArgumentNullException.ThrowIfNull(detectedEncoding);
+
+        (string detectedName, string oppositeName) = Names(detectedEncoding);
+
+        return Describe(detectedName, oppositeName, conversionRefused: false);
+    }
+
+    private static string Describe(
+        string detectedName,
+        string oppositeName,
+        bool conversionRefused) =>
+        $"EC estimates BOM-less {detectedName}, but these bytes are also valid "
+        + $"{oppositeName}. The byte order cannot be proven from the file. "
+        + (conversionRefused
+            ? "No conversion was performed. Add a byte-order mark, or specify "
+              + "-From utf-16le or -From utf-16be."
+            : "Add a byte-order mark to identify it.");
+
+    private static (string Detected, string Opposite) Names(Encoding detectedEncoding) =>
+        detectedEncoding.CodePage == 1200
+            ? ("UTF-16LE", "UTF-16BE")
+            : ("UTF-16BE", "UTF-16LE");
 }

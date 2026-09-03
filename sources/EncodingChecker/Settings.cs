@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
 
 namespace EncodingChecker;
@@ -23,6 +25,18 @@ public sealed class Settings
 
     public string FileMasks = string.Empty;
     public string[] ValidCharsets = [];
+
+    /// <summary>Repairs nullable values accepted by XML deserialization.</summary>
+    internal void NormalizeAfterLoad()
+    {
+        WindowPosition ??= new WindowPosition();
+        RecentDirectories ??= [];
+        RecentDirectories.RemoveAll(string.IsNullOrWhiteSpace);
+        FileMasks ??= string.Empty;
+        ValidCharsets = ValidCharsets?
+            .Where(static charset => !string.IsNullOrWhiteSpace(charset))
+            .ToArray() ?? [];
+    }
 
     /// <summary>
     /// Adds a directory to the front of the most-recently-used list, removing any existing
@@ -50,9 +64,54 @@ public sealed class WindowPosition
     public int Width = -1;
     public int Height = -1;
 
-    public void ApplyTo(Form form)
+    public void ApplyTo(Form form) =>
+        ApplyTo(form, Screen.AllScreens.Select(s => s.WorkingArea));
+
+    /// <summary>
+    /// Restores the saved bounds, but only onto a monitor that is actually there.
+    /// </summary>
+    /// <remarks>
+    /// The monitor list is a parameter so the decision can be tested against layouts
+    /// this machine does not have - a saved position is only ever wrong on a desktop
+    /// other than the one that saved it.
+    /// </remarks>
+    internal void ApplyTo(Form form, IEnumerable<Rectangle> workingAreas)
     {
-        if (Left >= 0 && Top >= 0 && Width > 0 && Height > 0)
-            form.SetBounds(Left, Top, Width, Height);
+        ArgumentNullException.ThrowIfNull(form);
+
+        if (Width <= 0 || Height <= 0)
+            return;
+
+        if (!IsReachable(new Rectangle(Left, Top, Width, Height), workingAreas))
+            return;
+
+        form.SetBounds(Left, Top, Width, Height);
+    }
+
+    /// <summary>Whether enough of the title bar remains reachable on a monitor.</summary>
+    internal static bool IsReachable(Rectangle bounds, IEnumerable<Rectangle> workingAreas)
+    {
+        const int titleBarHeight = 32;
+        const int minimumVisibleWidth = 80;
+        const int minimumVisibleHeight = 8;
+
+        var titleBar = new Rectangle(
+            bounds.Left,
+            bounds.Top,
+            bounds.Width,
+            Math.Min(titleBarHeight, bounds.Height));
+
+        foreach (Rectangle area in workingAreas)
+        {
+            Rectangle overlap = Rectangle.Intersect(area, titleBar);
+
+            if (overlap.Width >= Math.Min(minimumVisibleWidth, titleBar.Width) &&
+                overlap.Height >= Math.Min(minimumVisibleHeight, titleBar.Height))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

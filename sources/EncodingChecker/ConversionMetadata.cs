@@ -149,6 +149,27 @@ internal static class ConversionMetadataStore
 
     internal static string MetadataPathFor(string filePath) => filePath + Suffix;
 
+    /// <summary>
+    /// Removes the recovery record immediately before its fixed-name backup is replaced.
+    /// </summary>
+    /// <remarks>
+    /// A record must not survive replacement of the backup it describes. Deletion
+    /// failures propagate so conversion stops instead of leaving a misleading pair.
+    /// </remarks>
+    /// <exception cref="IOException">The record exists and could not be removed.</exception>
+    /// <exception cref="UnauthorizedAccessException">The record could not be removed.</exception>
+    internal static void RemoveBeforeBackupReplacement(string filePath)
+    {
+        string path = MetadataPathFor(filePath);
+
+        if (!File.Exists(path))
+            return;
+
+        // Match the backup's own handling of a read-only destination.
+        File.SetAttributes(path, FileAttributes.Normal);
+        File.Delete(path);
+    }
+
     internal static string ComputeSha256(string path)
     {
         using FileStream stream = new(

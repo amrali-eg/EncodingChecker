@@ -252,14 +252,17 @@ internal static class ScanEngine
             getPath: entry => entry.FilePath,
             processItem: entry =>
             {
-                // A failed planning snapshot is already a terminal refusal. Do not let a
-                // later pass reinterpret it as an ordinary unknown-encoding skip.
+                entry.ResetAttemptEvidence();
+
+                // A failed planning snapshot is already a terminal error.
                 if (entry is
                     {
                         Action: PlannedAction.Refuse,
                         ReasonCode: ConversionReasonCodes.SourceSnapshotFailed
                     })
                 {
+                    entry.Result = ConversionRowResult.Error;
+                    entry.ReplacementCommitted = false;
                     return entry;
                 }
 
@@ -374,7 +377,8 @@ internal static class ScanEngine
                 {
                     entry.Action = PlannedAction.Refuse;
                     entry.SourceInterpretation = SourceInterpretation.NotApplicable;
-                    entry.Result = ConversionRowResult.Refused;
+                    entry.Result = ConversionRowResult.Error;
+                    entry.ReplacementCommitted = false;
                     entry.ReasonCode = ConversionReasonCodes.SourceSnapshotFailed;
                     entry.Diagnostic =
                         $"The source could not be read consistently for planning: {ex.Message}";
@@ -468,6 +472,10 @@ internal static class ScanEngine
             DetectionCounters.RecordDetection();
             detected = TextEncoding.DetectFromFile(path);
             hasBom = detected != null && HasPreamble(path, detected);
+
+            // Read-only modes must disclose the same unprovable byte order conversion refuses.
+            snapshotHasAmbiguousBomlessUtf16 =
+                detected is not null && IsAmbiguousBomlessUtf16(path, detected, hasBom);
         }
 
         string sourceCharset =
@@ -490,8 +498,9 @@ internal static class ScanEngine
                 hasReliableUnicodeDetection,
             DetectedEncodingHasBom = options.Action == ScanAction.Convert &&
                 snapshotDetectedHasBom,
-            HasAmbiguousBomlessUtf16 = options.Action == ScanAction.Convert &&
-                snapshotHasAmbiguousBomlessUtf16,
+            // Not gated on Convert like the two above: those are policy inputs, this
+            // states what the bytes do and holds in every mode.
+            HasAmbiguousBomlessUtf16 = snapshotHasAmbiguousBomlessUtf16,
         };
 
         if (options.Action == ScanAction.Convert)
@@ -508,6 +517,14 @@ internal static class ScanEngine
                     entry.ReasonCode = ConversionReasonCodes.UnknownEncoding;
                     entry.Diagnostic =
                         "The file's encoding could not be identified from its contents.";
+                }
+                else if (entry.HasAmbiguousBomlessUtf16)
+                {
+                    // Detection found an estimate, not a reading. Nothing failed, so
+                    // the result stays Unchanged; the row must still say which it is.
+                    entry.ReasonCode = ConversionReasonCodes.AmbiguousBomlessUtf16;
+                    entry.Diagnostic =
+                        BomlessUnicodeSafety.DescribeUnprovableByteOrder(detected!);
                 }
 
                 break;
@@ -535,6 +552,20 @@ internal static class ScanEngine
                 {
                     entry.ReasonCode = ConversionReasonCodes.StrictValidationFailed;
                     entry.Diagnostic = validationDiagnostic;
+                }
+                else if (entry.Result == ConversionRowResult.Unchanged &&
+                         entry.HasAmbiguousBomlessUtf16)
+                {
+                    // The two byte orders are separate entries in the allowed set; the
+                    // label matched only because .NET names both "utf-16". Passing the
+                    // file would assert an identity EC cannot establish, and conversion
+                    // refuses that same file later.
+                    entry.Result = ConversionRowResult.Invalid;
+                    entry.ReasonCode = ConversionReasonCodes.AmbiguousBomlessUtf16;
+                    entry.Diagnostic =
+                        BomlessUnicodeSafety.DescribeUnprovableByteOrder(detected!)
+                        + $" The label '{label}' is in the allowed list, but EC cannot"
+                        + " confirm this file belongs to it.";
                 }
 
                 break;
@@ -766,16 +797,7 @@ internal static class ScanEngine
         if (entry.Action is null)
             DetectionCounters.RecordClassification();
 
-        // Whether this file's byte order can be established from its bytes is a fact
-        // about the file, not a decision about what to do. Folding the two together
-        // erased the fact whenever a source was supplied: the entry then reached the
-        // advisory below with nothing left to consult but detection's own estimate,
-        // which is the very thing an ambiguous file proves nothing about.
-        //
-        // Source snapshots normally carry this in. Recheck for callers of ConvertFiles
-        // that supply entries directly, testing what detection saw - with an explicit
-        // source, sourceEncoding is the answer being offered, not evidence about the
-        // file, and asking it would always answer no.
+        // With an explicit source, test detection's estimate rather than the supplied answer.
         Encoding? bomlessCandidate = entry.SourceEncodingWasSpecified
             ? automaticallyDetected
             : sourceEncoding;
@@ -809,6 +831,20 @@ internal static class ScanEngine
             out SourceInterpretation sourceInterpretation,
             out string? policyReason);
 
+        // Revalidation may make an applied plan stricter, never broader. Preserve a
+        // reviewed non-writing action if the current policy would convert the file.
+        if (entry.Approved is { } approved &&
+            approved.Action is not PlannedAction.Convert &&
+            action is PlannedAction.Convert)
+        {
+            entry.Action = approved.Action;
+            entry.SourceInterpretation = approved.SourceInterpretation;
+            entry.Result = ConversionPolicy.ToRowResult(approved.Action);
+            entry.ReasonCode = approved.ReasonCode;
+            entry.Diagnostic = approved.Diagnostic;
+            return;
+        }
+
         entry.Action = action;
         entry.SourceInterpretation = sourceInterpretation;
         entry.ReasonCode = action switch
@@ -828,10 +864,7 @@ internal static class ScanEngine
         // The optional BOM-less Unicode advisory below is added back for this pass.
         entry.Diagnostic = null;
 
-        // Reported whether or not the choice matches detection's estimate. Matching an
-        // estimate EC cannot prove is not corroboration, and staying silent for it left
-        // the one case most likely to be wrong - the caller repeating a wrong guess -
-        // indistinguishable from an ordinary conversion.
+        // Matching an unprovable estimate still means the byte order was taken on trust.
         if (action == PlannedAction.Convert &&
             entry.SourceEncodingWasSpecified &&
             automaticallyDetected is not null &&
@@ -882,6 +915,9 @@ internal static class ScanEngine
             entry.Result = ConversionRowResult.Converted; // "would be converted"
             return;
         }
+
+        // No replacement has happened yet; failures before the converter are known safe.
+        entry.ReplacementCommitted = false;
 
         if (backup)
         {
@@ -974,6 +1010,9 @@ internal static class ScanEngine
             entry.CurrentCharsetLabel = UnknownCharset;
         }
 
+        // The journal needs the installation state even when a later step failed.
+        entry.ReplacementCommitted = result.ReplacementCommitted;
+
         entry.Result =
             result.Success
                 ? ConversionRowResult.Converted
@@ -1022,6 +1061,9 @@ internal static class ScanEngine
 
         if (hashError is not null)
             return hashError;
+
+        // Record the verified output rather than a later reread of the path.
+        entry.OutputSha256 = record.OutputSha256;
 
         var prepared = new ConversionMetadata
         {
@@ -1141,6 +1183,9 @@ internal static class ScanEngine
                 destination.Flush(flushToDisk: true);
             }
 
+            // Never leave old metadata describing a newly replaced backup.
+            ConversionMetadataStore.RemoveBeforeBackupReplacement(path);
+
             EncodingConverter.AtomicReplaceForBackup(tempPath, path + ".bak");
         }
         finally
@@ -1201,17 +1246,32 @@ internal static class ScanEngine
                     ArgumentException or
                     NotSupportedException)
                 {
-                    entry = new ConversionReportEntry
+                    if (item is ConversionReportEntry existing)
                     {
-                        FilePath = getPath(item),
-                        SourceEncoding = "(Error)",
-                        TargetEncoding = "(Error)",
-                        Result = ConversionRowResult.Error,
-                        Action = PlannedAction.Refuse,
-                        SourceInterpretation = SourceInterpretation.NotApplicable,
-                        ReasonCode = ConversionReasonCodes.ScanFailed,
-                        Diagnostic = ex.Message,
-                    };
+                        // Keep the caller's entry authoritative when conversion fails.
+                        existing.Result = ConversionRowResult.Error;
+                        existing.Action = PlannedAction.Refuse;
+                        existing.SourceInterpretation = SourceInterpretation.NotApplicable;
+                        existing.ReplacementCommitted = false;
+                        existing.ReasonCode = ConversionReasonCodes.ScanFailed;
+                        existing.Diagnostic = ex.Message;
+                        entry = existing;
+                    }
+                    else
+                    {
+                        entry = new ConversionReportEntry
+                        {
+                            FilePath = getPath(item),
+                            SourceEncoding = "(Error)",
+                            TargetEncoding = "(Error)",
+                            Result = ConversionRowResult.Error,
+                            Action = PlannedAction.Refuse,
+                            SourceInterpretation = SourceInterpretation.NotApplicable,
+                            ReplacementCommitted = false,
+                            ReasonCode = ConversionReasonCodes.ScanFailed,
+                            Diagnostic = ex.Message,
+                        };
+                    }
                 }
 
                 if (entry is not null)

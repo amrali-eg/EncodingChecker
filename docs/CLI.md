@@ -30,11 +30,23 @@ A pattern without `/` or `\` matches file names at any depth. A pattern with a
 separator matches the path relative to `-BasePath`. `/` and `\` are equivalent.
 `*` and `?` are supported wildcards.
 
-EC always excludes its own `.bak`, `.ecmeta.json`, temporary, plan, journal,
-and report files, along with common metadata and build folders such as `.git`,
-`bin`, `obj`, and `node_modules`. Hidden, system, and reparse-point files are
-left alone. Hidden, system, and reparse-point folders are not entered. EC reports
-these coverage counts, but they do not change the exit code.
+EC always excludes files it can recognise as its own by name: `.bak` backups,
+`.ecmeta.json` recovery records, and `.unicodechecker.tmp` temporaries. It also
+excludes the plan, journal, and report files written by the current command.
+
+It does **not** exclude plans, journals, or reports left by earlier runs. You
+choose those file names, so EC cannot tell them from any other file, and a later
+conversion of the same folder will rewrite them like anything else. Keep exported
+plans, journals, and reports outside the folder you scan.
+
+Common metadata and build folders such as `.git`, `bin`, `obj`, and
+`node_modules` are skipped. Hidden, system, and reparse-point files are left
+alone, and hidden, system, and reparse-point folders are not entered.
+
+EC reports how many files each exclusion skipped, counting only files your
+patterns actually selected — so `-Include "*.bak"` reports that they were
+skipped instead of returning nothing at all. These counts do not change the
+exit code.
 
 ## Conversion
 
@@ -63,6 +75,12 @@ the files again. Only `-Journal`, `-Quiet`, and `-MaxParallelism` may accompany
 it. `-WhatIf`, `-Target`, `-From`, `-Backup`, and file-selection options are
 rejected with `-Apply`.
 
+`-Plan`, `-Apply`, `-Journal`, and `-Report` must use different paths. During
+`-Apply`, the journal path must not name any source file in the saved plan.
+`-Plan`, `-Journal`, and `-Report` also cannot use EC's reserved `.bak`,
+`.ecmeta.json`, or `.unicodechecker.tmp` suffixes, so command output cannot replace
+a backup or recovery artifact.
+
 ## Read-only modes
 
 | Option | Meaning |
@@ -81,11 +99,15 @@ combined with conversion options.
 |---|---|
 | `-Report <path>` | Also write the CSV report as UTF-8 with a BOM for Excel. |
 | `-Journal <path>` | Write a JSON record of the conversion decision and final result for every file. Convert mode only. |
-| `-Quiet` | Print only the final summary on standard output. |
+| `-Quiet` | Suppress per-file CSV and normal summaries. Errors and coverage warnings still go to stderr. |
 | `-Verbose` | Include error details and a result breakdown. |
 | `-MaxParallelism <N>` | Maximum simultaneous files. Default: the smaller of CPU count and 4. |
 
 `-Quiet` and `-Verbose` cannot be combined.
+
+If a GUI conversion is interrupted after writing starts, its journal records
+completed and not-attempted files separately. A command-line Ctrl+C returns
+exit code 4; command-line interruption journals are not yet guaranteed.
 
 ## Examples
 

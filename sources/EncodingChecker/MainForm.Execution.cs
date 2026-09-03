@@ -372,12 +372,18 @@ public partial class MainForm
         if (counters is null)
             return string.Empty;
 
-        var parts = new List<string>(2);
+        var parts = new List<string>(3);
 
         if (counters.FilesExcludedByAttribute > 0)
         {
             parts.Add(
                 $"{counters.FilesExcludedByAttribute} matching file(s) not examined");
+        }
+
+        if (counters.FilesExcludedAsEcArtifact > 0)
+        {
+            parts.Add(
+                $"{counters.FilesExcludedAsEcArtifact} EC backup/record file(s) not examined");
         }
 
         if (counters.DirectoriesExcludedByAttribute > 0)
@@ -406,10 +412,13 @@ public partial class MainForm
         _convertWasPreview = false;
         _convertArgs = null;
 
-        // These outcomes leave all files untouched, so there are no result rows to update.
+        // These outcomes leave all files untouched, so there are no result rows to
+        // update. Interrupted is deliberately not among them: it means writing had
+        // already begun, and reporting it here would tell the user nothing changed.
         if (e.Error is null && !e.Cancelled && outcome is not null &&
             outcome.Outcome is not (OrchestrationOutcome.Converted
-                                    or OrchestrationOutcome.Previewed))
+                                    or OrchestrationOutcome.Previewed
+                                    or OrchestrationOutcome.Interrupted))
         {
             // Starting conversion temporarily clears this control's visual state. A
             // cancelled review keeps all rows selected, so restore the matching state.
@@ -436,10 +445,7 @@ public partial class MainForm
             return;
         }
 
-        int convertedCount = 0;
-        int unchangedCount = 0;
-        int refusedCount = 0;
-        int errorCount = 0;
+        var tally = new ConversionTally();
 
         // Update the UI only after all worker results are available.
         lstResults.BeginUpdate();
@@ -456,21 +462,15 @@ public partial class MainForm
 
             UpdateResultItem(item, entry, targetLabel, wasPreview);
 
-            switch (entry.Result)
-            {
-                case ConversionRowResult.Converted:
-                    convertedCount++;
-                    break;
-                case ConversionRowResult.Error:
-                    errorCount++;
-                    break;
-                case ConversionRowResult.Refused:
-                    refusedCount++;
-                    break;
-                default:
-                    unchangedCount++;
-                    break;
-            }
+            if (wasPreview || outcome?.Journal is null)
+                tally.Count(entry.Result);
+        }
+
+        // Completed runs use the journal's terminal outcomes, including interrupted files.
+        if (!wasPreview && outcome?.Journal is { } journal)
+        {
+            foreach (JournalEntry entry in journal.Entries)
+                tally.Count(entry.Status);
         }
 
         lstResults.Sort();
@@ -482,20 +482,94 @@ public partial class MainForm
 
         btnExportReport.Visible = lstResults.Items.Count > 0;
 
-        // A preview reports intended changes, not completed conversions.
-        string statusMessage = wasPreview
-            ? (e.Cancelled
-                ? $"Preview cancelled: {convertedCount} file(s) would be converted, " +
-                  $"{unchangedCount} unchanged, {refusedCount} refused, {errorCount} failed"
-                : $"Preview complete: {convertedCount} file(s) would be converted, " +
-                  $"{unchangedCount} unchanged, {refusedCount} refused, {errorCount} failed")
-            : (e.Cancelled
-                ? $"Conversion cancelled: {convertedCount} converted, " +
-                  $"{unchangedCount} unchanged, {refusedCount} refused, {errorCount} failed"
-                : $"Conversion complete: {convertedCount} converted, " +
-                  $"{unchangedCount} unchanged, {refusedCount} refused, {errorCount} failed");
+        UpdateControlsOnActionDone(
+            tally.Describe(
+                wasPreview,
+                stopped: e.Cancelled ||
+                         outcome?.Outcome == OrchestrationOutcome.Interrupted));
+    }
 
-        UpdateControlsOnActionDone(statusMessage);
+    /// <summary>
+    /// Counts what a conversion did, and says it.
+    /// </summary>
+    /// <remarks>
+    /// Skipped and Invalid used to fall into an "everything else" arm and be reported as
+    /// unchanged, so files whose encoding EC could not identify were counted as already
+    /// being in the target. The CLI has always listed them separately; this brings the
+    /// window into line with it.
+    /// <para>
+    /// Kept out of the form so the wording can be tested without one.
+    /// </para>
+    /// </remarks>
+    internal sealed class ConversionTally
+    {
+        internal int Converted { get; private set; }
+        internal int Unchanged { get; private set; }
+        internal int Skipped { get; private set; }
+        internal int Refused { get; private set; }
+        internal int Failed { get; private set; }
+        internal int ConvertedWithWarning { get; private set; }
+        internal int InstallationUnknown { get; private set; }
+        internal int NotAttempted { get; private set; }
+
+        internal void Count(ConversionRowResult result)
+        {
+            switch (result)
+            {
+                case ConversionRowResult.Converted: Converted++; break;
+                case ConversionRowResult.Unchanged: Unchanged++; break;
+                case ConversionRowResult.Refused: Refused++; break;
+                case ConversionRowResult.Error: Failed++; break;
+
+                // Invalid belongs here rather than with Unchanged: it is a file the run
+                // did not convert, not one that needed no conversion.
+                case ConversionRowResult.Skipped:
+                case ConversionRowResult.Invalid:
+                    Skipped++;
+                    break;
+            }
+        }
+
+        internal void Count(ConversionStatus status)
+        {
+            switch (status)
+            {
+                case ConversionStatus.Converted: Converted++; break;
+                case ConversionStatus.Unchanged: Unchanged++; break;
+                case ConversionStatus.Skipped: Skipped++; break;
+                case ConversionStatus.Refused: Refused++; break;
+                case ConversionStatus.Failed: Failed++; break;
+                case ConversionStatus.ConvertedWithWarning: ConvertedWithWarning++; break;
+                case ConversionStatus.InstallationUnknown: InstallationUnknown++; break;
+                case ConversionStatus.NotAttempted: NotAttempted++; break;
+            }
+        }
+
+        internal string Describe(bool wasPreview, bool stopped)
+        {
+            string headline = (wasPreview, stopped) switch
+            {
+                (true, true) => "Preview cancelled",
+                (true, false) => "Preview complete",
+                (false, true) => "Conversion stopped",
+                (false, false) => "Conversion complete",
+            };
+
+            string verb = wasPreview ? "would be converted" : "converted";
+
+            string details = ConvertedWithWarning > 0
+                ? $", {ConvertedWithWarning} converted with warning"
+                : string.Empty;
+
+            if (InstallationUnknown > 0)
+                details += $", {InstallationUnknown} installation unknown";
+
+            if (NotAttempted > 0)
+                details += $", {NotAttempted} not attempted";
+
+            return $"{headline}: {Converted} {verb}, {Unchanged} unchanged, "
+                   + $"{Skipped} skipped, {Refused} refused, {Failed} failed{details}";
+        }
     }
 
     // Kept separate so row presentation can be tested without creating the form.

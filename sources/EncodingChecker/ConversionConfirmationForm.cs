@@ -80,12 +80,17 @@ internal sealed class ConversionConfirmationForm : Form
         ConversionPlanSummary summary = _plan.Summary;
         int convert = summary.ReadyToConvert;
         List<PlannedFile> refused = Refused;
+        // Both reason codes. Agreeing with an estimate EC has already called unprovable
+        // is not corroboration, so the matching case needs saying at least as much as
+        // the contradicting one.
         List<PlannedFile> advisories =
         [
             .. _plan.Files.Where(f =>
                 f.Action == PlannedAction.Convert &&
-                f.ReasonCode == ConversionReasonCodes
-                    .ExplicitSourceDiffersFromBomlessUnicodeEstimate)
+                (f.ReasonCode == ConversionReasonCodes
+                     .ExplicitSourceDiffersFromBomlessUnicodeEstimate ||
+                 f.ReasonCode == ConversionReasonCodes
+                     .ExplicitSourceOnUnprovableBomlessUnicode))
         ];
 
         body.Controls.Add(Heading(
@@ -132,9 +137,10 @@ internal sealed class ConversionConfirmationForm : Form
                 Padding = new Padding(0, 8, 0, 8),
                 ForeColor = Color.FromArgb(150, 80, 0),
                 Text =
-                    $"{advisories.Count} file(s) have a BOM-less Unicode estimate that "
-                    + "differs from your source choice. EC will use your choice, but review "
-                    + "these files carefully:" + Environment.NewLine + examples,
+                    $"For {advisories.Count} file(s), EC cannot prove the byte order of "
+                    + "the BOM-less Unicode source. EC will use your choice while keeping "
+                    + "strict decoding and output verification enabled. Review these files:"
+                    + Environment.NewLine + examples,
             });
         }
 
@@ -143,10 +149,11 @@ internal sealed class ConversionConfirmationForm : Form
         body.Controls.Add(Rows(
         [
             ("Directory", _plan.BaseDirectory),
+            // The per-file choices are authoritative for mixed batches.
             ("Source encoding",
-             string.IsNullOrEmpty(_plan.ExplicitSourceEncoding)
-                 ? "EC converts automatically only when it can identify the source safely"
-                 : $"{_plan.ExplicitSourceEncoding} (chosen by you; strict checks still apply)"),
+             _plan.Files.Any(f => f.SourceWasSpecified)
+                 ? _plan.DescribeSourceChoice() + "; strict checks still apply"
+                 : "EC converts automatically only when it can identify the source safely"),
             ("Backups", _plan.BackupEnabled
                 ? "enabled — original as <file>.bak; record as <file>.ecmeta.json"
                 : "OFF — originals will not be kept"),

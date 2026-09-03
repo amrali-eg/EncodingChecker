@@ -110,6 +110,100 @@ public sealed class ConversionConfirmationFormTests : IDisposable
         });
     }
 
+    /// <summary>
+    /// One planned file carrying the given BOM-less advisory reason code.
+    /// </summary>
+    private ConversionPlan PlanWithAdvisory(string reasonCode, string reason)
+    {
+        return new ConversionPlan
+        {
+            CreatedUtc = DateTime.UtcNow.ToString("O"),
+            EcVersion = "test",
+            BaseDirectory = _root,
+            TargetEncoding = "utf-8",
+            TargetHasBom = false,
+            BackupEnabled = true,
+            ExplicitSourceEncoding = "utf-16",
+            Files =
+            [
+                new PlannedFile
+                {
+                    RelativePath = "bomless.txt",
+                    Size = 20,
+                    Sha256 = new string('0', 64),
+                    Action = PlannedAction.Convert,
+                    SourceEncoding = "utf-16",
+                    SourceCodePage = 1200,
+                    SourceHasBom = false,
+                    SourceWasSpecified = true,
+                    DetectedEncoding = "utf-16",
+                    DetectedCodePage = 1200,
+                    SourceInterpretation = SourceInterpretation.ExplicitSource,
+                    ReasonCode = reasonCode,
+                    Reason = reason,
+                },
+            ],
+        };
+    }
+
+    [Fact]
+    public void ItShowsAnExplicitSourceThatMatchesAnUnprovableEstimate()
+    {
+        // v3.10.1 established that agreeing with an estimate EC has already called
+        // unprovable is the more dangerous of the two cases - the caller repeating a
+        // wrong guess. The review dialog matched only the contradicting reason code, so
+        // it warned about the safer choice and stayed silent for the riskier one. That
+        // is the same inversion v3.10.1 fixed, one surface over.
+        ConversionPlan plan = PlanWithAdvisory(
+            ConversionReasonCodes.ExplicitSourceOnUnprovableBomlessUnicode,
+            "Your selection matches EC's estimate, but that estimate is not evidence.");
+
+        UiTest.OnStaThread(() =>
+        {
+            using var form = new ConversionConfirmationForm(plan);
+            string text = AllText(form);
+
+            Assert.Contains("cannot prove", text);
+            Assert.Contains("bomless.txt", text);
+            Assert.Contains("not evidence", text);
+            Assert.Contains("Convert 1 file(s)", text);
+            Assert.DoesNotContain("Needs a source encoding", text);
+        });
+    }
+
+    [Fact]
+    public void TheAdvisoryDoesNotClaimTheChoiceDiffersWhenItAgrees()
+    {
+        // The old wording said the estimate "differs from your source choice", which is
+        // untrue for the agreeing case and would tell the reader the opposite of the
+        // risk. Each file's own reason carries the distinction instead.
+        ConversionPlan plan = PlanWithAdvisory(
+            ConversionReasonCodes.ExplicitSourceOnUnprovableBomlessUnicode,
+            "Your selection matches EC's estimate.");
+
+        UiTest.OnStaThread(() =>
+        {
+            using var form = new ConversionConfirmationForm(plan);
+
+            Assert.DoesNotContain("differs from your source choice", AllText(form));
+        });
+    }
+
+    [Fact]
+    public void AnOrdinaryConversionShowsNoAdvisoryAtAll()
+    {
+        // The control. Both tests above would pass against a dialog that showed the
+        // advisory unconditionally.
+        ConversionPlan plan = PlanWithAdvisory(reasonCode: null!, reason: null!);
+
+        UiTest.OnStaThread(() =>
+        {
+            using var form = new ConversionConfirmationForm(plan);
+
+            Assert.DoesNotContain("taken on trust", AllText(form));
+        });
+    }
+
     [Fact]
     public void ItShowsBomlessUnicodeDisagreementWithoutCallingItARefusal()
     {
@@ -148,8 +242,12 @@ public sealed class ConversionConfirmationFormTests : IDisposable
             using var form = new ConversionConfirmationForm(plan);
             string text = AllText(form);
 
-            Assert.Contains("BOM-less Unicode estimate", text);
+            // Wording is now shared by both advisory cases, so the assertion pins the
+            // per-file reason - which is what distinguishes them - rather than the
+            // heading that no longer mentions disagreement.
+            Assert.Contains("cannot prove the byte order", text);
             Assert.Contains("bomless.txt", text);
+            Assert.Contains("but you selected windows-1252", text);
             Assert.Contains("Convert 1 file(s)", text);
             Assert.DoesNotContain("Needs a source encoding", text);
         });

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -37,11 +38,11 @@ internal sealed record ConversionSemantics
     /// <summary>
     /// Changes only when the meaning of an existing plan's decisions changes.
     /// </summary>
-    internal const int Current = 5;
+    internal const int Current = 6;
 
     /// <summary>The guarantees of <see cref="Current"/> shown to the reader.</summary>
     internal const string Describes =
-        "source-bound detection, strict codecs, verified output, atomic install, explicit source required for legacy text, proven BOM-less UTF-16 byte order";
+        "source-bound detection, strict codecs, verified output, atomic install, explicit source required for legacy text, proven BOM-less UTF-16 byte order, a reviewed refusal is binding";
 
     /// <summary>Malformed input is rejected rather than replaced.</summary>
     public bool StrictDecoding { get; init; } = true;
@@ -101,6 +102,9 @@ internal sealed record PlannedFile
     /// <summary>Whether automatic detection found the encoding's BOM.</summary>
     public bool DetectedHasBom { get; init; }
 
+    /// <summary>Whether strict full-file validation confirmed the detected Unicode codec.</summary>
+    public bool HasReliableUnicodeDetection { get; init; }
+
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public required SourceInterpretation SourceInterpretation { get; init; }
 
@@ -116,6 +120,13 @@ internal sealed record PlannedFile
         ConversionPolicy.RequiresExplicitSourceChoice(SourceInterpretation, ReasonCode);
 }
 
+/// <summary>A reviewed decision that revalidation may tighten but never broaden.</summary>
+internal sealed record ApprovedDecision(
+    PlannedAction Action,
+    SourceInterpretation SourceInterpretation,
+    string? ReasonCode,
+    string? Diagnostic);
+
 /// <summary>
 /// A conversion plan that can be reviewed before execution and then applied as approved.
 /// </summary>
@@ -130,7 +141,7 @@ internal sealed record PlannedFile
 internal sealed record ConversionPlan
 {
     /// <summary>The plan file schema version.</summary>
-    internal const int CurrentPlanVersion = 4;
+    internal const int CurrentPlanVersion = 5;
 
     public int PlanVersion { get; init; } = CurrentPlanVersion;
 
@@ -197,10 +208,17 @@ internal sealed record ConversionPlan
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // Keep unreadable files visible in the plan rather than silently dropping them.
+                // Keep the file visible and make the failed snapshot a terminal result.
                 hash = string.Empty;
                 size = 0;
                 action = PlannedAction.Refuse;
+                entry.Action = PlannedAction.Refuse;
+                entry.SourceInterpretation = SourceInterpretation.NotApplicable;
+                entry.Result = ConversionRowResult.Error;
+                entry.ReplacementCommitted = false;
+                entry.ReasonCode = ConversionReasonCodes.SourceSnapshotFailed;
+                entry.Diagnostic =
+                    $"The source could not be read consistently for planning: {ex.Message}";
             }
 
             // Record the encoding the conversion will actually use.
@@ -232,6 +250,7 @@ internal sealed record ConversionPlan
                 DetectedEncoding = entry.DetectedEncodingLabel,
                 DetectedCodePage = detectedCodePage,
                 DetectedHasBom = entry.DetectedEncodingHasBom,
+                HasReliableUnicodeDetection = entry.HasReliableUnicodeDetection,
                 SourceInterpretation = entry.SourceInterpretation
                     ?? throw new InvalidOperationException(
                         $"'{entry.FilePath}' reached a conversion plan without being "
@@ -314,10 +333,21 @@ internal sealed record ConversionPlan
             {
                 if (file is null ||
                     string.IsNullOrWhiteSpace(file.RelativePath) ||
-                    string.IsNullOrWhiteSpace(file.Sha256) ||
                     string.IsNullOrWhiteSpace(file.SourceEncoding))
                 {
-                    error = "The plan contains an incomplete file entry.";
+                    error = "The plan contains an incomplete file entry"
+                            + (file?.RelativePath is { Length: > 0 } named
+                                ? $": {named}."
+                                : ".");
+                    return null;
+                }
+
+                // Only writes need a hash; hashless refusals remain visible and harmless.
+                if (file.Action == PlannedAction.Convert &&
+                    string.IsNullOrWhiteSpace(file.Sha256))
+                {
+                    error = $"The plan schedules '{file.RelativePath}' for conversion "
+                            + "without recording the contents it was reviewed against.";
                     return null;
                 }
             }
@@ -348,7 +378,8 @@ internal sealed record ConversionPlan
         {
             full = Path.GetFullPath(Path.Combine(root, file.RelativePath));
         }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+        catch (Exception ex) when (
+            ex is IOException or ArgumentException or NotSupportedException)
         {
             return null;
         }
@@ -427,14 +458,28 @@ internal sealed record ConversionPlan
 
             try
             {
+                // Check existence first so a missing file is not mislabeled as a link.
                 if (!File.Exists(path))
                 {
                     stale.Add($"{path} (no longer exists)");
                     continue;
                 }
 
-                if (ConversionMetadataStore.ComputeSha256(path) != file.Sha256)
+                // A matching hash cannot reveal that a link redirected the path.
+                if (DirectoryTraversal.HasReparsePointInPath(BaseDirectory, path))
+                {
+                    stale.Add(
+                        $"{path} (the file or a directory in its path is now a symbolic " +
+                        "link, another reparse point, or could not be inspected)");
+                    continue;
+                }
+
+                // Hashless entries are non-writing errors already recorded by the plan.
+                if (!string.IsNullOrWhiteSpace(file.Sha256) &&
+                    ConversionMetadataStore.ComputeSha256(path) != file.Sha256)
+                {
                     stale.Add($"{path} (contents changed since the plan was made)");
+                }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -443,6 +488,30 @@ internal sealed record ConversionPlan
         }
 
         return stale;
+    }
+
+    /// <summary>Describes per-file source choices accurately for mixed batches.</summary>
+    internal string DescribeSourceChoice()
+    {
+        string[] chosen =
+        [
+            .. Files.Where(f => f.SourceWasSpecified)
+                    .Select(f => f.SourceEncoding)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+        ];
+
+        if (chosen.Length == 0)
+            return "detected per file";
+
+        string detail = chosen.Length == 1
+            ? chosen[0]
+            : $"{chosen.Length} chosen per file ({string.Join(", ", chosen)})";
+
+        bool everyFile = Files.All(f => f.SourceWasSpecified);
+
+        return everyFile
+            ? $"{detail} (chosen by you; detection still ran and is recorded)"
+            : $"{detail} for some files, detected for the rest";
     }
 
     /// <summary>The summary shown before the user decides.</summary>
@@ -462,10 +531,7 @@ internal sealed record ConversionPlan
             string.Empty,
             $"Directory:                    {BaseDirectory}",
             $"Target:                       {ScanEngine.DescribeTarget(TargetEncoding, TargetHasBom)}",
-            "Source encoding:              "
-                + (string.IsNullOrEmpty(ExplicitSourceEncoding)
-                    ? "detected per file"
-                    : $"{ExplicitSourceEncoding} (specified; detection bypassed)"),
+            $"Source encoding:              {DescribeSourceChoice()}",
             $"Backups:                      {(BackupEnabled ? "enabled" : "DISABLED")}",
             $"Guarantees:                   {ConversionSemantics.Describes}",
             string.Empty,

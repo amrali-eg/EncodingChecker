@@ -94,6 +94,17 @@ internal sealed class ConversionReportEntry
     internal PlannedAction? Action { get; set; }
 
     /// <summary>
+    /// What a reviewed plan decided for this file, or <see langword="null"/> when this
+    /// run is not carrying out a saved plan. Internal state; not in CSV.
+    /// </summary>
+    /// <remarks>
+    /// Present only for <c>-Apply</c>. The GUI re-decides in memory and deliberately
+    /// clears <see cref="Action"/> so that supplying a source can turn a refusal into a
+    /// conversion; a saved plan has no such conversation, so its refusals bind.
+    /// </remarks>
+    internal ApprovedDecision? Approved { get; set; }
+
+    /// <summary>
     /// The charset label the next conversion will use to read this file.
     /// </summary>
     /// <remarks>
@@ -142,6 +153,36 @@ internal sealed class ConversionReportEntry
     /// <summary>Stable machine-readable reason for a non-success outcome.</summary>
     internal string? ReasonCode { get; set; }
 
+    /// <summary>
+    /// Whether the run ended before it reached this file. Internal state; not in CSV.
+    /// </summary>
+    /// <remarks>
+    /// An entry keeps the deciding pass's result until the write pass overwrites it,
+    /// so a file the run never got to still reads as Converted. This says otherwise.
+    /// </remarks>
+    internal bool NotAttempted { get; set; }
+
+    /// <summary>
+    /// Whether the converted file reached its destination, or <see langword="null"/>
+    /// when the outcome is unknown or nothing was attempted.
+    /// </summary>
+    /// <remarks>
+    /// Conversion can fail after installation succeeds - completing the recovery record
+    /// or restoring attributes. Without this the journal reported such a file as
+    /// untouched, which is the opposite of what happened.
+    /// </remarks>
+    internal bool? ReplacementCommitted { get; set; }
+
+    /// <summary>
+    /// SHA-256 of the exact bytes verified before installation, when a recovery record
+    /// was written. Internal state; not in CSV.
+    /// </summary>
+    /// <remarks>
+    /// Preferred over re-reading the file afterwards, which records whatever is on disk
+    /// at journal time rather than what this run verified and installed.
+    /// </remarks>
+    internal string? OutputSha256 { get; set; }
+
     /// <summary>The backup created by this run, even if conversion later failed.</summary>
     internal string? BackupPath { get; set; }
 
@@ -149,6 +190,18 @@ internal sealed class ConversionReportEntry
     /// The recovery sidecar prepared by this run. Its state says whether installation completed.
     /// </summary>
     internal string? RecoveryMetadataPath { get; set; }
+
+    /// <summary>Clears evidence that belongs only to the previous conversion attempt.</summary>
+    internal void ResetAttemptEvidence()
+    {
+        ResolvedSourceLabel = null;
+        JournalSourceSha256 = null;
+        NotAttempted = false;
+        ReplacementCommitted = null;
+        OutputSha256 = null;
+        BackupPath = null;
+        RecoveryMetadataPath = null;
+    }
 }
 
 /// <summary>Stable reason codes written to reports and journals.</summary>

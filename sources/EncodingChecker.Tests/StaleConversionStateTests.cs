@@ -206,6 +206,33 @@ public sealed class StaleConversionStateTests : IDisposable
     }
 
     [Fact]
+    public void FailedRetryDoesNotKeepPriorBackupOrOutputEvidence()
+    {
+        const string original = "café Привет";
+
+        string path = Path.Combine(_root, "retry-evidence.txt");
+        File.WriteAllText(path, original, new UTF8Encoding(false));
+
+        ConversionReportEntry entry = Entry(path, "utf-8");
+
+        Convert(entry, "utf-16", targetWriteBom: true, backup: true);
+
+        Assert.Equal(ConversionRowResult.Converted, entry.Result);
+        Assert.NotNull(entry.BackupPath);
+        Assert.NotNull(entry.RecoveryMetadataPath);
+        Assert.NotNull(entry.OutputSha256);
+
+        Convert(entry, "windows-1252", targetWriteBom: false, backup: false);
+
+        Assert.Equal(ConversionRowResult.Error, entry.Result);
+        Assert.False(entry.ReplacementCommitted);
+        Assert.Null(entry.BackupPath);
+        Assert.Null(entry.RecoveryMetadataPath);
+        Assert.Null(entry.OutputSha256);
+        Assert.Equal(original, File.ReadAllText(path, Encoding.Unicode));
+    }
+
+    [Fact]
     public void UnknownSourceEncoding_IsSkipped_NotDecodedWithAGuess()
     {
         string path = Path.Combine(_root, "unknown.txt");

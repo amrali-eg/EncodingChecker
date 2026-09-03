@@ -477,7 +477,19 @@ internal static partial class EncodingConverter
                     SourceBytes = sourceBytesProcessed,
                     SourceSha256 = sourceFileSha,
                     SourceTextSha256 = System.Convert.ToHexStringLower(sourceDigest.Hash),
-                    OutputTextSha256 = System.Convert.ToHexStringLower(sourceDigest.Hash),
+
+                    // The digest verification computed from the output, not a second
+                    // copy of the source one. Verification has already established the
+                    // two are equal, so no test can tell the difference by value - which
+                    // is exactly why falling back to the source digest here would let
+                    // the record quietly go back to holding one measurement written
+                    // twice. Success without an output digest is a contradiction, so
+                    // say so loudly instead.
+                    OutputTextSha256 = System.Convert.ToHexStringLower(
+                        verification.OutputHash
+                        ?? throw new InvalidOperationException(
+                            "Verification reported success without recording the "
+                            + "digest it computed from the output.")),
                     OutputSha256 = outputFileSha,
                     SourceEncoding = sourceEncoding.WebName,
                     SourceCodePage = sourceEncoding.CodePage,

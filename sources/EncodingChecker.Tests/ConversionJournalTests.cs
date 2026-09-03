@@ -330,7 +330,13 @@ public sealed class ConversionJournalTests : IDisposable
             FilePath = path,
             SourceEncoding = "utf-7",
             TargetEncoding = "utf-8",
-            Result = ConversionRowResult.Error,
+
+            // Refused, not Error: this is what ConvertFiles actually records for a codec
+            // the runtime cannot supply. The fixture previously paired Error with this
+            // reason code, a combination production never produces, and relied on a
+            // mapping that turned any Error on a refused entry into Refused - which is
+            // what let a file EC could not even open be journaled as a policy decision.
+            Result = ConversionRowResult.Refused,
             Action = PlannedAction.Refuse,
             SourceInterpretation = SourceInterpretation.NotApplicable,
             ResolvedSourceLabel = "utf-7",

@@ -74,4 +74,32 @@ public sealed class SettingsDefaultsTests
         Assert.True(restored.CreateBackup);
         Assert.True(restored.IncludeSubdirectories);
     }
+
+    [Fact]
+    public void ExplicitlyNullXmlValuesAreRepairedBeforeTheGuiUsesThem()
+    {
+        // XmlSerializer accepts xsi:nil for these public reference fields. A damaged
+        // but well-formed settings file must therefore fall back to usable defaults
+        // instead of crashing the application while it opens.
+        const string xml = """
+            <?xml version="1.0"?>
+            <Settings xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+              <WindowPosition xsi:nil="true" />
+              <RecentDirectories xsi:nil="true" />
+              <FileMasks xsi:nil="true" />
+              <ValidCharsets xsi:nil="true" />
+            </Settings>
+            """;
+
+        var serializer = new XmlSerializer(typeof(Settings));
+        using var buffer = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+        var restored = (Settings)serializer.Deserialize(buffer)!;
+
+        restored.NormalizeAfterLoad();
+
+        Assert.NotNull(restored.WindowPosition);
+        Assert.Empty(restored.RecentDirectories);
+        Assert.Equal(string.Empty, restored.FileMasks);
+        Assert.Empty(restored.ValidCharsets);
+    }
 }

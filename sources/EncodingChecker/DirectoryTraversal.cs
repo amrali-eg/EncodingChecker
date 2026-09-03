@@ -39,11 +39,7 @@ internal static class DirectoryTraversal
         IgnoreInaccessible = false,
     };
 
-    // Files are enumerated without an attribute filter so the excluded ones can be
-    // counted rather than vanishing. AttributesToSkip drops them inside the OS
-    // enumeration, which left a scan unable to distinguish "this folder is clean"
-    // from "this folder holds files I never looked at". The same attributes are
-    // still excluded below; they are now counted first.
+    // Enumerate all files so excluded attributes remain visible in coverage counts.
     private static readonly EnumerationOptions FileWalkOptions = new()
     {
         AttributesToSkip = FileAttributes.None,
@@ -56,14 +52,12 @@ internal static class DirectoryTraversal
     /// <summary>
     /// Counts files a scan never examined, so a report can say so.
     /// </summary>
-    /// <remarks>
-    /// Incremented while <see cref="Parallel.ForEach"/> pulls from the traversal, so
-    /// the increments are interlocked rather than assumed to be serialized.
-    /// </remarks>
+    /// <remarks>Parallel traversal requires interlocked counters.</remarks>
     internal sealed class TraversalCounters
     {
         private int _filesExcludedByAttribute;
         private int _directoriesExcludedByAttribute;
+        private int _filesExcludedAsEcArtifact;
 
         /// <summary>Matching files skipped for being hidden, system, or reparse points.</summary>
         internal int FilesExcludedByAttribute => Volatile.Read(ref _filesExcludedByAttribute);
@@ -72,8 +66,16 @@ internal static class DirectoryTraversal
         internal int DirectoriesExcludedByAttribute =>
             Volatile.Read(ref _directoriesExcludedByAttribute);
 
+        /// <summary>
+        /// Matching files skipped for being EC's own backups, sidecars, or temporaries.
+        /// </summary>
+        internal int FilesExcludedAsEcArtifact => Volatile.Read(ref _filesExcludedAsEcArtifact);
+
         internal void CountFileExcludedByAttribute() =>
             Interlocked.Increment(ref _filesExcludedByAttribute);
+
+        internal void CountFileExcludedAsEcArtifact() =>
+            Interlocked.Increment(ref _filesExcludedAsEcArtifact);
 
         internal void CountDirectoryExcludedByAttribute() =>
             Interlocked.Increment(ref _directoriesExcludedByAttribute);
@@ -82,26 +84,58 @@ internal static class DirectoryTraversal
     /// <summary>
     /// Files always excluded from scans, regardless of include patterns.
     /// </summary>
-    private static bool IsAlwaysExcludedFile(string fileName) =>
-        fileName.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) ||
-        fileName.EndsWith(ConversionMetadataStore.Suffix, StringComparison.OrdinalIgnoreCase) ||
-        fileName.EndsWith("." + EncodingConverter.TempFileSuffix, StringComparison.OrdinalIgnoreCase);
+    internal static bool HasReservedArtifactSuffix(string path) =>
+        path.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith(ConversionMetadataStore.Suffix, StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith("." + EncodingConverter.TempFileSuffix, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Returns true for symlink, junction, or other reparse-point directories.
     /// Attribute-read failures are treated conservatively.
     /// </summary>
     internal static bool IsReparsePointDirectory(string dir)
+        => IsReparsePointOrUnreadable(dir);
+
+    private static bool IsReparsePointOrUnreadable(string path)
     {
         try
         {
-            return (File.GetAttributes(dir) & FileAttributes.ReparsePoint) != 0;
+            return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
         }
         catch (Exception ex) when (
             ex is IOException or UnauthorizedAccessException)
         {
             return true;
         }
+    }
+
+    /// <summary>Whether the planned path can still be trusted to reach its recorded root.</summary>
+    internal static bool HasReparsePointInPath(string root, string path)
+    {
+        string normalizedRoot =
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+
+        string? current = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+
+        while (current is not null)
+        {
+            if (IsReparsePointOrUnreadable(current))
+                return true;
+
+            // Stop at the root; what lies above it is not part of the plan's scope.
+            if (string.Equals(
+                    Path.TrimEndingDirectorySeparator(current),
+                    normalizedRoot,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            current = Path.GetDirectoryName(current);
+        }
+
+        // The path was not beneath the recorded root.
+        return true;
     }
 
     /// <summary>
@@ -151,9 +185,6 @@ internal static class DirectoryTraversal
                 string file = info.FullName;
                 string fileName = info.Name;
 
-                if (IsAlwaysExcludedFile(fileName))
-                    continue;
-
                 // Compare full paths because the scan root may itself be relative.
                 if (excludedFullPaths is not null &&
                     excludedFullPaths.Contains(
@@ -171,8 +202,13 @@ internal static class DirectoryTraversal
                     MatchesAny(relativePath, excludePatterns))
                     continue;
 
-                // Count only matching files. Files outside the requested scope and EC's
-                // own artifacts must not inflate the incomplete-coverage warning.
+                // Count only excluded artifacts that the caller's patterns selected.
+                if (HasReservedArtifactSuffix(fileName))
+                {
+                    counters?.CountFileExcludedAsEcArtifact();
+                    continue;
+                }
+
                 if ((info.Attributes & ExcludedFileAttributes) != 0)
                 {
                     counters?.CountFileExcludedByAttribute();

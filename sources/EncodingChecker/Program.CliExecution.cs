@@ -27,6 +27,36 @@ internal static partial class Program
             return 3;
         }
 
+        // A matching hash cannot reveal that a link redirected the reviewed path.
+        if (DirectoryTraversal.IsReparsePointDirectory(plan.BaseDirectory))
+        {
+            Console.Error.WriteLine(
+                $"The plan's directory is now a symbolic link or other reparse point, " +
+                $"so it may no longer be the directory that was reviewed: " +
+                $"{plan.BaseDirectory}");
+            Console.Error.WriteLine();
+            Console.Error.WriteLine(
+                "Re-run -Plan against the real directory you intend to convert.");
+            return 3;
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.JournalPath))
+        {
+            string journalPath = Path.GetFullPath(options.JournalPath);
+            PlannedFile? collision = plan.Files.FirstOrDefault(file =>
+                string.Equals(
+                    plan.ResolvePath(file), journalPath,
+                    StringComparison.OrdinalIgnoreCase));
+
+            if (collision is not null)
+            {
+                Console.Error.WriteLine(
+                    $"The journal path is also a planned source file: {collision.RelativePath}");
+                Console.Error.WriteLine("Choose another -Journal path; nothing was converted.");
+                return 1;
+            }
+        }
+
         // Apply the reviewed plan; do not re-detect and silently change its decisions.
         IReadOnlyList<string> stale = plan.FindStaleFiles();
 
@@ -72,6 +102,16 @@ internal static partial class Program
                     ReasonCode = f.ReasonCode,
                     Diagnostic = f.Reason,
 
+                    // Preserve the Unicode-veto input used by the reviewed decision.
+                    HasReliableUnicodeDetection = f.HasReliableUnicodeDetection,
+
+                    // Revalidation may tighten this decision, never broaden it.
+                    Approved = new ApprovedDecision(
+                        f.Action,
+                        f.SourceInterpretation,
+                        f.ReasonCode,
+                        f.Reason),
+
                     // Rechecked at installation so a long conversion cannot install over
                     // bytes that changed after the initial stale-file check.
                     ExpectedSourceSha256 = f.Sha256,
@@ -79,11 +119,15 @@ internal static partial class Program
         ];
 
         using var cancellation = new CancellationTokenSource();
-        Console.CancelKeyPress += (_, e) =>
+
+        // Detach this handler before its token source is disposed.
+        ConsoleCancelEventHandler cancelHandler = (_, e) =>
         {
             e.Cancel = true;
             cancellation.Cancel();
         };
+
+        Console.CancelKeyPress += cancelHandler;
 
         try
         {
@@ -101,6 +145,10 @@ internal static partial class Program
         {
             Console.Error.WriteLine("Cancelled.");
             return 4;
+        }
+        finally
+        {
+            Console.CancelKeyPress -= cancelHandler;
         }
 
         List<ConversionReportEntry> completed =
@@ -311,9 +359,7 @@ internal static partial class Program
             ConversionReport.WriteCsv(entries, Console.Out);
         }
 
-        // Coverage, not a result: a caller reading only the rows cannot tell a clean
-        // folder from one holding files the scan never opened. Written to stderr so it
-        // survives -Quiet and stays out of the machine-readable report on stdout.
+        // Keep coverage warnings on stderr and outside the CSV stream.
         if (traversalCounters.FilesExcludedByAttribute > 0)
         {
             Console.Error.WriteLine(
@@ -321,11 +367,25 @@ internal static partial class Program
                 + "(hidden, system, or reparse point).");
         }
 
+        if (traversalCounters.FilesExcludedAsEcArtifact > 0)
+        {
+            Console.Error.WriteLine(
+                $"{traversalCounters.FilesExcludedAsEcArtifact} matching file(s) not examined "
+                + "(EC backup, recovery record, or temporary file).");
+        }
+
         if (traversalCounters.DirectoriesExcludedByAttribute > 0)
         {
             Console.Error.WriteLine(
                 $"{traversalCounters.DirectoriesExcludedByAttribute} folder(s) not entered "
                 + "(hidden, system, or reparse point); their contents were not counted.");
+        }
+
+        // Quiet mode must not hide the reason for exit code 3.
+        foreach (ConversionReportEntry entry in entries
+                     .Where(e => e.Result == ConversionRowResult.Error))
+        {
+            Console.Error.WriteLine($"Error: {entry.FilePath}: {entry.Diagnostic}");
         }
 
         if (options.Verbose)
@@ -405,7 +465,15 @@ internal static partial class Program
                 Console.Out.WriteLine(plan.Summarize());
             }
 
-            // A refusal is an expected preflight result, not a failed preflight.
+            // A file the scan could not read is a failed preflight, and the published
+            // precedence puts 3 ahead of 2. Returning before this check let a plan run
+            // report success over files it never opened; the plan is still written and
+            // summarized first so the caller can see which ones.
+            if (entries.Any(e => e.Result == ConversionRowResult.Error))
+                return 3;
+
+            // A refusal, unlike an error, is an expected preflight result. Exit 5 is
+            // deliberately not returned here.
             if (options.FailOnChanges &&
                 plan.Files.Any(f => f.Action == PlannedAction.Convert))
             {

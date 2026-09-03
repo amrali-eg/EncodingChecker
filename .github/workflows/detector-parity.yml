@@ -1,11 +1,21 @@
 name: Shared Unicode detector parity
 
+# The detector is duplicated in three repositories and nothing but this job keeps
+# the copies honest, so it runs before a change lands as well as after, and a
+# release cannot be cut without it. Every audit record asserts parity held at the
+# tagged commit; this is what makes that assertion true rather than hopeful.
 on:
   push:
+    branches: [ master ]
+  pull_request:
     branches: [ master ]
   schedule:
     - cron: "17 3 * * 1"
   workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   parity:
@@ -27,21 +37,86 @@ jobs:
           ref: main
           path: corpus-testers
 
-      - name: Verify shared Unicode detector
+      - name: Confirm every shared source is present
         shell: pwsh
         run: |
-          $ec = Get-Content 'encoding-checker/sources/EncodingChecker/UnicodeDetector.cs' -Raw
-          $len = Get-Content 'line-ending-normalizer/UnicodeDetector.cs' -Raw
-          $corpus = Get-Content 'corpus-testers/CorpusTesting/UnicodeDetector.cs' -Raw
-          $ec = $ec -replace 'namespace EncodingChecker;', 'namespace SharedUnicodeDetector;'
-          $len = $len -replace 'namespace LineEndingNormalizer;', 'namespace SharedUnicodeDetector;'
-          $corpus = $corpus -replace 'namespace CorpusTesting;', 'namespace SharedUnicodeDetector;'
-          $ec = $ec -replace '^using System;\r?\n', ''
-          $len = $len -replace '^using System;\r?\n', ''
-          $corpus = $corpus -replace '^using System;\r?\n', ''
-          $ec = [regex]::Replace($ec, "`r?`n", "`n").TrimStart([char]0xFEFF)
-          $len = [regex]::Replace($len, "`r?`n", "`n").TrimStart([char]0xFEFF)
-          $corpus = [regex]::Replace($corpus, "`r?`n", "`n").TrimStart([char]0xFEFF)
-          if ($ec -cne $len -or $ec -cne $corpus) {
-            throw 'UnicodeDetector.cs differs between EncodingChecker, LineEndingNormalizer, and CorpusTesters. Keep the shared algorithm synchronized; application-specific TextEncoding wrappers may differ.'
+          # A comparison with nothing to compare would pass. Fail first if a path
+          # stops resolving, which is how a rename would otherwise turn this job
+          # into a rubber stamp.
+          $required = @(
+            'encoding-checker/sources/EncodingChecker/UnicodeDetector.cs',
+            'encoding-checker/sources/EncodingChecker/TextValidation.cs',
+            'line-ending-normalizer/UnicodeDetector.cs',
+            'line-ending-normalizer/TextValidation.cs',
+            'corpus-testers/CorpusTesting/UnicodeDetector.cs',
+            'corpus-testers/CorpusTesting/TextValidation.cs'
+          )
+
+          $missing = $required | Where-Object { -not (Test-Path $_) }
+
+          if ($missing) {
+            throw "Expected shared detector sources are missing: $($missing -join ', ')"
+          }
+
+      - name: Verify shared detector sources
+        shell: pwsh
+        run: |
+          # Compares the algorithm, not the file. The namespace, a leading
+          # `using System;` that only EncodingChecker needs, byte-order marks,
+          # line endings, and runs of blank lines are normalized away; anything
+          # else differing is a real divergence.
+          function Get-Normalized([string] $path, [string] $namespace) {
+            # Read as UTF-8 explicitly. These files are a mix of BOM and BOM-less,
+            # and one carries a non-ASCII character in a comment, so a host whose
+            # default is the system codepage silently mangles the BOM-less copy and
+            # reports a difference that is not in the code. A parity check for an
+            # encoding detector should not itself depend on an encoding default.
+            $text = Get-Content $path -Raw -Encoding utf8
+
+            # The byte-order mark goes next, before the `using` line. One copy begins
+            # with a BOM immediately followed by `using System;`, so stripping that
+            # line first would leave it in place wherever the mark survives the read.
+            $text = $text.TrimStart([char]0xFEFF)
+
+            $text = $text -replace "namespace $namespace;", 'namespace SharedDetector;'
+            $text = $text -replace '^using System;\r?\n', ''
+            $text = [regex]::Replace($text, "`r?`n", "`n")
+            $text = [regex]::Replace($text, "`n{3,}", "`n`n")
+            return $text.Trim()
+          }
+
+          $files = @(
+            @{ Name = 'UnicodeDetector.cs'
+               Ec   = 'encoding-checker/sources/EncodingChecker/UnicodeDetector.cs'
+               Len  = 'line-ending-normalizer/UnicodeDetector.cs'
+               Cor  = 'corpus-testers/CorpusTesting/UnicodeDetector.cs' },
+            @{ Name = 'TextValidation.cs'
+               Ec   = 'encoding-checker/sources/EncodingChecker/TextValidation.cs'
+               Len  = 'line-ending-normalizer/TextValidation.cs'
+               Cor  = 'corpus-testers/CorpusTesting/TextValidation.cs' }
+          )
+
+          $divergent = @()
+
+          foreach ($file in $files) {
+            $ec  = Get-Normalized $file.Ec  'EncodingChecker'
+            $len = Get-Normalized $file.Len 'LineEndingNormalizer'
+            $cor = Get-Normalized $file.Cor 'CorpusTesting'
+
+            $mismatch = @()
+            if ($ec -cne $len) { $mismatch += 'LineEndingNormalizer' }
+            if ($ec -cne $cor) { $mismatch += 'CorpusTesters' }
+
+            if ($mismatch.Count -gt 0) {
+              $divergent += "$($file.Name): EncodingChecker differs from $($mismatch -join ' and ')"
+            } else {
+              Write-Host "$($file.Name): identical across all three repositories"
+            }
+          }
+
+          if ($divergent.Count -gt 0) {
+            throw ("Shared detector sources have diverged:`n  " +
+                   ($divergent -join "`n  ") +
+                   "`nKeep the shared algorithm synchronized; application-specific " +
+                   "TextEncoding wrappers may differ.")
           }

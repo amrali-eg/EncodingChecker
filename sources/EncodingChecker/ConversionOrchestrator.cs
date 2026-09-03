@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -51,6 +52,9 @@ internal enum OrchestrationOutcome
 
     /// <summary>The run could not be planned. Nothing was written.</summary>
     CouldNotPlan,
+
+    /// <summary>Stopped after writing began; completed files remain converted.</summary>
+    Interrupted,
 }
 
 /// <summary>The result of a run and the plan shown to the user.</summary>
@@ -71,14 +75,7 @@ internal sealed record OrchestrationResult
 /// <summary>
 /// Decides, confirms, and carries out exactly the confirmed conversion plan.
 /// </summary>
-/// <remarks>
-/// The orchestration is kept separate from the UI so the complete sequence can be tested
-/// independently of any form or event handler.
-/// <para>
-/// Classification and conversion use the same entries. The UI only confirms the decided
-/// plan; it does not perform another detection pass.
-///</para>
-/// </remarks>
+/// <remarks>The UI confirms these decisions; it never detects the files again.</remarks>
 internal sealed class ConversionOrchestrator
 {
     private readonly Func<ConversionPlan, ConfirmationResponse> _confirm;
@@ -122,9 +119,12 @@ internal sealed class ConversionOrchestrator
 
         DateTime startedUtc = DateTime.UtcNow;
 
-        // View is informational. Re-detect the selected automatic-source files while
-        // hashing the same locked bytes, so the plan never combines stale detection with
-        // a newer source hash. Explicit choices are hashed but not detected.
+        // Rows survive between GUI runs; write evidence must not survive with them.
+        foreach (ConversionReportEntry entry in entries)
+            entry.ResetAttemptEvidence();
+
+        // Detection and hashing share one read, so the plan cannot mix different bytes.
+        // Detection still runs for explicit choices to preserve provenance and safety vetoes.
         ScanEngine.RefreshSourceSnapshots(
             entries,
             maxParallelism,
@@ -153,10 +153,7 @@ internal sealed class ConversionOrchestrator
             {
                 plan = ConversionPlan.FromEntries(
                     entries, baseDirectory, targetCharset, targetWriteBom, backup,
-                    explicitSource: entries.All(e => e.SourceEncodingWasSpecified)
-                                    && entries.Count > 0
-                        ? entries[0].EffectiveSourceLabel
-                        : null);
+                    SingleExplicitSource(entries, e => e.EffectiveSourceLabel));
             }
             catch (InvalidOperationException ex)
             {
@@ -220,14 +217,51 @@ internal sealed class ConversionOrchestrator
             // Carry the approved hashes into the write pass to narrow the time-of-check gap.
             BindToPlannedBytes(entries, plan);
 
-            RunPass(
-                entries, targetCharset, targetWriteBom,
-                backup, whatIf: false, maxParallelism, onEntry, cancellationToken);
+            // Callbacks are concurrent, so completion tracking must be thread-safe.
+            var reached = new ConcurrentDictionary<string, byte>(
+                StringComparer.OrdinalIgnoreCase);
 
-            string? explicitSource = entries.All(e => e.SourceEncodingWasSpecified)
-                                     && entries.Count > 0
-                ? entries[0].ResolvedSourceLabel ?? entries[0].EffectiveSourceLabel
-                : null;
+            try
+            {
+                RunPass(
+                    entries, targetCharset, targetWriteBom,
+                    backup, whatIf: false, maxParallelism,
+                    entry =>
+                    {
+                        reached.TryAdd(entry.FilePath, 0);
+                        onEntry(entry);
+                    },
+                    cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                // The preview result remains on files the write pass never reached.
+                foreach (ConversionReportEntry entry in entries)
+                    entry.NotAttempted = !reached.ContainsKey(entry.FilePath);
+
+                return new OrchestrationResult
+                {
+                    Outcome = OrchestrationOutcome.Interrupted,
+                    Plan = plan,
+                    Message =
+                        $"Conversion stopped after processing {reached.Count} of "
+                        + $"{entries.Count} file(s). Completed writes remain in place; "
+                        + "export the journal for details.",
+                    Journal = ConversionJournal.FromRun(
+                        entries,
+                        baseDirectory,
+                        targetCharset,
+                        targetWriteBom,
+                        backup,
+                        SingleExplicitSource(
+                            entries, e => e.ResolvedSourceLabel ?? e.EffectiveSourceLabel),
+                        surface: "Gui",
+                        startedUtc),
+                };
+            }
+
+            string? explicitSource = SingleExplicitSource(
+                entries, e => e.ResolvedSourceLabel ?? e.EffectiveSourceLabel);
 
             return new OrchestrationResult
             {
@@ -244,6 +278,22 @@ internal sealed class ConversionOrchestrator
                     startedUtc),
             };
         }
+    }
+
+    /// <summary>The common explicit source, or null for none or a mixed batch.</summary>
+    private static string? SingleExplicitSource(
+        IReadOnlyList<ConversionReportEntry> entries,
+        Func<ConversionReportEntry, string> label)
+    {
+        if (entries.Count == 0 || !entries.All(e => e.SourceEncodingWasSpecified))
+            return null;
+
+        string[] distinct =
+        [
+            .. entries.Select(label).Distinct(StringComparer.OrdinalIgnoreCase)
+        ];
+
+        return distinct.Length == 1 ? distinct[0] : null;
     }
 
     private static void RunPass(
@@ -265,9 +315,7 @@ internal sealed class ConversionOrchestrator
             onEntry,
             cancellationToken);
 
-    /// <summary>
-    /// Replaces detection with the user's source encoding for the refused files in scope.
-    /// </summary>
+    /// <summary>Uses the chosen source for the refused files in scope.</summary>
     /// <returns><see langword="false"/> when no refused file matched the scope.</returns>
     private static bool ApplyChosenSource(
         string? charset,
@@ -293,7 +341,7 @@ internal sealed class ConversionOrchestrator
             if (scope is not null && !scope.Contains(entry.FilePath))
                 continue;
 
-            // Use the existing source override so conversion reads the chosen encoding.
+            // Detection stays recorded; only the effective source changes.
             entry.CurrentCharsetLabel = charset;
             entry.SourceEncodingWasSpecified = true;
             entry.Diagnostic = null;

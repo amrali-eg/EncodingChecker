@@ -8,10 +8,8 @@ namespace EncodingChecker.Tests;
 ///
 /// A row's entry lives in ListViewItem.Tag and is what OnExportReport writes to CSV,
 /// while the GUI's per-row presentation is driven by whatever entry came back from
-/// processing. Those are normally the same instance, because processing mutates the
-/// entry in place - but ScanEngine.RunParallel substitutes a fresh error entry when a
-/// file throws, and a substitute that never reached Tag would leave the exported CSV
-/// reporting a stale pre-error result for a row the GUI showed as failed.
+/// processing. Processing must mutate that same instance even when a file operation
+/// throws; substituting another entry would leave the CSV reporting stale scan state.
 /// </summary>
 public sealed class ResultEntryReconciliationTests : IDisposable
 {
@@ -217,7 +215,9 @@ public sealed class ResultEntryReconciliationTests : IDisposable
         ConversionReportEntry failsEntry = new()
         {
             FilePath = fails,
-            SourceEncoding = "utf-8",
+            // BOM-less UTF-16 checks open the file before EncodingConverter. This forces
+            // RunParallel's outer exception path rather than the converter's own result.
+            SourceEncoding = "utf-16",
             SourceHasBom = false,
             TargetEncoding = "utf-8",
         };

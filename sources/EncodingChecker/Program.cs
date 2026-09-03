@@ -195,11 +195,14 @@ internal static partial class Program
           -Report <path>                Also write the UTF-8-with-BOM CSV report to a file.
           -Journal <path>               Write a JSON record of the conversion decision and
                                       result for every file. Convert mode only.
-          -Quiet                        Print only the final summary on standard output.
+          -Quiet                        Suppress per-file CSV and normal summaries.
+                                      Errors and coverage warnings still go to stderr.
           -Verbose                      Include error details and a result breakdown.
           -MaxParallelism <N>           Maximum simultaneous files; default is min(CPU count, 4).
           -FailOnChanges                Return exit code 2 if files need conversion (or fail
                                       validation). Useful for CI.
+
+        Plan, apply, report, and journal paths must name different files.
 
         Examples:
 
@@ -218,8 +221,16 @@ internal static partial class Program
         Directories named .git, .svn, .hg, .vs, .idea, bin, obj, node_modules,
         packages, dist, build, and target are always skipped. Matching hidden,
         system, and reparse-point files are not examined. Hidden, system, and
-        reparse-point folders are not entered. Both counts are reported on stderr
-        and are informational; they do not change the exit code.
+        reparse-point folders are not entered.
+
+        Files ending in .bak, .ecmeta.json, or .unicodechecker.tmp are always
+        skipped, as are this command's -Plan, -Journal, and -Report outputs.
+        Those output options cannot use one of the reserved suffixes above.
+        Plans, journals, and reports from earlier runs are not recognized and are
+        scanned like any other file; keep them outside the folder you scan.
+
+        Skipped-file and skipped-folder counts are written to stderr for items your
+        patterns selected. These coverage counts do not change the exit code.
 
         Help: -?, /?, -h, /h, or --help. Version: --version.
 

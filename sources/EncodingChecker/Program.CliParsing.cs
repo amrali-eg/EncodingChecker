@@ -215,6 +215,14 @@ internal static partial class Program
             return false;
         }
 
+        // Later validation treats blank strings as absent. Reject them here so safety
+        // options such as -Plan and -Apply cannot fall through to direct conversion.
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            value = null;
+            return false;
+        }
+
         value = args[++i];
         return true;
     }
@@ -232,22 +240,22 @@ internal static partial class Program
         CliOptions options,
         [NotNullWhen(false)] out string? error)
     {
-        // A filter that fails to parse must not widen the scan. -Include "" and
-        // -Include ",,," both leave no usable pattern, which would otherwise mean
-        // every file - the opposite of what the caller asked for, and dangerous
-        // when the value came from an unset variable in a script.
-        if (options.IncludeSpecified && options.Include.Count == 0)
+        switch (options)
         {
-            error = "-Include was given but contains no usable pattern. Omit "
-                    + "-Include to process every file.";
-            return false;
-        }
-
-        if (options.ExcludeSpecified && options.Exclude.Count == 0)
-        {
-            error = "-Exclude was given but contains no usable pattern. Omit "
-                    + "-Exclude to process every file.";
-            return false;
+            // An empty filter must not widen a scripted scan to every file.
+            case { IncludeSpecified: true, Include.Count: 0 }:
+                error = "-Include was given but contains no usable pattern. Omit "
+                        + "-Include to process every file.";
+                return false;
+            case { ExcludeSpecified: true, Exclude.Count: 0 }:
+                error = "-Exclude was given but contains no usable pattern. Omit "
+                        + "-Exclude to process every file.";
+                return false;
+            // Neither output mode may silently override the other.
+            case { Quiet: true, Verbose: true }:
+                error = "-Quiet and -Verbose ask for opposite amounts of output; "
+                        + "supply only one.";
+                return false;
         }
 
         if (!string.IsNullOrWhiteSpace(options.PlanPath) &&
@@ -257,6 +265,12 @@ internal static partial class Program
                     + "separate runs so the plan can be reviewed in between.";
             return false;
         }
+
+        if (!TryValidateDistinctCommandPaths(options, out error))
+            return false;
+
+        if (!TryValidateOutputSuffixes(options, out error))
+            return false;
 
         if (!string.IsNullOrWhiteSpace(options.ApplyPath))
         {
@@ -369,6 +383,25 @@ internal static partial class Program
             return false;
         }
 
+        // Reject ignored write options so scripts cannot mistake inspection for conversion.
+        if (options.DetectOnly || options.ValidateCharsets is not null)
+        {
+            string mode = options.DetectOnly ? "-DetectOnly" : "-Validate";
+
+            string? ignored =
+                options.Target is not null ? "-Target"
+                : options.WhatIf ? "-WhatIf"
+                : options.Backup ? "-Backup"
+                : null;
+
+            if (ignored is not null)
+            {
+                error = $"{ignored} only affects conversion and cannot be used with "
+                        + $"{mode}, which does not modify files.";
+                return false;
+            }
+        }
+
         if (options.ValidateCharsets is not null &&
             SplitCommaList(options.ValidateCharsets).Count == 0)
         {
@@ -411,6 +444,86 @@ internal static partial class Program
                     : $"'{options.Target}' is not a recognized encoding.";
                 return false;
             }
+        }
+
+        error = null;
+        return true;
+    }
+
+    /// <summary>Prevents command files from silently overwriting one another.</summary>
+    private static bool TryValidateDistinctCommandPaths(
+        CliOptions options,
+        [NotNullWhen(false)] out string? error)
+    {
+        (string Name, string? Path)[] candidates =
+        [
+            ("-Plan", options.PlanPath),
+            ("-Apply", options.ApplyPath),
+            ("-Journal", options.JournalPath),
+            ("-Report", options.ReportPath),
+        ];
+
+        var seen = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach ((string name, string? path) in candidates)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                continue;
+
+            string fullPath;
+
+            try
+            {
+                fullPath = Path.GetFullPath(path);
+            }
+            catch (Exception ex) when (
+                ex is IOException or ArgumentException or NotSupportedException)
+            {
+                error = $"{name} contains an invalid path: {ex.Message}";
+                return false;
+            }
+
+            if (seen.TryGetValue(fullPath, out string? first))
+            {
+                error = $"{first} and {name} resolve to the same file. Use separate paths.";
+                return false;
+            }
+
+            seen.Add(fullPath, name);
+        }
+
+        error = null;
+        return true;
+    }
+
+    /// <summary>Prevents command output from replacing EC recovery artifacts.</summary>
+    private static bool TryValidateOutputSuffixes(
+        CliOptions options,
+        [NotNullWhen(false)] out string? error)
+    {
+        (string Name, string? Path)[] outputs =
+        [
+            ("-Plan", options.PlanPath),
+            ("-Journal", options.JournalPath),
+            ("-Report", options.ReportPath),
+        ];
+
+        foreach ((string name, string? path) in outputs)
+        {
+            if (path is null)
+                continue;
+
+            // Windows removes trailing spaces and periods from ordinary file paths.
+            // Check the resolved name so "file.bak." cannot alias "file.bak".
+            string fullPath = Path.GetFullPath(path);
+
+            if (!DirectoryTraversal.HasReservedArtifactSuffix(fullPath))
+                continue;
+
+            error = $"{name} uses an EC-reserved artifact suffix. "
+                    + "Choose a path that cannot be mistaken for a backup, recovery "
+                    + "record, or temporary conversion file.";
+            return false;
         }
 
         error = null;
