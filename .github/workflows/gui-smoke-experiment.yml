@@ -9,6 +9,12 @@ name: GUI smoke experiment
 
 on:
   workflow_dispatch:
+  # workflow_dispatch alone cannot fire until the file reaches the default
+  # branch, and an unproven experiment does not belong there. Scoped to this
+  # branch so it runs where it lives.
+  push:
+    branches:
+      - experiment/ci-ui-automation
 
 jobs:
   probe:
