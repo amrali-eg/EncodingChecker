@@ -17,9 +17,9 @@ using System.Runtime.Versioning;
 [assembly: AssemblyTitle("File Encoding Checker")]
 [assembly: AssemblyDescription("GUI tool to check the encoding of a text file")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("Jeevan James")]
+[assembly: AssemblyCompany("Amr Ali")]
 [assembly: AssemblyProduct("File Encoding Checker")]
-[assembly: AssemblyCopyright("Copyright © Jeevan James 2020")]
+[assembly: AssemblyCopyright("Copyright © Jeevan James 2020, Amr Ali 2026")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
@@ -41,5 +41,5 @@ using System.Runtime.Versioning;
 // You can specify all the values, or you can default the Build and Revision Numbers
 // by using the '*' as shown below:
 // [assembly: AssemblyVersion("1.0.*")]
-[assembly: AssemblyVersion("3.11.0.0")]
-[assembly: AssemblyFileVersion("3.11.0.0")]
+[assembly: AssemblyVersion("3.11.1.0")]
+[assembly: AssemblyFileVersion("3.11.1.0")]

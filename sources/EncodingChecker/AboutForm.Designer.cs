@@ -107,7 +107,7 @@ partial class AboutForm
         this.lblAuthor.Size = new System.Drawing.Size(131, 18);
         this.lblAuthor.TabIndex = 3;
         this.lblAuthor.TabStop = true;
-        this.lblAuthor.Text = "Created by Jeevan James";
+        this.lblAuthor.Text = "Created by Jeevan James · Maintained by Amr Ali";
         this.lblAuthor.UseCompatibleTextRendering = true;
         this.lblAuthor.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.OnLinkClicked);
         // 
@@ -120,20 +120,20 @@ partial class AboutForm
         this.lblLicense.Size = new System.Drawing.Size(229, 18);
         this.lblLicense.TabIndex = 4;
         this.lblLicense.TabStop = true;
-        this.lblLicense.Text = "Licensed under the Mozilla Public License 1.1";
+        this.lblLicense.Text = "Licensed under the Mozilla Public License 2.0";
         this.lblLicense.UseCompatibleTextRendering = true;
         this.lblLicense.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.OnLinkClicked);
         // 
         // lblCreditsUde
         // 
         this.lblCreditsUde.AutoSize = true;
-        this.lblCreditsUde.LinkArea = new System.Windows.Forms.LinkArea(0, 3);
+        this.lblCreditsUde.LinkArea = new System.Windows.Forms.LinkArea(0, 10);
         this.lblCreditsUde.Location = new System.Drawing.Point(25, 148);
         this.lblCreditsUde.Name = "lblCreditsUde";
         this.lblCreditsUde.Size = new System.Drawing.Size(265, 18);
         this.lblCreditsUde.TabIndex = 6;
         this.lblCreditsUde.TabStop = true;
-        this.lblCreditsUde.Text = "ude, a C# port of Mozilla Universal Charset Detector";
+        this.lblCreditsUde.Text = "UtfUnknown, a C# port of uchardet";
         this.lblCreditsUde.UseCompatibleTextRendering = true;
         this.lblCreditsUde.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.OnLinkClicked);
         // 

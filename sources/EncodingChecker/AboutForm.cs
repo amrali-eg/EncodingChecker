@@ -22,7 +22,7 @@ public partial class AboutForm : Form
         lblAuthor.Links[0].LinkData = "https://github.com/JeevanJames";
         lblLicense.Links[0].LinkData = "https://www.mozilla.org/en-US/MPL/2.0/";
         lblCreditsUde.Links[0].LinkData = "https://github.com/CharsetDetector/UTF-unknown";
-        lblCreditsCodePlex.Links[0].LinkData = "http://encodingchecker.codeplex.com";
+        lblCreditsCodePlex.Links[0].LinkData = "https://archive.codeplex.com/?p=encodingchecker";
     }
 
     private void OnLinkClicked(object? sender, LinkLabelLinkClickedEventArgs e)

@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -168,9 +169,14 @@ internal sealed record ConversionJournal
             .OrderBy(group => group.Key, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Count());
 
+    // These files exist to be read by a person recovering from a bad run. The
+    // default encoder escapes every non-ASCII character, which turns the text EC
+    // exists to handle into \uXXXX. Relaxed escaping is safe here because none of
+    // this JSON is ever embedded in HTML.
     private static readonly JsonSerializerOptions Options = new()
     {
         WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
     /// <summary>Builds a journal from the results of one run.</summary>

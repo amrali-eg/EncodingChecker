@@ -92,8 +92,8 @@ could have gone red.
 
 The driver finds the review dialog's controls by automation id, and those ids were
 added by the same change that added this suite. **No release up to and including
-v3.11.0 carries them**, so no published binary can be driven by it today; the first
-testable release is whatever ships next.
+v3.11.0 carries them**, so none of those can be driven by it. **v3.11.1 is the first
+release the suite can run against.**
 
 A preflight check enforces this. It opens one review, looks for the five ids, and if
 none are present refuses with exit `2` and says so.
