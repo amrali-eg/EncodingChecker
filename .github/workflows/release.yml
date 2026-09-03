@@ -104,6 +104,32 @@ jobs:
             Remove-Item $certPath -Force -ErrorAction SilentlyContinue
           }
 
+      # Drives the signed, published executable rather than a build of the same
+      # commit, so what is verified is the bytes that ship. A failure here fails
+      # the job, and no release is created.
+      #
+      # It is placed after signing because signing rewrites the file: verifying
+      # the unsigned one would leave the shipped binary undriven.
+      - name: Drive the GUI smoke suite
+        shell: pwsh
+        run: |
+          $app = "sources\EncodingChecker\bin\Release\net10.0-windows\publish\win-x64\EncodingChecker.exe"
+          $suite = "sources\EncodingChecker.GuiSmoke\bin\Release\net10.0-windows\EncodingChecker.GuiSmoke.exe"
+
+          & $suite --app $app --output "$env:RUNNER_TEMP\gui-smoke"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "GUI smoke suite failed with exit code $LASTEXITCODE; no release will be published."
+          }
+
+      - name: Keep the GUI smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-smoke-evidence
+          path: ${{ runner.temp }}/gui-smoke
+          if-no-files-found: error
+
       - name: Package
         shell: pwsh
         run: |

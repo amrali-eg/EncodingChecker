@@ -120,5 +120,11 @@ exits `0`, because every phase in an empty set passes. The evidence the run uplo
 is what settles it: one phase recorded, `A`, with five files hashed before and five
 after. Read the artifact, not the tick.
 
-The suite is still run locally before tagging. Making it a release gate is a change
-to what blocks a release and has not been made yet.
+**It now gates the release.** `release.yml` runs all nine phases against the signed,
+published executable, after signing and before packaging, so what is verified is the
+bytes that ship rather than a rebuild of the same commit. A failure fails the job and
+no release is created. The report is uploaded as a `gui-smoke-evidence` artifact.
+
+It does not run on every push. A GUI regression is caught at release time, which is
+late for a contributor and early enough for a user — moving it earlier is a separate
+decision about what every pull request should pay for.

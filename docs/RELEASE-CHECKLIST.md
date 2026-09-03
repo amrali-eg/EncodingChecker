@@ -61,11 +61,16 @@ before and after file hashes.
 
 **[What each of the nine phases proves, and what it would catch →](GUI-SMOKE-TEST.md)**
 
+**The release workflow runs this for you, and a failure stops the release.** It drives
+the signed, published executable — the bytes that ship, not a rebuild of the same
+commit — after signing and before packaging, and uploads the report as a
+`gui-smoke-evidence` artifact. Run it locally while developing; before tagging, you no
+longer have to remember to.
+
 Two prerequisites, each refused with exit 2 rather than reported as a pass: an
-interactive Windows desktop, and a build carrying the review dialog's automation ids
-— no release up to and including v3.11.0 has them. A hosted `windows-latest` runner
-does provide such a desktop, confirmed by driving a phase on one, so this can become
-a CI gate; until it is wired up, run it locally before tagging.
+interactive Windows desktop, which a hosted `windows-latest` runner provides, and a
+build carrying the review dialog's automation ids — no release up to and including
+v3.11.0 has them.
 
 Status messages are never evidence on their own. Every phase checks files, and phase I
 checks the status line *against* the bytes on disk rather than trusting it.
