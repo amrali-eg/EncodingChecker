@@ -107,7 +107,7 @@ partial class AboutForm
         this.lblAuthor.Size = new System.Drawing.Size(131, 18);
         this.lblAuthor.TabIndex = 3;
         this.lblAuthor.TabStop = true;
-        this.lblAuthor.Text = "Created by Jeevan James";
+        this.lblAuthor.Text = "Created by Jeevan James · Maintained by Amr Ali";
         this.lblAuthor.UseCompatibleTextRendering = true;
         this.lblAuthor.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.OnLinkClicked);
         // 
