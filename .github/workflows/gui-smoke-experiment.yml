@@ -1,0 +1,75 @@
+name: GUI smoke experiment
+
+# Answers one open question: whether a GitHub-hosted Windows runner gives UI
+# Automation an interactive window station. Until that is known the GUI smoke
+# suite is a local gate run before tagging.
+#
+# Manual only, and deliberately not wired into CI or release. It is an
+# experiment, and an experiment must not be able to fail a release.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      # Recorded before the suite runs, because the suite's own guard refuses a
+      # non-interactive session. Without this line an exit 2 would not say
+      # whether the runner lacks a desktop or something else went wrong.
+      - name: Describe the session
+        shell: pwsh
+        run: |
+          "UserInteractive : $([Environment]::UserInteractive)"
+          "OSVersion       : $([Environment]::OSVersion.VersionString)"
+          "SESSIONNAME     : $env:SESSIONNAME"
+          "USERNAME        : $env:USERNAME"
+
+      - name: Build
+        run: dotnet build sources\EncodingChecker.sln --configuration Release
+
+      # One phase, not nine. Phase A opens the review, cancels it, and checks
+      # that nothing on disk changed - enough to prove a window can be found and
+      # driven, without spending ten minutes to learn it.
+      - name: Drive one phase
+        id: phase
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $exe = "sources\EncodingChecker.GuiSmoke\bin\Release\net10.0-windows\EncodingChecker.GuiSmoke.exe"
+          & $exe --phase A --output "$env:RUNNER_TEMP\gui-smoke" --keep-workspace
+          $code = $LASTEXITCODE
+          "exit=$code"
+          "code=$code" >> $env:GITHUB_OUTPUT
+
+      - name: What the exit code means
+        if: always()
+        shell: pwsh
+        run: |
+          $code = "${{ steps.phase.outputs.code }}"
+          $verdict = switch ($code) {
+            "0" { "UI Automation WORKS on a hosted runner. The suite can become a CI gate." }
+            "1" { "The suite ran and the phase failed. UI Automation reached the window; something else is wrong. Read the artifact." }
+            "2" { "Refused before driving anything. Check UserInteractive above: false means no interactive session, true means a different environment problem." }
+            default { "Unexpected exit '$code'. Read the log." }
+          }
+          "exit code : $code"
+          "verdict   : $verdict"
+          "## GUI smoke on a hosted runner" >> $env:GITHUB_STEP_SUMMARY
+          "" >> $env:GITHUB_STEP_SUMMARY
+          "**exit $code** - $verdict" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-smoke-evidence
+          path: ${{ runner.temp }}/gui-smoke
+          if-no-files-found: warn
