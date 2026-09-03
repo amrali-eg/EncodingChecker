@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EncodingChecker", "Encoding
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EncodingChecker.Tests", "EncodingChecker.Tests\EncodingChecker.Tests.csproj", "{9C5FADFF-A7FF-409A-8AD7-8C92E17D3CD4}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EncodingChecker.GuiSmoke", "EncodingChecker.GuiSmoke\EncodingChecker.GuiSmoke.csproj", "{E5237993-8443-4DCB-87A7-586C8E112BA2}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -41,6 +43,18 @@ Global
 		{9C5FADFF-A7FF-409A-8AD7-8C92E17D3CD4}.Release|x64.Build.0 = Release|Any CPU
 		{9C5FADFF-A7FF-409A-8AD7-8C92E17D3CD4}.Release|x86.ActiveCfg = Release|Any CPU
 		{9C5FADFF-A7FF-409A-8AD7-8C92E17D3CD4}.Release|x86.Build.0 = Release|Any CPU
+		{E5237993-8443-4DCB-87A7-586C8E112BA2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E5237993-8443-4DCB-87A7-586C8E112BA2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E5237993-8443-4DCB-87A7-586C8E112BA2}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{E5237993-8443-4DCB-87A7-586C8E112BA2}.Debug|x64.Build.0 = Debug|Any CPU
+		{E5237993-8443-4DCB-87A7-586C8E112BA2}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{E5237993-8443-4DCB-87A7-586C8E112BA2}.Debug|x86.Build.0 = Debug|Any CPU
+		{E5237993-8443-4DCB-87A7-586C8E112BA2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E5237993-8443-4DCB-87A7-586C8E112BA2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E5237993-8443-4DCB-87A7-586C8E112BA2}.Release|x64.ActiveCfg = Release|Any CPU
+		{E5237993-8443-4DCB-87A7-586C8E112BA2}.Release|x64.Build.0 = Release|Any CPU
+		{E5237993-8443-4DCB-87A7-586C8E112BA2}.Release|x86.ActiveCfg = Release|Any CPU
+		{E5237993-8443-4DCB-87A7-586C8E112BA2}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

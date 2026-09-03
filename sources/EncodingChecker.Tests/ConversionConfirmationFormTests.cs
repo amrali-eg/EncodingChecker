@@ -110,6 +110,26 @@ public sealed class ConversionConfirmationFormTests : IDisposable
         });
     }
 
+    [Fact]
+    public void InteractiveControlsExposeStableAutomationIds()
+    {
+        Write("legacy.txt", "Le café était déjà prêt", "windows-1252");
+        ConversionPlan plan = Plan();
+
+        UiTest.OnStaThread(() =>
+        {
+            using var form = new ConversionConfirmationForm(plan);
+            string[] names = [.. Descendants(form).Select(control => control.Name)];
+
+            Assert.Equal("ConversionConfirmationForm", form.Name);
+            Assert.Contains("lstRefusedFiles", names);
+            Assert.Contains("lstSourceEncoding", names);
+            Assert.Contains("btnConfirmSourceEncoding", names);
+            Assert.Contains("btnCancelConversionReview", names);
+            Assert.Contains("btnProceedConversion", names);
+        });
+    }
+
     /// <summary>
     /// One planned file carrying the given BOM-less advisory reason code.
     /// </summary>
