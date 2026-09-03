@@ -127,13 +127,13 @@ partial class AboutForm
         // lblCreditsUde
         // 
         this.lblCreditsUde.AutoSize = true;
-        this.lblCreditsUde.LinkArea = new System.Windows.Forms.LinkArea(0, 3);
+        this.lblCreditsUde.LinkArea = new System.Windows.Forms.LinkArea(0, 10);
         this.lblCreditsUde.Location = new System.Drawing.Point(25, 148);
         this.lblCreditsUde.Name = "lblCreditsUde";
         this.lblCreditsUde.Size = new System.Drawing.Size(265, 18);
         this.lblCreditsUde.TabIndex = 6;
         this.lblCreditsUde.TabStop = true;
-        this.lblCreditsUde.Text = "ude, a C# port of Mozilla Universal Charset Detector";
+        this.lblCreditsUde.Text = "UtfUnknown, a C# port of uchardet";
         this.lblCreditsUde.UseCompatibleTextRendering = true;
         this.lblCreditsUde.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.OnLinkClicked);
         // 

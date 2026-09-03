@@ -1,7 +1,7 @@
 # EncodingChecker v3.11.1
 
-A readability fix for the three files EC writes to be read by a person, plus a
-guard on the GUI smoke test.
+A readability fix for the three files EC writes to be read by a person, a guard on
+the GUI smoke test, and corrections to what the About box claims.
 
 ## Recovery files keep their names
 
@@ -34,6 +34,28 @@ the real cause was a control it could not see.
 
 It now checks once, up front, and exits 2 saying so. **v3.11.1 is the first
 release the suite can run against**; no earlier one carries the ids.
+
+## About box and attribution
+
+Four statements in the About box or the assembly were wrong or out of date.
+
+- **The licence.** It said Mozilla Public License **1.1**. The project ships
+  **2.0** — that is what `LICENSE` contains, what the README links, and what the
+  label's own click target already opened. Only the words a reader saw were wrong.
+- **The detector credit.** It named `ude` while linking to UtfUnknown, the
+  library actually in use. It now names UtfUnknown.
+- **The CodePlex link.** It pointed at `encodingchecker.codeplex.com`, which no
+  longer resolves — CodePlex shut down. It now points at the archive, as the
+  README does.
+- **Attribution.** `AssemblyCompany` names the current maintainer, and the About
+  box records both the original author and the maintainer. The copyright notice
+  adds the maintainer beside the original author rather than replacing him; MPL
+  2.0 section 3.4 forbids removing a copyright notice from covered source, and
+  permits altering a notice only to remedy a factual inaccuracy, which is what
+  the licence-version fix above is.
+
+`THIRD-PARTY-NOTICES.txt` still says MPL 1.1 and is correct: that describes
+UtfUnknown's own licence, not this project's.
 
 ## Compatibility
 
