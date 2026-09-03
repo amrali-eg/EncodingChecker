@@ -326,6 +326,50 @@ The wording above also said the advisory was something no automated test could o
 - EC's journal, plan and recovery sidecar escape every non-ASCII character to `\uXXXX`. This is valid JSON that round-trips exactly, so nothing is lost or misstated, but these are records meant to be read by a person and EC's domain is non-ASCII text. Deferred to v3.11.1 rather than changing three writers after the audit had run.
 - The recovery sidecar's `SourceTextSha256` and `OutputTextSha256` now come from two separate measurements rather than one value written twice. No test can tell the difference, because verification has already established the two are equal; a mutation copying the source digest back into the field passes the whole suite. That was confirmed rather than assumed. The fallback was replaced with a throw, so a silent revert is impossible.
 
+### v3.11.1 — `883cf1f2ef019845043d03b87e7a9a458cc07e85`, not re-audited
+
+A readability and correctness release for what EC *says*, not what it converts. **It was not measured against the four corpora.** The checklist requires a corpus run for a release that changes detection or conversion policy; this changes neither, so no audited build exists and no assembly hash is quoted. The v3.11.0 figures above are not evidence about this release.
+
+The published archives:
+
+```
+EncodingChecker-3.11.1-framework-dependent.zip
+  825ed4f695e803f2de0bc0defdea2abbb123a1199f3d87aa64c1b4462b6e43cf
+EncodingChecker-3.11.1-win-x64-self-contained.zip
+  c787072019b4d12bcbb7dfd5d5a7f01e17a49a42efafef05d4ef630acece8abd
+```
+
+#### What changed in v3.11.1
+
+| | |
+|---|---|
+| The journal, plan, and recovery sidecar | Wrote every non-ASCII character and every apostrophe as `\uXXXX`. A recovery record for a Japanese or Arabic filename could not spell it. |
+| The About box | Claimed MPL 1.1 while the project ships 2.0; credited `ude` while linking the library actually used; linked a CodePlex domain that no longer resolves. |
+| Attribution | `AssemblyCompany` names the current maintainer. The copyright notice adds him beside the original author rather than replacing him, which MPL 2.0 §3.4 requires. |
+| The GUI smoke suite | Refuses a build without the review dialog's automation ids instead of running every phase and reporting the absence as a fault in EC. |
+
+None of this alters a converted file. Conversion semantics stay at 6, the plan schema at 5, the journal schema at 4, and v3.11.0 artifacts still load.
+
+#### What was verified, and by what control
+
+Verified on the tagged commit: CI and the shared-detector parity job both pass, and parity is checked *inside* the release job rather than asserted — `UnicodeDetector.cs` and `TextValidation.cs` were confirmed identical across all three repositories at the commit being released. The full suite passes 637/637 with none skipped and no warnings, and the workflow independently asserts the built `--version` matches the tag.
+
+The three new tests assert on each file's raw bytes rather than a deserialized value. That distinction is the whole point: the escaped JSON was always valid and always round-tripped, so a test that deserialized would have passed against the defect. Each was mutation-checked — with the encoder line removed all three fail, and the files were restored byte-identical.
+
+The smoke suite's new refusal was checked in both directions, because a guard only ever seen to stay quiet has not been shown to work: against the published v3.11.0 executable it exits 2 without running a phase, and against this build all nine phases still pass.
+
+#### The GUI smoke test
+
+Nine phases pass against the Release build, with `EcVersion 3.11.1.0` recorded in the evidence, so the report names the build it drove. Phase I converted 36 of 400 files before the cancellation landed, which is what distinguishes a genuine interruption from a run that finished first — the phase passes either way, so the count, not the result, is the evidence.
+
+**This is the first release the suite can run against.** The automation ids it drives were added after v3.11.0 was tagged, so no earlier release can be driven by it, and none was.
+
+#### Known limits specific to this release
+
+- **No corpus measurement backs this release.** The v3.11.0 result establishes that the conversion engine was undisturbed *as of that commit*; it says nothing about this one. What supports v3.11.1 is the unit suite, the GUI suite, and the parity check — not a measurement over 5,078 files.
+- **The GUI suite ran locally, not in CI.** Whether a GitHub-hosted Windows runner gives UI Automation an interactive window station is still unestablished, so this gate depends on a person running it before tagging.
+- **The About box was verified by reading it, not by a test.** No automated check asserts its wording, and each corrected label is a `LinkLabel` whose clickable span is a character range: a later text edit can move a link onto the wrong words without failing anything.
+
 ## Known limits
 
 - No detector can recover an author's historical legacy encoding when the same bytes admit multiple plausible readings. EC refuses automatic legacy conversion instead of guessing.
