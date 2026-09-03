@@ -63,8 +63,9 @@ before and after file hashes.
 
 Two prerequisites, each refused with exit 2 rather than reported as a pass: an
 interactive Windows desktop, and a build carrying the review dialog's automation ids
-— no release up to and including v3.11.0 has them. Whether a GitHub-hosted runner
-provides such a desktop is not yet established, so run this locally before tagging.
+— no release up to and including v3.11.0 has them. A hosted `windows-latest` runner
+does provide such a desktop, confirmed by driving a phase on one, so this can become
+a CI gate; until it is wired up, run it locally before tagging.
 
 Status messages are never evidence on their own. Every phase checks files, and phase I
 checks the status line *against* the bytes on disk rather than trusting it.

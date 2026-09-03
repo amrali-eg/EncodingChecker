@@ -111,6 +111,14 @@ An interactive Windows desktop. UI Automation cannot drive a window that no sess
 owns, so the runner refuses to start with exit `2` rather than reporting a pass it did
 not earn.
 
-Whether a GitHub-hosted Windows runner provides such a session is **not yet
-established**. Until it is, this is a local gate run before tagging, and the manual
-procedure it replaces is recorded in this file's history rather than in the checklist.
+A GitHub-hosted `windows-latest` runner **does** provide one. Measured, not assumed:
+`Environment.UserInteractive` is `True` under the `runneradmin` account, and phase A
+opened the review, cancelled it, and verified the bytes on disk.
+
+The exit code alone would not have shown that. A `--phase` matching nothing also
+exits `0`, because every phase in an empty set passes. The evidence the run uploaded
+is what settles it: one phase recorded, `A`, with five files hashed before and five
+after. Read the artifact, not the tick.
+
+The suite is still run locally before tagging. Making it a release gate is a change
+to what blocks a release and has not been made yet.
