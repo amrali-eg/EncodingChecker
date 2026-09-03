@@ -61,6 +61,11 @@ internal static class Program
             Console.WriteLine($"Evidence: {options.Output}");
             return report.Passed ? 0 : 1;
         }
+        catch (IncompatibleBuildException ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return 2;
+        }
         catch (ArgumentException ex)
         {
             Console.Error.WriteLine(ex.Message);
