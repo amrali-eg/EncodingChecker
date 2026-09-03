@@ -120,6 +120,26 @@ public sealed class ConversionPlanTests : IDisposable
     }
 
     [Fact]
+    public void ThePlanKeepsNonAsciiNamesAndApostrophesReadable()
+    {
+        Write("日本語のファイル.txt", "こんにちは世界。", "shift_jis");
+        Write("ملف-عربي.txt", "مرحبا بالعالم", "utf-8");
+        Write("it's-a-file.txt", "plain ascii", "us-ascii");
+
+        Assert.Equal(0, Plan("-From", "shift_jis"));
+
+    // A plan is reviewed before it is applied, which is impossible if the paths in it
+    // are \uXXXX. Asserted on the file's own bytes, since deserializing hides the
+    // difference.
+        string json = File.ReadAllText(PlanPath);
+
+        Assert.Contains("日本語のファイル.txt", json, StringComparison.Ordinal);
+        Assert.Contains("ملف-عربي.txt", json, StringComparison.Ordinal);
+        Assert.Contains("it's-a-file.txt", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\\u", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PlanningWritesNothing()
     {
         // The one thing a dry run must never do.

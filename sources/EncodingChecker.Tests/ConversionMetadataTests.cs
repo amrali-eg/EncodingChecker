@@ -59,6 +59,24 @@ public sealed class ConversionMetadataTests : IDisposable
     }
 
     [Fact]
+    public void TheSidecarKeepsNonAsciiNamesAndApostrophesReadable()
+    {
+        string path = Convert(
+            "عربي-l'été.txt", "café — naïve", "windows-1252", "utf-8");
+
+    // These files are read by a person recovering from a bad run, so the names have to
+    // survive as names. The default encoder escapes every non-ASCII character and the
+    // apostrophe too, turning the text EC exists to convert into \uXXXX.
+    //
+    // The assertion is on the raw bytes on disk, not on a deserialized value: the round
+    // trip succeeds either way, so only the file itself shows whether it is readable.
+        string json = File.ReadAllText(ConversionMetadataStore.MetadataPathFor(path));
+
+        Assert.Contains("عربي-l'été.txt", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\\u", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AConversionWithBackupWritesASidecarDescribingIt()
     {
         string path = Convert("described.txt", "café — naïve", "windows-1252", "utf-8");

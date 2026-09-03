@@ -85,6 +85,29 @@ public sealed class ConversionJournalTests : IDisposable
         ]);
 
     [Fact]
+    public void TheJournalKeepsNonAsciiNamesAndApostrophesReadable()
+    {
+        Write("日本語のファイル.txt", "こんにちは世界。", "utf-8");
+        Write("ملف-عربي.txt", "مرحبا بالعالم", "utf-8");
+        Write("it's-a-file.txt", "plain ascii", "utf-8");
+
+        Assert.Equal(0, Convert("-From", "utf-8"));
+
+    // These files are read by a person recovering from a bad run, so the names have to
+    // survive as names. The default encoder escapes every non-ASCII character and the
+    // apostrophe too, turning the text EC exists to convert into \uXXXX.
+    //
+    // The assertion is on the raw bytes on disk, not on a deserialized value: the round
+    // trip succeeds either way, so only the file itself shows whether it is readable.
+        string json = File.ReadAllText(JournalPath);
+
+        Assert.Contains("日本語のファイル.txt", json, StringComparison.Ordinal);
+        Assert.Contains("ملف-عربي.txt", json, StringComparison.Ordinal);
+        Assert.Contains("it's-a-file.txt", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\\u", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ItRecordsWhatWasBelievedDecidedAndWritten()
     {
         const string text = "こんにちは世界。日本語のテキストです。";

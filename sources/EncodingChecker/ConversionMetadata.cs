@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -142,9 +143,14 @@ internal static class ConversionMetadataStore
 {
     internal const string Suffix = ".ecmeta.json";
 
+    // These files exist to be read by a person recovering from a bad run. The
+    // default encoder escapes every non-ASCII character, which turns the text EC
+    // exists to handle into \uXXXX. Relaxed escaping is safe here because none of
+    // this JSON is ever embedded in HTML.
     private static readonly JsonSerializerOptions Options = new()
     {
         WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
     internal static string MetadataPathFor(string filePath) => filePath + Suffix;
