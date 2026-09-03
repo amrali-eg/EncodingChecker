@@ -1,6 +1,6 @@
 # The GUI smoke test
 
-Nine phases that drive the built `EncodingChecker.exe` through Windows UI Automation
+Nine phases that drive a built `EncodingChecker.exe` through Windows UI Automation
 and check the bytes it leaves behind. Every phase creates its own disposable folder,
 performs a real sequence in the real window, and then verifies files — never status
 messages.
@@ -17,8 +17,8 @@ sources/EncodingChecker.GuiSmoke/bin/Release/net10.0-windows/EncodingChecker.Gui
 --keep-workspace      keep the fixtures even when the run passes
 ```
 
-Exit `0` when every phase passes, `1` when one fails, `2` for a usage or environment
-problem. Each run writes `gui-smoke-report.json` and `gui-smoke-report.md` carrying the
+Exit `0` when every phase passes, `1` when one fails, `2` for a usage, environment, or
+build-compatibility problem. Each run writes `gui-smoke-report.json` and `gui-smoke-report.md` carrying the
 EC version, the executable and managed-assembly SHA-256, the OS and .NET versions, and
 each phase's before and after file hashes.
 
@@ -87,6 +87,23 @@ could have gone red.
   layouts only, because it needs a real display change.
 - **The journal export dialog.** Phase I checks the status line and the bytes; the
   exported file's contents are reconciled by `InterruptedRunJournalTests` instead.
+
+## Which builds it can drive
+
+The driver finds the review dialog's controls by automation id, and those ids were
+added by the same change that added this suite. **No release up to and including
+v3.11.0 carries them**, so no published binary can be driven by it today; the first
+testable release is whatever ships next.
+
+A preflight check enforces this. It opens one review, looks for the five ids, and if
+none are present refuses with exit `2` and says so.
+
+This exists because the failure was worse than useless without it. Pointed at v3.11.0
+the suite ran every phase and reported, first line, that *the mixed review did not offer
+a source-encoding choice* — which reads as a conversion-safety regression in EC. The
+control was there; the suite could not see it. A harness that cannot tell "the control
+is absent" from "the behaviour is absent" reports the wrong defect, in the alarming
+direction, about the wrong component.
 
 ## Requirements
 

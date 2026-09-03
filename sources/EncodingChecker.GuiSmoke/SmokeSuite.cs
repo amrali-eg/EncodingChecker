@@ -5,6 +5,12 @@ using System.Text.Json;
 
 namespace EncodingChecker.GuiSmoke;
 
+/// <summary>
+/// The build under test predates the review dialog's automation ids, so the suite
+/// cannot drive it at all.
+/// </summary>
+internal sealed class IncompatibleBuildException(string message) : Exception(message);
+
 internal sealed record SmokePhaseResult(
     string Id,
     string Name,
@@ -49,6 +55,8 @@ internal sealed class SmokeSuite
     internal SmokeReport Run(string? onlyPhase = null)
     {
         string started = DateTime.UtcNow.ToString("O");
+
+        Preflight();
 
         RunIf("A", "Review cancellation changes nothing", PhaseA);
         RunIf("B", "Unicode and ASCII convert automatically", PhaseB);
@@ -107,6 +115,44 @@ internal sealed class SmokeSuite
 
         if (!passed)
             Console.Error.WriteLine(error);
+    }
+
+    /// <summary>Ids the review dialog has carried since they were introduced.</summary>
+    private static readonly string[] ReviewAutomationIds =
+    [
+        "btnProceedConversion",
+        "btnCancelConversionReview",
+        "btnConfirmSourceEncoding",
+        "lstSourceEncoding",
+        "lstRefusedFiles",
+    ];
+
+    /// <summary>
+    /// Refuses a build whose review dialog has no automation ids. Without this the
+    /// phases still run, and report the absence as a finding about EC: phase A says the
+    /// review offered no source-encoding choice, which reads as a conversion-safety
+    /// regression rather than a suite that cannot see the control. All five ids arrived
+    /// in one commit, so any one of them present means the build is drivable.
+    /// </summary>
+    private void Preflight()
+    {
+        string directory = Path.Combine(_workspace, "preflight");
+        Directory.CreateDirectory(directory);
+        Write(directory, "french.txt", "Prix: 100€ pour le café", CodePage("windows-1252"));
+
+        using var gui = new EcGuiDriver(_app);
+        System.Windows.Automation.AutomationElement review = gui.OpenReview(directory, 1);
+
+        if (!ReviewAutomationIds.Any(id => gui.ReviewContainsControl(review, id)))
+        {
+            throw new IncompatibleBuildException(
+                $"{_app} predates the review dialog's automation ids, so the suite "
+                + "cannot drive it. Run against a build that contains them; every "
+                + "release up to and including v3.11.0 does not.");
+        }
+
+        gui.CancelReview(review);
+        Directory.Delete(directory, recursive: true);
     }
 
     private void PhaseA(PhaseContext phase)

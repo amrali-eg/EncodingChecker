@@ -61,9 +61,10 @@ before and after file hashes.
 
 **[What each of the nine phases proves, and what it would catch →](GUI-SMOKE-TEST.md)**
 
-An interactive Windows desktop is required; the runner exits 2 rather than reporting a
-pass it did not earn. Whether a GitHub-hosted runner provides one is not yet
-established, so run this locally before tagging.
+Two prerequisites, each refused with exit 2 rather than reported as a pass: an
+interactive Windows desktop, and a build carrying the review dialog's automation ids
+— no release up to and including v3.11.0 has them. Whether a GitHub-hosted runner
+provides such a desktop is not yet established, so run this locally before tagging.
 
 Status messages are never evidence on their own. Every phase checks files, and phase I
 checks the status line *against* the bytes on disk rather than trusting it.
