@@ -5,6 +5,10 @@ on:
     tags:
       - "v*"
 
+  # A rehearsal. Runs every step a real release runs except the publish, so a
+  # change to this file can be proven before a tag depends on it.
+  workflow_dispatch:
+
 permissions:
   contents: write
 
@@ -29,7 +33,39 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      # One step decides what version this run is for, so nothing later has to
+      # reason about whether a tag exists.
+      - name: Resolve the version under test
+        id: version
+        shell: pwsh
+        run: |
+          $isTag = "${{ github.ref }}".StartsWith("refs/tags/")
+
+          if ($isTag) {
+            $resolved = "${{ github.ref_name }}" -replace '^v', ''
+          }
+          else {
+            $assemblyInfo =
+              Get-Content "sources\EncodingChecker\Properties\AssemblyInfo.cs" -Raw
+            $pattern = '(?m)^\s*\[assembly:\s*AssemblyVersion\("(?<version>[^"]+)"\)\]'
+            $match = [regex]::Match($assemblyInfo, $pattern)
+
+            if (-not $match.Success) {
+              throw "Could not find [AssemblyVersion] in AssemblyInfo.cs."
+            }
+
+            $parsed = [Version]$match.Groups['version'].Value
+            $resolved = "$($parsed.Major).$($parsed.Minor).$([Math]::Max($parsed.Build, 0))"
+          }
+
+          "version=$resolved" >> $env:GITHUB_OUTPUT
+          "is_tag=$($isTag.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          "version=$resolved  is_tag=$isTag"
+
+      # Exists only to catch a tag that disagrees with the source, so it has
+      # nothing to check when there is no tag.
       - name: Verify release version
+        if: steps.version.outputs.is_tag == 'true'
         shell: pwsh
         run: |
           $tagVersion = "${{ github.ref_name }}" -replace '^v', ''
@@ -60,7 +96,7 @@ jobs:
       - name: Verify built display version
         shell: pwsh
         run: |
-          $expected = "${{ github.ref_name }}" -replace '^v', ''
+          $expected = "${{ steps.version.outputs.version }}"
           $actual = (& dotnet "sources\EncodingChecker\bin\Release\net10.0-windows\EncodingChecker.dll" --version).Trim()
 
           if ($LASTEXITCODE -ne 0) {
@@ -133,11 +169,15 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          $version = "${{ github.ref_name }}" -replace '^v', ''
+          $version = "${{ steps.version.outputs.version }}"
           Compress-Archive -Path "sources\EncodingChecker\bin\Release\net10.0-windows\publish\win-x64\*" -DestinationPath "EncodingChecker-$version-framework-dependent.zip"
           Compress-Archive -Path "sources\EncodingChecker\bin\Release\net10.0-windows\publish\win-x64-selfcontained\*" -DestinationPath "EncodingChecker-$version-win-x64-self-contained.zip"
 
+      # The publish, and the only step a rehearsal must never reach. It requires a
+      # tag *push*, not merely a tag ref: workflow_dispatch can be pointed at a tag
+      # from the dropdown, and a run started by hand must never publish.
       - name: Create GitHub release
+        if: github.event_name == 'push' && steps.version.outputs.is_tag == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
@@ -145,3 +185,14 @@ jobs:
           EncodingChecker-*-framework-dependent.zip EncodingChecker-*-win-x64-self-contained.zip
           --title "${{ github.ref_name }}"
           --generate-notes
+
+      - name: Say plainly that nothing was published
+        if: github.event_name != 'push'
+        shell: pwsh
+        run: |
+          $summary = "REHEARSAL for version ${{ steps.version.outputs.version }} - " +
+                     "built, tested, signed, GUI-checked and packaged. No release was created."
+          $summary
+          "## Release rehearsal" >> $env:GITHUB_STEP_SUMMARY
+          "" >> $env:GITHUB_STEP_SUMMARY
+          $summary >> $env:GITHUB_STEP_SUMMARY
