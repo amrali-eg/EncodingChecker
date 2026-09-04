@@ -139,6 +139,65 @@ public sealed class ConversionPlanTests : IDisposable
         Assert.DoesNotContain("\\u", json, StringComparison.Ordinal);
     }
 
+    private static ConversionPlan PlanRootedAt(string baseDirectory, string relativePath) =>
+        new()
+        {
+            CreatedUtc = "2026-01-01T00:00:00.0000000Z",
+            EcVersion = "test",
+            BaseDirectory = baseDirectory,
+            TargetEncoding = "utf-8",
+            TargetHasBom = false,
+            BackupEnabled = false,
+            Files =
+            [
+                new PlannedFile
+                {
+                    RelativePath = relativePath,
+                    Size = 1,
+                    Sha256 = new string('0', 64),
+                    Action = PlannedAction.Convert,
+                    SourceEncoding = "windows-1252",
+                    SourceCodePage = 1252,
+                    SourceHasBom = false,
+                    SourceWasSpecified = true,
+                    SourceInterpretation = SourceInterpretation.ExplicitSource,
+                },
+            ],
+        };
+
+    [Theory]
+    [InlineData(@"C:\", @"file.txt", @"C:\file.txt")]
+    [InlineData(@"C:\", @"sub\file.txt", @"C:\sub\file.txt")]
+    [InlineData(@"C:\data", @"file.txt", @"C:\data\file.txt")]
+    [InlineData(@"C:\data\", @"file.txt", @"C:\data\file.txt")]
+    public void APlanResolvesItsFilesWhateverItsRootLooksLike(
+        string baseDirectory, string relativePath, string expected)
+    {
+        // A drive root is left alone by TrimEndingDirectorySeparator, so the old
+        // containment prefix became "C:\\" and matched nothing. Every file in a plan
+        // rooted at a drive was then reported as resolving outside the plan's own
+        // directory, and the whole run was refused - with a message blaming the file
+        // paths rather than the root.
+        ConversionPlan plan = PlanRootedAt(baseDirectory, relativePath);
+
+        Assert.Equal(expected, plan.ResolvePath(plan.Files[0]));
+    }
+
+    [Theory]
+    [InlineData(@"C:\data", @"..\outside.txt")]
+    [InlineData(@"C:\data", @"..\data-sibling\file.txt")]
+    [InlineData(@"C:\data", @"")]
+    [InlineData(@"C:\", @"")]
+    public void APathThatIsNotAFileBeneathTheRootIsStillRejected(
+        string baseDirectory, string relativePath)
+    {
+        // Widening the prefix must not widen what the plan will touch. The empty cases
+        // resolve to the root directory itself, which is not a file in the plan.
+        ConversionPlan plan = PlanRootedAt(baseDirectory, relativePath);
+
+        Assert.Null(plan.ResolvePath(plan.Files[0]));
+    }
+
     [Fact]
     public void PlanningWritesNothing()
     {

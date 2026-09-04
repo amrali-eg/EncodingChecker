@@ -390,9 +390,17 @@ internal sealed record ConversionPlan
             return null;
         }
 
-        return full.StartsWith(
-            root + Path.DirectorySeparatorChar,
-            StringComparison.OrdinalIgnoreCase)
+        // A drive or share root already ends with the separator and is left alone by
+        // TrimEndingDirectorySeparator, so appending another produced "C:\\" - a prefix
+        // no resolved path can start with, which reported every file in such a plan as
+        // escaping its own directory.
+        string prefix = root.EndsWith(Path.DirectorySeparatorChar)
+            ? root
+            : root + Path.DirectorySeparatorChar;
+
+        // Longer than the prefix, so the root directory itself is still not a file.
+        return full.Length > prefix.Length &&
+               full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
             ? full
             : null;
     }
