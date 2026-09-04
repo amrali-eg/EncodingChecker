@@ -3,7 +3,9 @@
 Status of the thirty-five findings from the two independent reviews that
 preceded v3.11.0, plus what has been found since.
 
-**25 fixed, 9 open, 1 could not be reproduced.**
+**Of the original thirty-five: 25 fixed, 9 open, 1 could not be reproduced.**
+Five further findings have been raised since v3.11.1, one of them already fixed.
+**Thirteen open in total.**
 
 ## Why this file exists
 
@@ -77,8 +79,10 @@ report.
 | Ambiguous BOM-less UTF-32 converts silently | **open** | The ambiguity guard covers only code pages 1200 and 1201, so the UTF-32 detector's prefer-little-endian wins with no refusal. Demonstrated end to end; reaching it needs every scalar to be a multiple of 0x100, so real text is unlikely to trigger it. |
 | CSV report does not neutralise leading formula characters | **open** | A filename beginning with an equals, plus, minus or at sign becomes a live formula in a spreadsheet. |
 | Conversion parallelism was capped at 4 | fixed | Raised to 8 on 2026-09-04; measured 1.5–1.7x faster. |
+| A ticked file can be dropped from a source choice in silence | **open** | Each row in the review's refused list carries its resolved path. `TickedFiles()` filters out rows whose path is null and says nothing, so a file the user ticked is left refused with no message. This was live until EC-06 was fixed: with a drive-root base directory every row resolved to null, so choosing an encoding reported "Conversion cancelled. No files were modified." The trigger is gone; the silent drop is not. |
+| Force-closing during a run can throw on the way out | **open** | The second close request abandons a run deliberately, which is correct. But the worker may then marshal its next confirmation to a form that no longer exists, and the completion handler runs against disposed controls. An error dialog at exit rather than lost work — finished files are installed and the one in flight is untouched. Reasoned from the code, not reproduced: it needs precise timing. |
 
-## The nine that are open
+## The nine open from the original thirty-five
 
 None writes to a file nobody approved, which is why none blocked a release. In
 rough order of what a user could notice:
