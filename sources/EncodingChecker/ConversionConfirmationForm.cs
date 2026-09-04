@@ -23,6 +23,20 @@ internal sealed class ConversionConfirmationForm : Form
     private readonly ConversionPlan _plan;
     private readonly ComboBox _sourceChoice = new() { Name = "lstSourceEncoding" };
     private readonly Button _resolve = new() { Name = "btnConfirmSourceEncoding" };
+
+    /// <summary>
+    /// Shown in place when the ticked rows cannot be acted on. A silent no-op here
+    /// resolves to "Conversion cancelled. No files were modified." - a cancellation
+    /// the user never asked for, blamed on them.
+    /// </summary>
+    private readonly Label _scopeProblem = new()
+    {
+        Name = "lblSourceChoiceProblem",
+        AutoSize = true,
+        MaximumSize = new Size(660, 0),
+        Visible = false,
+        ForeColor = Color.FromArgb(0xB0, 0x28, 0x28),
+    };
     private ListView? _refusedList;
 
     /// <summary>
@@ -259,6 +273,32 @@ internal sealed class ConversionConfirmationForm : Form
         _resolve.MinimumSize = new Size(230, 0);
         _resolve.Click += (_, _) =>
         {
+            ListViewItem[] ticked =
+                [.. _refusedList?.CheckedItems.Cast<ListViewItem>() ?? []];
+
+            // A row carries the path this review resolved for it. A null one cannot be
+            // matched to an entry later, so acting on it would drop the file from the
+            // scope without saying so.
+            int unresolvable = ticked.Count(item => item.Tag is not string);
+
+            if (ticked.Length == 0)
+            {
+                ShowScopeProblem(
+                    "Tick at least one file to use this encoding for.");
+                return;
+            }
+
+            if (unresolvable > 0)
+            {
+                ShowScopeProblem(
+                    $"{unresolvable} of the {ticked.Length} ticked file(s) are no longer "
+                    + "inside this review's directory, so the chosen encoding cannot be "
+                    + "applied to them. Run View again for the directory these files are "
+                    + "actually in, then choose the encoding.");
+                return;
+            }
+
+            _scopeProblem.Visible = false;
             ChosenSourceEncoding = (string)_sourceChoice.SelectedItem!;
             ChosenFiles = TickedFiles();
             DialogResult = DialogResult.Retry;
@@ -269,6 +309,7 @@ internal sealed class ConversionConfirmationForm : Form
 
         chooser.Controls.Add(_sourceChoice);
         chooser.Controls.Add(_resolve);
+        chooser.Controls.Add(_scopeProblem);
 
         var note = new Label
         {
@@ -304,6 +345,13 @@ internal sealed class ConversionConfirmationForm : Form
             .Where(p => p is not null)
             .Select(p => p!)
     ];
+
+    /// <summary>Says why the button did nothing, instead of doing nothing.</summary>
+    private void ShowScopeProblem(string message)
+    {
+        _scopeProblem.Text = message;
+        _scopeProblem.Visible = true;
+    }
 
     /// <summary>
     /// Keeps the button scope explicit.

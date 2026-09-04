@@ -79,7 +79,7 @@ report.
 | Ambiguous BOM-less UTF-32 converts silently | **open** | The ambiguity guard covers only code pages 1200 and 1201, so the UTF-32 detector's prefer-little-endian wins with no refusal. Demonstrated end to end; reaching it needs every scalar to be a multiple of 0x100, so real text is unlikely to trigger it. |
 | CSV report does not neutralise leading formula characters | **open** | A filename beginning with an equals, plus, minus or at sign becomes a live formula in a spreadsheet. |
 | Conversion parallelism was capped at 4 | fixed | Raised to 8 on 2026-09-04; measured 1.5–1.7x faster. |
-| A ticked file can be dropped from a source choice in silence | **open** | Each row in the review's refused list carries its resolved path. `TickedFiles()` filters out rows whose path is null and says nothing, so a file the user ticked is left refused with no message. This was live until EC-06 was fixed: with a drive-root base directory every row resolved to null, so choosing an encoding reported "Conversion cancelled. No files were modified." The trigger is gone; the silent drop is not. |
+| A ticked file can be dropped from a source choice in silence | fixed | Each row in the review's refused list carries its resolved path. `TickedFiles()` filters out rows whose path is null and says nothing, so a file the user ticked is left refused with no message. This was live until EC-06 was fixed: with a drive-root base directory every row resolved to null, so choosing an encoding reported "Conversion cancelled. No files were modified." The trigger is gone; the silent drop is not. |
 | Force-closing during a run can throw on the way out | **open** | The second close request abandons a run deliberately, which is correct. But the worker may then marshal its next confirmation to a form that no longer exists, and the completion handler runs against disposed controls. An error dialog at exit rather than lost work — finished files are installed and the one in flight is untouched. Reasoned from the code, not reproduced: it needs precise timing. |
 
 ## Hashing: three optimisations measured and rejected
@@ -164,6 +164,24 @@ Neither comparison is wrong for an accidental-corruption model. The point is the
 drift: the detector-parity job exists to stop exactly this happening to the
 shared detector, and nothing plays that role for the safety machinery around it.
 **Open** — decide whether the two should converge, and on which.
+
+## The source-choice refusal has no GUI coverage
+
+The review now refuses a source choice it cannot apply, instead of closing on an
+emptied scope. A smoke phase to drive that sequence was attempted and abandoned.
+
+The setup reproduces correctly - scan one directory, retarget the window at
+another, and the refused row appears labelled `..\scanned\french.txt`, which only
+happens when the plan's root does not contain the file. What does not work is
+driving the source-encoding combo in that dialog state: `SelectCombo` times out
+waiting for the selection to take, while the identical call in phase C succeeds.
+Activating the review first and ticking the row first were both tried; neither
+changed it. The cause is not known.
+
+Worth recording because the diagnosis is most of the work, and because the fix
+is currently verified by reading rather than by driving. **Open** - either finish
+the phase, or cover the refusal with a unit test that constructs the form
+directly, as `InteractiveControlsExposeStableAutomationIds` already does.
 
 ## The nine open from the original thirty-five
 
