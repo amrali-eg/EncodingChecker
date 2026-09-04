@@ -82,6 +82,60 @@ report.
 | A ticked file can be dropped from a source choice in silence | **open** | Each row in the review's refused list carries its resolved path. `TickedFiles()` filters out rows whose path is null and says nothing, so a file the user ticked is left refused with no message. This was live until EC-06 was fixed: with a drive-root base directory every row resolved to null, so choosing an encoding reported "Conversion cancelled. No files were modified." The trigger is gone; the silent drop is not. |
 | Force-closing during a run can throw on the way out | **open** | The second close request abandons a run deliberately, which is correct. But the worker may then marshal its next confirmation to a form that no longer exists, and the completion handler runs against disposed controls. An error dialog at exit rather than lost work — finished files are installed and the one in flight is untouched. Reasoned from the code, not reproduced: it needs precise timing. |
 
+## Hashing: three optimisations measured and rejected
+
+Conversion looked as though it hashed the same bytes several times over. Three
+variants were built on throwaway branches and measured against the same
+baseline, interleaved to cancel machine drift (292 MiB, 60 large files, backup
+and journal enabled).
+
+| Variant | Median | vs baseline | What it costs |
+|---|---|---|---|
+| Baseline | 1030 ms | — | — |
+| Digest the backup while copying | 872 ms | −15.3% | The `.bak` is no longer read back, so nothing proves the restore point on disk is intact. |
+| Hash source and output while streaming | −3.5% (own batch) | −3.5% | Two independent measurements become values derived from what EC intended to write. |
+| XxHash128 in place of SHA-256 | 1078 ms | **+4.7%, slower** | Recorded hashes stop being verifiable with `Get-FileHash`, and lose collision resistance. |
+
+**The reads are not redundant.** Each is an independent measurement: the source
+re-read proves the file still matches what was approved, the backup re-read
+proves the restore point is real, the output re-read proves what landed on disk.
+Removing them is the same defect class as EC-14, which this project fixed
+deliberately.
+
+**Hashing is not the bottleneck.** In isolation XxHash128 runs at 16,447 MiB/s
+against SHA-256's 2,429 — 6.8x — yet replacing it made no difference at all,
+because at eight-way parallelism the hashing hides behind the I/O it accompanies.
+SHA-256 is also the fastest algorithm available here: hardware acceleration puts
+it ahead of SHA-1 (981 MiB/s), MD5 (754) and SHA-512 (805), so every "lighter"
+cryptographic option is slower as well as weaker.
+
+**What this means for future work.** Conversion is bound by cold reads, not by
+CPU. The only variant that helped removed a read of a file that had just been
+flushed to disk. Optimise reads, and treat the hashes as the verifications they
+are.
+
+## Hash handling differs from LineEndingNormalizer
+
+LEN uses two algorithms, split by whether the value is durable: SHA-256 for the
+raw source bytes and the backup check, XxHash3 for the normalised-content digest
+that lives in a private record and is discarded after the run.
+
+EC uses SHA-256 for both, and persists its content digests as `SourceTextSha256`
+and `OutputTextSha256`. That is defensible — EC-14 exists precisely to keep those
+two independent — but the two tools now justify the same safety claim by
+different means, and nothing checks that they agree:
+
+| | EC | LEN |
+|---|---|---|
+| Raw file / backup hash | SHA-256 | SHA-256 |
+| Content digest | SHA-256, persisted | XxHash3, discarded |
+| Backup comparison | `string.Equals(..., OrdinalIgnoreCase)` on hex | `CryptographicOperations.FixedTimeEquals` on bytes |
+
+Neither comparison is wrong for an accidental-corruption model. The point is the
+drift: the detector-parity job exists to stop exactly this happening to the
+shared detector, and nothing plays that role for the safety machinery around it.
+**Open** — decide whether the two should converge, and on which.
+
 ## The nine open from the original thirty-five
 
 None writes to a file nobody approved, which is why none blocked a release. In
