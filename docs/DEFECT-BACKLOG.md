@@ -114,6 +114,35 @@ CPU. The only variant that helped removed a read of a file that had just been
 flushed to disk. Optimise reads, and treat the hashes as the verifications they
 are.
 
+### If you are reading this because you want to try again
+
+This idea looks obviously right from the source: the same bytes are read up to
+seven times per converted file, and one of the hashes is computed twice over
+data already in memory. It reads like waste. It is not, and the window in which
+it would pay is narrower than it appears.
+
+**The ceiling is 15%, and it is the expensive 15%.** Every variant was measured,
+not estimated. The two that preserve safety bought 3.5% and nothing at all. The
+one worth having costs the only check that proves the restore point on disk is
+intact — on a tool whose entire proposition is that it can undo what it did.
+
+**These numbers are conditional, and the conditions favour the status quo.** They
+were taken on a 24-core machine with a fast local disk, a warm cache, and
+eight-way parallelism. Change those and the results move, but mostly in ways that
+do not help: on cold or network storage the read-elimination wins grow, yet so
+does the value of verifying what actually landed there. Only a single-worker run
+on a slow CPU would make the hashing itself visible, and that is not how EC runs.
+
+**The safety argument does not depend on the measurement.** Even if a future
+machine made these changes worth 40%, the source re-read would still be the only
+thing proving the file matches what was approved, and the backup re-read the only
+thing proving the restore point exists. Speed is not the reason to decline; it is
+merely the reason not to have to argue about it.
+
+If you still want the throughput, the honest target is the read that costs most —
+the `.bak` read immediately after its `Flush(flushToDisk: true)` — and the honest
+approach is to make that read cheaper, not to delete it.
+
 ## Hash handling differs from LineEndingNormalizer
 
 LEN uses two algorithms, split by whether the value is durable: SHA-256 for the
