@@ -947,6 +947,27 @@ internal static class ScanEngine
 
         if (whatIf)
         {
+            // A preview saying "would be converted" has to have read what it is promising
+            // about. Nothing here decoded the file, so -Plan - which sets WhatIf - recorded
+            // Action=Convert with no reason for a source that cannot be read, exited 0, and
+            // showed the reviewer nothing; the failure surfaced at -Apply, after approval
+            // and part-way through the batch. Refuse rather than schedule it, so the plan
+            // never carries a file it cannot carry out.
+            //
+            // The decode only. A source that reads cleanly can still fail on a target that
+            // cannot represent it, and no amount of reading the source predicts that;
+            // closing that half means running the whole conversion into a discarded buffer.
+            if (!StrictFileValidation.TryValidateFile(
+                    path, sourceEncoding, out string? previewDiagnostic))
+            {
+                entry.Action = PlannedAction.Refuse;
+                entry.Result = ConversionRowResult.Error;
+                entry.ReasonCode = ConversionReasonCodes.StrictValidationFailed;
+                entry.Diagnostic = previewDiagnostic;
+                entry.ReplacementCommitted = false;
+                return;
+            }
+
             entry.Result = ConversionRowResult.Converted; // "would be converted"
             return;
         }
