@@ -198,7 +198,7 @@ internal static partial class Program
           -Quiet                        Suppress per-file CSV and normal summaries.
                                       Errors and coverage warnings still go to stderr.
           -Verbose                      Include error details and a result breakdown.
-          -MaxParallelism <N>           Maximum simultaneous files; default is min(CPU count, 4).
+          -MaxParallelism <N>           Maximum simultaneous files; default is min(CPU count, 8).
           -FailOnChanges                Return exit code 2 if files need conversion (or fail
                                       validation). Useful for CI.
 

@@ -101,7 +101,7 @@ combined with conversion options.
 | `-Journal <path>` | Write a JSON record of the conversion decision and final result for every file. Convert mode only. |
 | `-Quiet` | Suppress per-file CSV and normal summaries. Errors and coverage warnings still go to stderr. |
 | `-Verbose` | Include error details and a result breakdown. |
-| `-MaxParallelism <N>` | Maximum simultaneous files. Default: the smaller of CPU count and 4. |
+| `-MaxParallelism <N>` | Maximum simultaneous files. Default: the smaller of CPU count and 8. |
 
 `-Quiet` and `-Verbose` cannot be combined.
 

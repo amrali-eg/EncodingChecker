@@ -100,8 +100,12 @@ internal static class ScanEngine
     // above the point where CPU count would matter. Measured on 2,000 files: 4 gave
     // 4,207 ms and 8 gave 2,511 ms without backups, 10,516 and 7,305 with them. Past 8
     // the curve flattens, and backup runs stop improving entirely.
+    // Named rather than inlined so the documentation stating it can be asserted against
+    // it. Both the help text and CLI.md still said 4 a release after this became 8.
+    internal const int MaxParallelismCap = 8;
+
     internal static readonly int DefaultMaxParallelism =
-        Math.Min(Environment.ProcessorCount, 8);
+        Math.Min(Environment.ProcessorCount, MaxParallelismCap);
 
     /// <summary>Charset label used when the source encoding cannot be established.</summary>
     internal const string UnknownCharset = "(Unknown)";
