@@ -57,6 +57,7 @@ internal static class DirectoryTraversal
     {
         private int _filesExcludedByAttribute;
         private int _directoriesExcludedByAttribute;
+        private int _directoriesExcludedByName;
         private int _filesExcludedAsEcArtifact;
 
         /// <summary>Matching files skipped for being hidden, system, or reparse points.</summary>
@@ -65,6 +66,19 @@ internal static class DirectoryTraversal
         /// <summary>Directories not entered because they are hidden, system, or reparse points.</summary>
         internal int DirectoriesExcludedByAttribute =>
             Volatile.Read(ref _directoriesExcludedByAttribute);
+
+        /// <summary>
+        /// Directories not entered because their name is a build or metadata convention.
+        /// </summary>
+        /// <remarks>
+        /// Counted for the same reason the attribute exclusions are. Skipping these is
+        /// deliberate and documented, but leaving them out of the coverage report let a
+        /// clean result stand in for complete coverage - the one thing this report exists
+        /// to prevent - and "build" and "target" are ordinary content directory names
+        /// outside the conventions they were chosen for.
+        /// </remarks>
+        internal int DirectoriesExcludedByName =>
+            Volatile.Read(ref _directoriesExcludedByName);
 
         /// <summary>
         /// Matching files skipped for being EC's own backups, sidecars, or temporaries.
@@ -79,6 +93,9 @@ internal static class DirectoryTraversal
 
         internal void CountDirectoryExcludedByAttribute() =>
             Interlocked.Increment(ref _directoriesExcludedByAttribute);
+
+        internal void CountDirectoryExcludedByName() =>
+            Interlocked.Increment(ref _directoriesExcludedByName);
     }
 
     /// <summary>
@@ -243,9 +260,11 @@ internal static class DirectoryTraversal
 
             foreach (DirectoryInfo subdirectory in subdirectories)
             {
-                if (ExcludedDirectoryNames.Contains(
-                    subdirectory.Name))
+                if (ExcludedDirectoryNames.Contains(subdirectory.Name))
+                {
+                    counters?.CountDirectoryExcludedByName();
                     continue;
+                }
 
                 // Do not traverse excluded directories merely to count their contents.
                 // Reporting the directory itself is honest about the unknown scope.

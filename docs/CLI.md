@@ -40,13 +40,16 @@ conversion of the same folder will rewrite them like anything else. Keep exporte
 plans, journals, and reports outside the folder you scan.
 
 Common metadata and build folders such as `.git`, `bin`, `obj`, and
-`node_modules` are skipped. Hidden, system, and reparse-point files are left
-alone, and hidden, system, and reparse-point folders are not entered.
+`node_modules` are skipped, and no pattern reaches into them. Hidden, system,
+and reparse-point files are left alone, and hidden, system, and reparse-point
+folders are not entered.
 
-EC reports how many files each exclusion skipped, counting only files your
-patterns actually selected — so `-Include "*.bak"` reports that they were
-skipped instead of returning nothing at all. These counts do not change the
-exit code.
+EC reports what each exclusion skipped, so a clean result cannot stand in for
+complete coverage. For files it reports counts, limited to files your patterns
+actually selected — so `-Include "*.bak"` reports that they were skipped instead
+of returning nothing at all. For skipped folders it reports the folders, not
+their contents, because it does not walk them to find out. These counts do not
+change the exit code.
 
 ## Conversion
 

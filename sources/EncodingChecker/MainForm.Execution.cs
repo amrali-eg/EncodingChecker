@@ -372,7 +372,7 @@ public partial class MainForm
         if (counters is null)
             return string.Empty;
 
-        var parts = new List<string>(3);
+        var parts = new List<string>(4);
 
         if (counters.FilesExcludedByAttribute > 0)
         {
@@ -390,6 +390,12 @@ public partial class MainForm
         {
             parts.Add(
                 $"{counters.DirectoriesExcludedByAttribute} folder(s) not entered");
+        }
+
+        if (counters.DirectoriesExcludedByName > 0)
+        {
+            parts.Add(
+                $"{counters.DirectoriesExcludedByName} build/metadata folder(s) not entered");
         }
 
         return string.Join(", ", parts);
