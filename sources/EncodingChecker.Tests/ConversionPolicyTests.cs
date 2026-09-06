@@ -140,8 +140,8 @@ public sealed class ConversionPolicyTests : IDisposable
     public void DetectedLegacyTextRequiresAnExplicitSourceChoice()
     {
         PlannedAction action = ConversionPolicy.Decide(
-            "windows-1252", sourceHasBom: false,
-            "utf-16le", targetHasBom: false,
+            "windows-1252", sourceCodePage: 1252, sourceHasBom: false,
+            "utf-16le", targetCodePage: 1200, targetHasBom: false,
             sourceWasSpecified: false, isUnicodeOrAscii: false,
             explicitSourceConflictsWithReliableDetection: false,
             automaticBomlessUtf16IsAmbiguous: false,
@@ -158,8 +158,8 @@ public sealed class ConversionPolicyTests : IDisposable
         Assert.Equal(
             PlannedAction.Convert,
             ConversionPolicy.Decide(
-            "utf-8", sourceHasBom: false,
-            "utf-16le", targetHasBom: false,
+            "utf-8", sourceCodePage: 65001, sourceHasBom: false,
+            "utf-16le", targetCodePage: 1200, targetHasBom: false,
             sourceWasSpecified: false, isUnicodeOrAscii: true,
             explicitSourceConflictsWithReliableDetection: false,
             automaticBomlessUtf16IsAmbiguous: false,
@@ -169,8 +169,8 @@ public sealed class ConversionPolicyTests : IDisposable
         Assert.Equal(
             PlannedAction.Convert,
             ConversionPolicy.Decide(
-            "windows-1252", sourceHasBom: false,
-            "utf-8", targetHasBom: false,
+            "windows-1252", sourceCodePage: 1252, sourceHasBom: false,
+            "utf-8", targetCodePage: 65001, targetHasBom: false,
             sourceWasSpecified: true, isUnicodeOrAscii: false,
             explicitSourceConflictsWithReliableDetection: false,
             automaticBomlessUtf16IsAmbiguous: false,
@@ -186,8 +186,8 @@ public sealed class ConversionPolicyTests : IDisposable
         Assert.Equal(
             PlannedAction.Unchanged,
             ConversionPolicy.Decide(
-                "utf-8", sourceHasBom: false,
-                "utf-8", targetHasBom: false,
+                "utf-8", sourceCodePage: 65001, sourceHasBom: false,
+                "utf-8", targetCodePage: 65001, targetHasBom: false,
                 sourceWasSpecified: false, isUnicodeOrAscii: true,
                 explicitSourceConflictsWithReliableDetection: false,
                 automaticBomlessUtf16IsAmbiguous: false,
@@ -203,8 +203,8 @@ public sealed class ConversionPolicyTests : IDisposable
         Assert.Equal(
             PlannedAction.Skip,
             ConversionPolicy.Decide(
-                ScanEngine.UnknownCharset, sourceHasBom: false,
-                "utf-8", targetHasBom: false,
+                ScanEngine.UnknownCharset, sourceCodePage: 0, sourceHasBom: false,
+                "utf-8", targetCodePage: 65001, targetHasBom: false,
                 sourceWasSpecified: false, isUnicodeOrAscii: false,
                 explicitSourceConflictsWithReliableDetection: false,
                 automaticBomlessUtf16IsAmbiguous: false,

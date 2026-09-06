@@ -823,8 +823,10 @@ internal static class ScanEngine
 
         PlannedAction action = ConversionPolicy.Decide(
             sourceCharset,
+            sourceEncoding.CodePage,
             sourceHasBom,
             targetCharset,
+            targetEncoding.CodePage,
             targetWriteBom,
             entry.SourceEncodingWasSpecified,
             TextEncoding.IsUnicodeOrAscii(sourceEncoding),

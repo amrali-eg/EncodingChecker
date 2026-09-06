@@ -19,8 +19,14 @@ internal static class ConversionPolicy
     /// Why, in words a user can act on, when the answer is not a plain conversion.
     /// </param>
     /// <param name="sourceCharset">The character set of the source file.</param>
+    /// <param name="sourceCodePage">
+    /// The source codec's canonical code page, or 0 when the label did not resolve.
+    /// </param>
     /// <param name="sourceHasBom">Whether the source file has a BOM.</param>
     /// <param name="targetCharset">The character set to convert to.</param>
+    /// <param name="targetCodePage">
+    /// The target codec's canonical code page, or 0 when the label did not resolve.
+    /// </param>
     /// <param name="targetHasBom">Whether to write a BOM when converting to the target charset.</param>
     /// <param name="sourceWasSpecified">Whether the source encoding was explicitly specified by the user.</param>
     /// <param name="isUnicodeOrAscii">Whether the source encoding is Unicode or ASCII.</param>
@@ -31,8 +37,10 @@ internal static class ConversionPolicy
     /// <returns>The planned action for the file.</returns>
     internal static PlannedAction Decide(
         string sourceCharset,
+        int sourceCodePage,
         bool sourceHasBom,
         string targetCharset,
+        int targetCodePage,
         bool targetHasBom,
         bool sourceWasSpecified,
         bool isUnicodeOrAscii,
@@ -52,7 +60,14 @@ internal static class ConversionPolicy
         }
 
         // An unchanged file is not read or rewritten, so no source choice is needed.
-        if (string.Equals(sourceCharset, targetCharset, StringComparison.OrdinalIgnoreCase)
+        //
+        // Codec identity is the code page, not the label. "utf-16", "unicode", "ucs-2"
+        // and "utf-16le" all name code page 1200, so comparing the strings reported a
+        // file already in the target as needing conversion, then rewrote it to identical
+        // bytes - discarding its timestamp, and making -FailOnChanges fail forever. A
+        // zero code page means the label did not resolve, so it proves nothing.
+        if (sourceCodePage != 0
+            && sourceCodePage == targetCodePage
             && sourceHasBom == targetHasBom)
         {
             sourceInterpretation = SourceInterpretation.NotApplicable;
