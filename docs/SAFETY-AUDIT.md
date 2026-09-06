@@ -413,6 +413,49 @@ Nothing in the audit method would have found it either: no corpus run reaches th
 - **One fix has no test.** Coupling the JSON reader to the writer's options changes nothing observable today, and no test can demonstrate it without adding a setting to production code purely to make one fail. Every other fix here was mutation-checked; this one is stated instead.
 - **The source-choice refusal is covered by a unit test, not a GUI phase.** A smoke phase for it was attempted and abandoned: the automation driver cannot select a combo inside that dialog, which is a defect in the driver rather than in EC. Both the defect and the fix were reproduced by hand in the window.
 
+### v3.12.0 — `2878a8ef8ab66e5a6b143822ff93c0268c24bcb8`, not re-audited
+
+**It was not measured against the four corpora, and unlike v3.11.2 this is a release that asks for one.** The checklist requires a corpus run for a release changing detection or conversion policy. Detection is untouched — no detector file changed, and the parity workflow passed at this commit — but `ConversionPolicy` did change, so the exemption the previous record claimed is not available here. No audited build exists and no assembly hash is quoted. The v3.11.0 figures are not evidence about this release.
+
+The published archives, each downloaded and hashed rather than trusting GitHub's own report of them:
+
+```
+EncodingChecker-3.12.0-framework-dependent.zip
+  b48b95692d432106387519b08639240adbd1cac10c5054db58343f5d45d18b18
+EncodingChecker-3.12.0-win-x64-self-contained.zip
+  f94d4618f04d8fcf186c187dbe8e6feda5f1d3c2869fb79dd5968ed0dcc4b917
+```
+
+#### What changed in v3.12.0
+
+| | |
+|---|---|
+| A target named by an alias | Rewrote every file in a tree already in that codec to identical bytes, resetting every modification time. Identity was the charset's label; it is now the resolved code page. |
+| "Already in the target encoding" | Was a whole-file claim made from a 64 KiB detection sample. The whole file is now validated first, at 0.04–0.10 ms per MiB. |
+| A preview of a conversion | Promised conversions that would fail, and recorded them in a plan as approved, because nothing decoded the file. The source is now decoded and the entry marked `Refuse`. |
+| One file's failure | Could end the whole run. The per-item catch named four exception types; it now excludes only cancellation and `OutOfMemoryException`. |
+| An unreadable folder, and a folder skipped by name | Were counted nowhere. Both are counted now. The exit code is deliberately unchanged. |
+| A `-Validate` rejection, and a refusal | Could carry no reason, or a reason re-derived beside the decision that already knew it. Both now come from one place. |
+| A decode failure | Reported an offset relative to a read chunk, which could be negative. It names the offending bytes instead. |
+| Standard output | Was UTF-8 whatever the console was. It now uses the console's encoding; redirected output stays UTF-8. |
+
+#### What this release says about these records
+
+Twelve findings, in a codebase that had already been through two independent reviews and a backlog re-derived from the source rather than from a summary. Eleven were new to that file.
+
+What is worth recording is *why the method missed them*. The corpus harness does convert, and it compares decoded source text against strict output, so it is not blind to conversion. All three defects that touched files still sat outside its reach, each for a different reason. The alias defect **preserves text perfectly** — it rewrites a file to identical bytes, so every comparison the harness makes passes while a modification time is silently lost. The 64 KiB defect needs a file valid for 64 KiB and invalid afterwards, a shape no corpus contains because corpora hold files with authoritative metadata. The preview defect lives in `-Plan`, a mode the harness does not run. A corpus run at full marks would have said nothing about any of the three.
+
+The review that found them also over-rated four of its own findings, and the reader caught each one rather than the review catching itself. The pattern was single: a mechanism proved with an input built to prove it, then described for significance without checking what the product does with such an input. Two were downgraded after measurement against realistic files, one was withdrawn once its fix was shown to break four existing tests, and one was withdrawn once what EC actually reports was checked. That belongs in this file because it is the failure these records exist to catch — a claim true about a mechanism and false about the product.
+
+#### Known limits specific to this release
+
+- **No corpus measurement backs it, and the checklist asked for one.** What supports it is 727 unit tests, the nine-phase GUI suite, the detector parity check, and a mutation check on each fix — the change reverted, the intended test required to fail, the file restored byte-identical and confirmed by hash.
+- **Code signing did not run.** The signing secrets are still not configured, so the step was skipped, the archives above are **unsigned**, and the GUI suite drove an *unsigned* published executable. This is the second release to carry the limit unchanged, and the claim that the suite drives the signed binary remains unproven.
+- **The preview fix decodes and no more.** A target that cannot represent the source text still fails at conversion time, which reading the source cannot predict. A test named for that case pins the limit rather than hiding it.
+- **A run that could not read part of the tree still exits 0.** Unreadable directories are counted and reported now, but the exit code was deliberately left alone; a script that must fail on them has to read the coverage line.
+- **Four findings from the same review are open**, the first a silent corruption: a BOM-less UTF-16 file whose every other code unit is a C0 control can be detected as UTF-32 and converted. Output verification cannot catch it, because both sides of the comparison use the same wrong codec. Measured over nineteen realistic file shapes — 41 of 44 detect correctly, and the three that do not are the same degenerate shape. `docs/DEFECT-BACKLOG.md` scores it critical impact, low reach.
+- **No accessibility spot check is recorded for this release.** The checklist's scaling, keyboard-only, and high-contrast checks have no automated substitute, and nothing in the release job stands in for them.
+
 ## Known limits
 
 - No detector can recover an author's historical legacy encoding when the same bytes admit multiple plausible readings. EC refuses automatic legacy conversion instead of guessing.
