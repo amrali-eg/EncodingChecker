@@ -58,6 +58,7 @@ internal static class DirectoryTraversal
         private int _filesExcludedByAttribute;
         private int _directoriesExcludedByAttribute;
         private int _directoriesExcludedByName;
+        private int _directoriesUnreadable;
         private int _filesExcludedAsEcArtifact;
 
         /// <summary>Matching files skipped for being hidden, system, or reparse points.</summary>
@@ -80,6 +81,18 @@ internal static class DirectoryTraversal
         internal int DirectoriesExcludedByName =>
             Volatile.Read(ref _directoriesExcludedByName);
 
+        /// <summary>Directories EC tried to list and could not.</summary>
+        /// <remarks>
+        /// Distinct from the two exclusion counters above, which record directories EC
+        /// chose not to enter. This one records a failure, and it is the one that used to
+        /// be invisible: an unreadable file becomes a row and drives exit code 3, while an
+        /// unreadable directory produced a warning on stderr and nothing else - no row, no
+        /// count, exit 0. A GUI scan reported nothing at all, because the window passes no
+        /// warning callback. A run that examined none of the tree could report success.
+        /// </remarks>
+        internal int DirectoriesUnreadable =>
+            Volatile.Read(ref _directoriesUnreadable);
+
         /// <summary>
         /// Matching files skipped for being EC's own backups, sidecars, or temporaries.
         /// </summary>
@@ -96,6 +109,9 @@ internal static class DirectoryTraversal
 
         internal void CountDirectoryExcludedByName() =>
             Interlocked.Increment(ref _directoriesExcludedByName);
+
+        internal void CountDirectoryUnreadable() =>
+            Interlocked.Increment(ref _directoriesUnreadable);
     }
 
     /// <summary>
@@ -191,6 +207,8 @@ internal static class DirectoryTraversal
             catch (Exception ex) when (
                 ex is IOException or UnauthorizedAccessException)
             {
+                counters?.CountDirectoryUnreadable();
+
                 onWarning?.Invoke(
                     $"Skipping directory (cannot list): {dir}{Environment.NewLine}    {ex.Message}");
 
@@ -252,6 +270,8 @@ internal static class DirectoryTraversal
             catch (Exception ex) when (
                 ex is IOException or UnauthorizedAccessException)
             {
+                counters?.CountDirectoryUnreadable();
+
                 onWarning?.Invoke(
                     $"Skipping directory (cannot list): {dir}{Environment.NewLine}    {ex.Message}");
 

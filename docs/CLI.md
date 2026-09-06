@@ -48,8 +48,14 @@ EC reports what each exclusion skipped, so a clean result cannot stand in for
 complete coverage. For files it reports counts, limited to files your patterns
 actually selected — so `-Include "*.bak"` reports that they were skipped instead
 of returning nothing at all. For skipped folders it reports the folders, not
-their contents, because it does not walk them to find out. These counts do not
-change the exit code.
+their contents, because it does not walk them to find out.
+
+A folder EC tried to read and could not — a permission denial, or one removed
+mid-scan — is reported the same way, counted separately from the folders it
+skipped on purpose. **These counts do not change the exit code.** A run that
+could not read part of the tree still exits 0, so a script that must not pass
+over unexamined content has to read the counts on stderr rather than the exit
+code alone.
 
 ## Conversion
 
