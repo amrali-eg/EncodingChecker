@@ -372,6 +372,47 @@ Nine phases pass against the Release build, with `EcVersion 3.11.1.0` recorded i
   *Corrected after this record was written.* A hosted `windows-latest` runner does provide such a session: `Environment.UserInteractive` is `True`, and phase A drove the review to completion on one. The limit above stands as written for v3.11.1 — the suite did run locally for this release, and no CI gate existed — but the question it calls open is now answered, and a later release can be gated on it.
 - **The About box was verified by reading it, not by a test.** No automated check asserts its wording, and each corrected label is a `LinkLabel` whose clickable span is a character range: a later text edit can move a link onto the wrong words without failing anything.
 
+### v3.11.2 — `a77d6dda99560106773c4a5ef1f7327a5061e244`, not re-audited
+
+**It was not measured against the four corpora.** The checklist requires a corpus run for a release that changes detection or conversion policy; this changes neither, so no audited build exists and no assembly hash is quoted. The v3.11.0 figures are not evidence about this release.
+
+The published archives:
+
+```
+EncodingChecker-3.11.2-framework-dependent.zip
+  ff3f476b40eacbe2aa5b9144912b6caab557aff0ac1fe74368c636021513ac02
+EncodingChecker-3.11.2-win-x64-self-contained.zip
+  2236dd2461081ef7c51401f6733633359b99d3667e8f365737f6bd446b993948
+```
+
+#### The first release the GUI suite gated
+
+Every earlier record could say only that the nine phases passed somewhere before the tag. This one can say they passed *inside the release job*, against the published executable, after packaging and before publication — 646 tests and nine phases in the same run that produced the archives above. A failure would have stopped the release rather than been noticed afterwards.
+
+That closes a gap these records have carried since v3.11.0: the suite was evidence a person chose to gather, and is now evidence the pipeline cannot skip.
+
+#### What changed in v3.11.2
+
+| | |
+|---|---|
+| A plan rooted at a drive | Was refused whole, every file reported as escaping the plan's own directory. The containment prefix appended a separator to a root that already ended in one. |
+| A source choice that cannot be applied | Was dropped in silence, and the run reported a cancellation nobody asked for. It is now refused, in place, with the reason. |
+| Conversion parallelism | Raised from 4 to 8; 1.5 to 1.7 times faster, measured. |
+| Plan and sidecar reading | Now uses the same options object the writer uses. |
+
+#### What this release says about these records
+
+The drive-root defect **shipped broken in v3.11.0 and v3.11.1**. It was found before v3.11.0, recorded as Confirmed, and reported as closed. Both of those records were written while it was live, and neither caught it, because both trusted a summary of what had been fixed rather than the source.
+
+Nothing in the audit method would have found it either: no corpus run reaches the plan boundary, and the GUI suite has no phase for a drive-root base path. It was rediscovered by accident during an unrelated review. `docs/DEFECT-BACKLOG.md` exists because of that, and records every finding's status re-derived from the code rather than carried forward.
+
+#### Known limits specific to this release
+
+- **No corpus measurement backs it.** What supports it is the unit suite, the GUI suite, the parity check, and a mutation check on each fix.
+- **Code signing did not run**, because the signing secrets are not configured, so the GUI suite drove an *unsigned* published executable. The step is correctly gated on the secrets being present; the claim that the suite drives the signed binary remains unproven.
+- **One fix has no test.** Coupling the JSON reader to the writer's options changes nothing observable today, and no test can demonstrate it without adding a setting to production code purely to make one fail. Every other fix here was mutation-checked; this one is stated instead.
+- **The source-choice refusal is covered by a unit test, not a GUI phase.** A smoke phase for it was attempted and abandoned: the automation driver cannot select a combo inside that dialog, which is a defect in the driver rather than in EC. Both the defect and the fix were reproduced by hand in the window.
+
 ## Known limits
 
 - No detector can recover an author's historical legacy encoding when the same bytes admit multiple plausible readings. EC refuses automatic legacy conversion instead of guessing.
