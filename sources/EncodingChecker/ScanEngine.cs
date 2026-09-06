@@ -905,6 +905,26 @@ internal static class ScanEngine
                   + "your explicit selection and kept all strict conversion checks enabled.";
         }
 
+        // "Already in the target encoding" is a claim about the whole file, and detection
+        // saw at most the first 64 KiB of it. Without this check a file whose later bytes
+        // are not valid in the codec just named was reported as already correct, and
+        // whether EC noticed depended only on which target the caller happened to type:
+        // the same corrupt file was an Error under -Target utf-16 and Unchanged under
+        // -Target utf-8. -Validate has always read the whole file; this is the same check,
+        // reached from the one path that had decided it had nothing to do.
+        if (action == PlannedAction.Unchanged &&
+            !StrictFileValidation.TryValidateFile(
+                path, sourceEncoding, out string? unchangedDiagnostic))
+        {
+            entry.Result = ConversionRowResult.Error;
+            entry.ReasonCode = ConversionReasonCodes.StrictValidationFailed;
+            entry.Diagnostic = unchangedDiagnostic;
+
+            // Nothing was written, and nothing was going to be.
+            entry.ReplacementCommitted = false;
+            return;
+        }
+
         if (action != PlannedAction.Convert)
         {
             entry.Result = ConversionPolicy.ToRowResult(action);
