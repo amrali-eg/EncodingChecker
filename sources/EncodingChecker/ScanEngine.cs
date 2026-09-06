@@ -1222,7 +1222,13 @@ internal static class ScanEngine
     /// Processes items with bounded parallelism and isolates per-file errors.
     /// Cancellation propagates normally.
     /// </summary>
-    private static void RunParallel<T>(
+    /// <remarks>
+    /// Internal rather than private so the isolation itself can be tested. No file can be
+    /// made to throw the exceptions this has to survive - that is what makes them the
+    /// dangerous ones - so the only way to prove one file's failure stays one row is to
+    /// hand it a <paramref name="processItem"/> that throws.
+    /// </remarks>
+    internal static void RunParallel<T>(
         IEnumerable<T> items,
         int maxParallelism,
         Func<T, string> getPath,
@@ -1250,11 +1256,15 @@ internal static class ScanEngine
                 {
                     entry = processItem(item);
                 }
+                // One file's failure is one row. This used to name four exception types,
+                // so anything else - a SecurityException the enumerator did not surface, a
+                // regex timeout, a defect in this code - escaped Parallel.ForEach as an
+                // AggregateException and took every file the run had not reached yet with
+                // it. Cancellation still propagates, and OutOfMemoryException is left alone
+                // because carrying on after it would be pretending to process, not
+                // processing.
                 catch (Exception ex) when (
-                    ex is IOException or
-                    UnauthorizedAccessException or
-                    ArgumentException or
-                    NotSupportedException)
+                    ex is not OperationCanceledException and not OutOfMemoryException)
                 {
                     if (item is ConversionReportEntry existing)
                     {
