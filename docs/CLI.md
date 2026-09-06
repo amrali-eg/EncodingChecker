@@ -63,7 +63,7 @@ code alone.
 |---|---|
 | `-Target <encoding>` | Target encoding, for example `utf-8` or `utf-8-bom`. Required for conversion. |
 | `-From <encoding>` | Explicit original encoding for every selected file. Use when you know a legacy source encoding. |
-| `-Backup` | Save every replaced original as `<file>.bak`. |
+| `-Backup` | Save the replaced original as `<file>.bak`. The name is fixed, so converting the same file again replaces that backup. |
 | `-WhatIf` | Show a one-time preview without writing files. |
 | `-Plan <path>` | Write a reviewable conversion plan; do not modify files. |
 | `-Apply <path>` | Execute a saved plan. Its scope and conversion settings are fixed. |

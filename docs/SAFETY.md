@@ -68,6 +68,12 @@ whether installation was prepared or completed. The `.bak` and sidecar provide
 independently verifiable recovery information. EC does not currently provide a
 built-in restore command.
 
+`<file>.bak` is a fixed name holding the version the most recent run replaced, so
+it is one level of undo rather than a history. Converting the same file again
+replaces the backup, and removes its sidecar with it. If you may want the original
+of a file you are about to convert a second time, copy the existing `.bak`
+elsewhere first.
+
 `-Journal` creates the batch-level record: detection, chosen source, decision,
 reason code, final result, and before/after hashes for every file.
 
