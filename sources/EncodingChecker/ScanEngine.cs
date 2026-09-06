@@ -556,13 +556,29 @@ internal static class ScanEngine
                         ? ConversionRowResult.Unchanged
                         : ConversionRowResult.Invalid;
 
-                if (isValid && entry.Result == ConversionRowResult.Invalid)
+                if (!isValid)
+                {
+                    // Two unlike situations used to arrive here as the same bare Invalid:
+                    // a file EC could not identify, and one it identified as something the
+                    // caller did not allow. Every other mode names both. Leaving these
+                    // blank made -Validate the only outcome whose reason the reader had to
+                    // reconstruct from the encoding column and the list they passed in.
+                    bool identified = sourceCharset != UnknownCharset;
+
+                    entry.ReasonCode = identified
+                        ? ConversionReasonCodes.CharsetNotAllowed
+                        : ConversionReasonCodes.UnknownEncoding;
+
+                    entry.Diagnostic = identified
+                        ? $"The file is {label}, which is not in the allowed list."
+                        : "The file's encoding could not be identified from its contents.";
+                }
+                else if (entry.Result == ConversionRowResult.Invalid)
                 {
                     entry.ReasonCode = ConversionReasonCodes.StrictValidationFailed;
                     entry.Diagnostic = validationDiagnostic;
                 }
-                else if (entry.Result == ConversionRowResult.Unchanged &&
-                         entry.HasAmbiguousBomlessUtf16)
+                else if (entry.HasAmbiguousBomlessUtf16)
                 {
                     // The two byte orders are separate entries in the allowed set; the
                     // label matched only because .NET names both "utf-16". Passing the
