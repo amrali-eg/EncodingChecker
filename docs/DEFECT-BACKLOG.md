@@ -165,23 +165,32 @@ drift: the detector-parity job exists to stop exactly this happening to the
 shared detector, and nothing plays that role for the safety machinery around it.
 **Open** — decide whether the two should converge, and on which.
 
-## The source-choice refusal has no GUI coverage
+## The source-choice refusal is verified by hand, not by the suite
 
-The review now refuses a source choice it cannot apply, instead of closing on an
-emptied scope. A smoke phase to drive that sequence was attempted and abandoned.
+Both the defect and its fix were reproduced manually. That is how the defect was
+finally confirmed at all — until then it existed only as a reading of the code.
 
-The setup reproduces correctly - scan one directory, retarget the window at
-another, and the refused row appears labelled `..\scanned\french.txt`, which only
-happens when the plan's root does not contain the file. What does not work is
-driving the source-encoding combo in that dialog state: `SelectCombo` times out
-waiting for the selection to take, while the identical call in phase C succeeds.
-Activating the review first and ticking the row first were both tried; neither
-changed it. The cause is not known.
+**Before the fix:** scan a directory, point the window at a different one without
+scanning again, tick the refused file, choose an encoding, press confirm. The
+review closes and the status bar reads "Conversion cancelled. No files were
+modified." The choice is discarded and blamed on a cancellation nobody made.
 
-Worth recording because the diagnosis is most of the work, and because the fix
-is currently verified by reading rather than by driving. **Open** - either finish
-the phase, or cover the refusal with a unit test that constructs the form
-directly, as `InteractiveControlsExposeStableAutomationIds` already does.
+**After the fix:** the review stays open and says which ticked files are no
+longer inside its directory, and what to do about it.
+
+A smoke phase for the sequence was attempted and abandoned. The setup drives
+correctly — the refused row appears labelled `..\scanned\french.txt`, which only
+happens when the plan's root does not contain the file — but `SelectCombo` times
+out on the source-encoding dropdown in that dialog state, while the identical
+call in phase C succeeds. Driving the review to the foreground and ticking the
+row first were both tried; neither changed it.
+
+**The dropdown works perfectly by hand**, so this is a defect in the automation
+driver, not in EC. One candidate: `SelectCombo`'s keyboard fallback calls
+`SetForegroundWindow` on the *main* window, which is the wrong target while a
+modal review is open. **Open** — finish the phase, or cover the refusal with a
+unit test that constructs the form directly, as
+`InteractiveControlsExposeStableAutomationIds` already does.
 
 ## The nine open from the original thirty-five
 
