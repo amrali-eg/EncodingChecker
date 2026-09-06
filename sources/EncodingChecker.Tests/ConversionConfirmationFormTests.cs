@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Windows.Forms;
 
 namespace EncodingChecker.Tests;
@@ -107,6 +107,88 @@ public sealed class ConversionConfirmationFormTests : IDisposable
             using var form = new ConversionConfirmationForm(plan);
 
             Assert.DoesNotContain("need an explicit source encoding", AllText(form));
+        });
+    }
+
+    /// <summary>
+    /// A plan whose root does not contain its own files. The GUI reaches this whenever the
+    /// directory box changes after a scan - by typing, by picking a recent entry, or by
+    /// dropping a folder on it - because the results list is only cleared when a scan
+    /// starts.
+    /// </summary>
+    private ConversionPlan PlanRootedElsewhere(string target = "utf-8")
+    {
+        var entries = new EntrySink();
+
+        ScanEngine.ScanDirectory(
+            new ScanDirectoryOptions
+            {
+                BaseDirectory = _root,
+                IncludeSubdirectories = true,
+                IncludePatterns = ["*"],
+                Action = ScanAction.Convert,
+                TargetCharset = target,
+                TargetWriteBom = false,
+                WhatIf = true,
+            },
+            entries.Add,
+            CancellationToken.None);
+
+        string elsewhere = Directory.CreateTempSubdirectory("ec_elsewhere_").FullName;
+
+        return ConversionPlan.FromEntries(
+            entries, elsewhere, target, targetHasBom: false,
+            backupEnabled: true, explicitSource: null);
+    }
+
+    private static T Find<T>(Control root, string name) where T : Control =>
+        Descendants(root).OfType<T>().Single(c => c.Name == name);
+
+    [Fact]
+    public void ASourceChoiceThatCannotBeAppliedIsRefusedRatherThanDropped()
+    {
+        // Each refused row carries the path this review resolved for it. When the plan's
+        // root does not contain the file that path is null, and the ticked set used to be
+        // built by filtering those rows out - so the button did nothing, and the run
+        // reported "Conversion cancelled. No files were modified." The user had ticked a
+        // file and chosen an encoding; the cancellation was neither theirs nor explained.
+        Write("legacy.txt", "Le café était déjà prêt", "windows-1252");
+        ConversionPlan plan = PlanRootedElsewhere();
+
+        UiTest.OnStaThread(() =>
+        {
+            using var form = new ConversionConfirmationForm(plan);
+            form.CreateControl();
+
+            var refused = Find<ListView>(form, "lstRefusedFiles");
+            var chooser = Find<ComboBox>(form, "lstSourceEncoding");
+            var confirm = Find<Button>(form, "btnConfirmSourceEncoding");
+
+            Assert.Single(refused.Items);
+
+            // The row is listed, and the path behind it is exactly what is missing.
+            Assert.Null(refused.Items[0].Tag);
+
+            refused.Items[0].Checked = true;
+            chooser.SelectedItem = "windows-1252";
+
+            Assert.True(
+                confirm.Enabled,
+                "The confirm button was disabled, so the refusal below could not be reached.");
+
+            string? problem = form.DescribeUnusableScope();
+
+            Assert.False(
+                problem is null,
+                "The review would have applied a choice it cannot scope to any file, "
+                + "which resolves to a cancellation the user never asked for.");
+
+            Assert.Contains("no longer inside this review", problem!, StringComparison.Ordinal);
+            Assert.Contains("Run View again", problem, StringComparison.Ordinal);
+
+            // Refusing means staying put: nothing is chosen and no result is reported.
+            Assert.Equal(DialogResult.None, form.DialogResult);
+            Assert.Empty(form.ChosenFiles);
         });
     }
 

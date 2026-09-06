@@ -165,7 +165,7 @@ drift: the detector-parity job exists to stop exactly this happening to the
 shared detector, and nothing plays that role for the safety machinery around it.
 **Open** — decide whether the two should converge, and on which.
 
-## The source-choice refusal is verified by hand, not by the suite
+## The source-choice refusal is covered by a unit test, not a smoke phase
 
 Both the defect and its fix were reproduced manually. That is how the defect was
 finally confirmed at all — until then it existed only as a reading of the code.
@@ -188,9 +188,17 @@ row first were both tried; neither changed it.
 **The dropdown works perfectly by hand**, so this is a defect in the automation
 driver, not in EC. One candidate: `SelectCombo`'s keyboard fallback calls
 `SetForegroundWindow` on the *main* window, which is the wrong target while a
-modal review is open. **Open** — finish the phase, or cover the refusal with a
-unit test that constructs the form directly, as
-`InteractiveControlsExposeStableAutomationIds` already does.
+modal review is open.
+
+**The refusal is covered instead by a unit test**, not by a manual step. The
+decision is now a method on the form — `DescribeUnusableScope` — so a test can
+build a plan rooted outside its own files, tick the row, and assert on the
+refusal without showing a window. `PerformClick` does nothing on a control that
+is not effectively visible, and a test that had to show one would need an
+interactive desktop, which is exactly what the unit suite must not require.
+
+The driver defect stays **open** on its own account: it will bite any future
+phase that touches a combo inside a dialog. The refusal itself is closed.
 
 ## The nine open from the original thirty-five
 

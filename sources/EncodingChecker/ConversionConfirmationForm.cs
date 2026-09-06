@@ -273,28 +273,9 @@ internal sealed class ConversionConfirmationForm : Form
         _resolve.MinimumSize = new Size(230, 0);
         _resolve.Click += (_, _) =>
         {
-            ListViewItem[] ticked =
-                [.. _refusedList?.CheckedItems.Cast<ListViewItem>() ?? []];
-
-            // A row carries the path this review resolved for it. A null one cannot be
-            // matched to an entry later, so acting on it would drop the file from the
-            // scope without saying so.
-            int unresolvable = ticked.Count(item => item.Tag is not string);
-
-            if (ticked.Length == 0)
+            if (DescribeUnusableScope() is { } problem)
             {
-                ShowScopeProblem(
-                    "Tick at least one file to use this encoding for.");
-                return;
-            }
-
-            if (unresolvable > 0)
-            {
-                ShowScopeProblem(
-                    $"{unresolvable} of the {ticked.Length} ticked file(s) are no longer "
-                    + "inside this review's directory, so the chosen encoding cannot be "
-                    + "applied to them. Run View again for the directory these files are "
-                    + "actually in, then choose the encoding.");
+                ShowScopeProblem(problem);
                 return;
             }
 
@@ -345,6 +326,35 @@ internal sealed class ConversionConfirmationForm : Form
             .Where(p => p is not null)
             .Select(p => p!)
     ];
+
+    /// <summary>
+    /// Why the ticked rows cannot be acted on, or <see langword="null"/> when they can.
+    /// </summary>
+    /// <remarks>
+    /// Separate from the click handler so it can be tested without showing a window:
+    /// <c>PerformClick</c> does nothing on a control that is not effectively visible, and
+    /// a unit test that had to show one would need an interactive desktop.
+    /// </remarks>
+    internal string? DescribeUnusableScope()
+    {
+        ListViewItem[] ticked =
+            [.. _refusedList?.CheckedItems.Cast<ListViewItem>() ?? []];
+
+        if (ticked.Length == 0)
+            return "Tick at least one file to use this encoding for.";
+
+        // A row carries the path this review resolved for it. A null one cannot be matched
+        // to an entry later, so acting on it would drop the file from the scope in silence.
+        int unresolvable = ticked.Count(item => item.Tag is not string);
+
+        if (unresolvable == 0)
+            return null;
+
+        return $"{unresolvable} of the {ticked.Length} ticked file(s) are no longer "
+               + "inside this review's directory, so the chosen encoding cannot be "
+               + "applied to them. Run View again for the directory these files are "
+               + "actually in, then choose the encoding.";
+    }
 
     /// <summary>Says why the button did nothing, instead of doing nothing.</summary>
     private void ShowScopeProblem(string message)
