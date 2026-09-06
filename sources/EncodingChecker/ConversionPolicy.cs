@@ -120,6 +120,38 @@ internal static class ConversionPolicy
     };
 
     /// <summary>
+    /// The machine-readable reason for a decision, read from the decision itself.
+    /// </summary>
+    /// <remarks>
+    /// Beside <see cref="Decide"/> because it answers the same question. The caller used to
+    /// work the reason out again from the raw inputs, re-deriving the distinction
+    /// <see cref="SourceInterpretation"/> had already been handed back to express. The two
+    /// could not disagree - the expressions were identical and their operands never changed
+    /// between them - but a refusal reason added to <see cref="Decide"/> would have fallen
+    /// through to <see cref="ConversionReasonCodes.LegacySourceRequired"/> at the call site:
+    /// a correct refusal carrying the wrong explanation, with nothing to fail. That already
+    /// happened once, when the ambiguous BOM-less case had to be bolted on as a guard rather
+    /// than added as a case.
+    /// </remarks>
+    internal static string? ReasonCodeFor(
+        PlannedAction action,
+        SourceInterpretation sourceInterpretation) => (action, sourceInterpretation) switch
+    {
+        (PlannedAction.Skip, _) => ConversionReasonCodes.UnknownEncoding,
+
+        (PlannedAction.Refuse, SourceInterpretation.AutomaticUnicodeOrAscii) =>
+            ConversionReasonCodes.AmbiguousBomlessUtf16,
+
+        (PlannedAction.Refuse, SourceInterpretation.ExplicitSource) =>
+            ConversionReasonCodes.ExplicitSourceConflictsWithDetection,
+
+        (PlannedAction.Refuse, SourceInterpretation.LegacyNeedsSourceChoice) =>
+            ConversionReasonCodes.LegacySourceRequired,
+
+        _ => null,
+    };
+
+    /// <summary>
     /// Whether a refusal can be resolved by the user identifying the original source
     /// encoding. Kept here so the GUI, plans, and CLI describe the same policy.
     /// </summary>

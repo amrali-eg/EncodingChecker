@@ -857,18 +857,7 @@ internal static class ScanEngine
 
         entry.Action = action;
         entry.SourceInterpretation = sourceInterpretation;
-        entry.ReasonCode = action switch
-        {
-            PlannedAction.Skip => ConversionReasonCodes.UnknownEncoding,
-            PlannedAction.Refuse when automaticBomlessUtf16IsAmbiguous =>
-                ConversionReasonCodes.AmbiguousBomlessUtf16,
-            PlannedAction.Refuse => entry.SourceEncodingWasSpecified &&
-                entry.HasReliableUnicodeDetection && automaticallyDetected is not null &&
-                automaticallyDetected.CodePage != sourceEncoding.CodePage
-                ? ConversionReasonCodes.ExplicitSourceConflictsWithDetection
-                : ConversionReasonCodes.LegacySourceRequired,
-            _ => null,
-        };
+        entry.ReasonCode = ConversionPolicy.ReasonCodeFor(action, sourceInterpretation);
 
         // A retry must not carry a diagnostic from an earlier failed attempt.
         // The optional BOM-less Unicode advisory below is added back for this pass.
