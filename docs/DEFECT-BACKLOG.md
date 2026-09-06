@@ -3,9 +3,9 @@
 Status of the thirty-five findings from the two independent reviews that
 preceded v3.11.0, plus what has been found since.
 
-**Of the original thirty-five: 26 fixed, 7 open, 2 could not be reproduced.**
+**Of the original thirty-five: 26 fixed, 8 open, 1 could not be reproduced.**
 Six further findings have been raised since v3.11.1, two of them already fixed.
-**Eleven open in total.**
+**Twelve open in total.**
 
 ## Why this file exists
 
@@ -43,7 +43,7 @@ report.
 | EC-05 | A plan holding an unreadable file can never be applied | fixed | A hash is required only for `Convert` entries. |
 | EC-06 | A drive-root base path makes every plan unusable | fixed | Fixed 2026-09-04. **Shipped broken in v3.11.0 and v3.11.1.** |
 | EC-07 | The refusal advises the very encoding it cannot justify | fixed | `DescribeRefusal` offers both byte orders. |
-| EC-08 | An include pattern can hang the scan indefinitely | *not reproduced* | A pathological mask against a matching filename completed inside a 10 s budget. No match timeout was added, so this is not *proven fixed*. |
+| EC-08 | An include pattern can hang the scan indefinitely | **open** | Reproduced 2026-09-06, but only against inputs built for it. `CompilePatterns` still emits `RegexOptions.Compiled` with `Regex.InfiniteMatchTimeout`. The 2026-09-04 attempt used a *matching* filename, which stops at the first success and cannot show it. Scored below. |
 | EC-09 | `.bak` files are excluded, uncounted, and unreported | fixed | `TraversalCounters.FilesExcludedAsEcArtifact`. |
 | EC-10 | A scan failure is journaled as a refusal | fixed | A failed snapshot is recorded as `Error`, not `Refused`. |
 | EC-11 | `ApplyPlan` leaks its Ctrl+C handler onto a disposed token source | fixed | Both handler sites unsubscribe in a `finally`. |
@@ -212,6 +212,7 @@ trips over is not noise.
 |---|---|---|---|---|
 | CX-06 | Entropy gate outranks a valid BOM | Medium | Occasional | EC reports the wrong encoding for a file that says what it is. The only open item that changes what EC tells you. |
 | — | Ambiguous BOM-less UTF-32 converts silently | **Critical** | **Theoretical** | Rewrites on an unproven byte order — the exact thing this release line exists to prevent. Needs every scalar to be a multiple of 0x100, so real text will not reach it. Scored high on impact and dismissed on reach, deliberately. |
+| EC-08 | An include pattern can hang the scan indefinitely | Medium | **Theoretical** | Availability, not data: a scan no token can cancel, and if it hangs partway through a conversion the tree is left partly converted with no journal. Needs *both* halves built on purpose — a mask of ~10+ wildcards separated by one character, and a filename carrying ~24+ mostly consecutive repeats of that same character. Measured at twelve wildcards: every realistic name answered in 0–5 ms; forty consecutive `a` took >20 s. The mask comes from the operator's own command line, so there is no untrusted path. Fix measured and not taken: see below. |
 | — | CSV report does not neutralise leading formula characters | Medium | Rare | Needs an attacker-influenced filename and a reader who opens the report in a spreadsheet. |
 | EC-16 | Settings.xml written truncate-in-place | Low | Occasional | Loses preferences, not data, and reverts toward safer defaults. Already caused one smoke-test failure that looked like a product bug. |
 | EC-20 | Detection reads with looser file sharing | Low | Rare | Detect and validate only; nothing is written. Can describe bytes another process is changing. |
@@ -225,9 +226,25 @@ trips over is not noise.
 Nothing here writes to a file nobody approved, which is why none of it blocked a
 release.
 
+### EC-08: the fix that was measured and not taken
+
+`RegexOptions.NonBacktracking` in place of `Compiled` removes the blow-up
+entirely, agrees with the current engine on every mask tested, and costs nothing
+measurable beside per-file I/O. It was implemented with tests and then reverted
+deliberately: the defect needs a mask *and* a filename both built for it, and
+neither arrives from anywhere but the operator's own hands.
+
+Three dead ends, recorded so nobody walks them again. Testing a pathological
+mask against a **matching** filename proves nothing, because the engine stops at
+the first success — that is how this was first recorded "not reproduced". `*`
+crossing directory separators is deliberate rather than a Windows-wildcard bug:
+`src/*.cs` is meant to scope a subtree, pinned by
+`PathAwarePatternTests.PathQualifiedPattern_MatchesOnlyTheIntendedSubtree`. And
+`[^/]*` in place of `.*` does not reduce the backtracking, because a filename
+contains no separator for it to bound.
+
 ### Not reproduced
 
 | | Finding | Why it is not listed as open |
 |---|---|---|
-| EC-08 | An include pattern can hang the scan indefinitely | A pathological mask completed inside a 10 s budget. No match timeout was added, so this is not *proven fixed* either. |
 | EC-19 | The double-BOM guard's reach depends on which object supplied the codec | An inspection-only finding that traced the wrong object. `ConvertFiles` re-resolves the codec by name through `Encoding.GetEncoding`, which carries a 3-byte preamble, so the detector's BOM-less instance never reaches the guard. Tested against a file beginning with two BOMs: both the automatic path and `-From utf-8` refuse with `MultipleLeadingByteOrderMarks`. |
