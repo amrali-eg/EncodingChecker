@@ -3,9 +3,10 @@
 Status of the thirty-five findings from the two independent reviews that
 preceded v3.11.0, plus what has been found since.
 
-**Of the original thirty-five: 26 fixed, 7 open, 2 could not be reproduced.**
+**Of the original thirty-five: 26 fixed, 8 open, 1 could not be reproduced.**
 Six further findings have been raised since v3.11.1, two of them already fixed.
-**Eleven open in total.**
+Twelve more since v3.11.2, all twelve fixed.
+**Twelve open in total.**
 
 ## Why this file exists
 
@@ -43,7 +44,7 @@ report.
 | EC-05 | A plan holding an unreadable file can never be applied | fixed | A hash is required only for `Convert` entries. |
 | EC-06 | A drive-root base path makes every plan unusable | fixed | Fixed 2026-09-04. **Shipped broken in v3.11.0 and v3.11.1.** |
 | EC-07 | The refusal advises the very encoding it cannot justify | fixed | `DescribeRefusal` offers both byte orders. |
-| EC-08 | An include pattern can hang the scan indefinitely | *not reproduced* | A pathological mask against a matching filename completed inside a 10 s budget. No match timeout was added, so this is not *proven fixed*. |
+| EC-08 | An include pattern can hang the scan indefinitely | **open** | Reproduced 2026-09-06, but only against inputs built for it. `CompilePatterns` still emits `RegexOptions.Compiled` with `Regex.InfiniteMatchTimeout`. The 2026-09-04 attempt used a *matching* filename, which stops at the first success and cannot show it. Scored below. |
 | EC-09 | `.bak` files are excluded, uncounted, and unreported | fixed | `TraversalCounters.FilesExcludedAsEcArtifact`. |
 | EC-10 | A scan failure is journaled as a refusal | fixed | A failed snapshot is recorded as `Error`, not `Refused`. |
 | EC-11 | `ApplyPlan` leaks its Ctrl+C handler onto a disposed token source | fixed | Both handler sites unsubscribe in a `finally`. |
@@ -81,6 +82,49 @@ report.
 | Conversion parallelism was capped at 4 | fixed | Raised to 8 on 2026-09-04; measured 1.5–1.7x faster. |
 | A ticked file can be dropped from a source choice in silence | fixed | Each row in the review's refused list carries its resolved path. `TickedFiles()` filters out rows whose path is null and says nothing, so a file the user ticked is left refused with no message. This was live until EC-06 was fixed: with a drive-root base directory every row resolved to null, so choosing an encoding reported "Conversion cancelled. No files were modified." The trigger is gone; the silent drop is not. |
 | Force-closing during a run can throw on the way out | **open** | The second close request abandons a run deliberately, which is correct. But the worker may then marshal its next confirmation to a form that no longer exists, and the completion handler runs against disposed controls. An error dialog at exit rather than lost work — finished files are installed and the one in flight is untouched. Reasoned from the code, not reproduced: it needs precise timing. |
+
+## Found after v3.11.2
+
+An independent review of 74d5b3d, run from the source rather than from this file.
+Everything it found and fixed is below, one commit each, carrying that commit's
+measurement and mutation result. Ordered by what a reader needs first: what EC
+did to files, then what it reported, then what it documented.
+
+| Finding | Status | Note |
+|---|---|---|
+| "Already in the target encoding" was decided by label, not by codec | fixed | `Decide` compared the detected charset's `WebName` against whatever the caller typed, so every accepted alias for one code page failed the test. `-Target unicode`, `ucs-2` or `utf-16le` on a tree already in UTF-16LE decoded, re-encoded, verified and reinstalled every file to produce **identical bytes**, resetting every modification time and, with `-Backup`, leaving a `.bak` and an `.ecmeta.json` beside each. Under `-FailOnChanges` the same tree exits 0 for `-Target utf-16` and 2 for `-Target unicode`; on BOM-less UTF-16 the alias reaches the ambiguity guard and exits 5, so the spelling alone moved a clean run to a refusal. Now compares resolved code pages; a zero code page proves nothing and never matches. ASCII to UTF-8 was deliberately left a conversion, on reasoning the 64 KiB finding below then disproved — folding them together is now safe and is not yet done. |
+| "Already in the target encoding" was a whole-file claim made from a 64 KiB sample | fixed | Detection reads at most 64 KiB, and when the source codec matched the target nothing read further. A file clean for 64 KiB and invalid afterwards was reported `Unchanged`, and whether EC noticed depended only on which target was named: the same corrupt file was `Error` under `-Target utf-16` and `Unchanged` under `-Target utf-8`. `-Validate` always read the whole file; Convert never reached that check once it had decided it had nothing to do. Costs almost nothing, and not for the expected reason — Convert already reads every byte, because `CaptureSourceSnapshot` hashes the whole stream before anything is decided. Measured at 0.04–0.10 ms per MiB. |
+| A preview promised conversions that would fail, and a plan recorded them as approved | fixed | `ApplyConversion` returned at the `whatIf` branch before the converter ran, so nothing decoded the file. `-Plan` sets `WhatIf`, so a plan recorded `Action=Convert` with no reason for a source that cannot be read, exited 0, and showed the reviewer nothing; the failure surfaced at `-Apply`, after approval and part-way through the batch. `FindStaleFiles` can prove the bytes have not changed since review and cannot prove they are readable, because that needs a decode nobody performed. The entry is now marked `Refuse`, not merely given an error, because the plan records the *action*. Decode only: a target that cannot represent the text still fails at conversion time, which reading the source cannot predict, and a test named for that case pins the limit. |
+| One file's failure could end the whole run | fixed | The per-item catch in `RunParallel` named four exception types. Anything else — a `SecurityException` from an ACL the enumerator did not surface, a regex timeout, a defect in EC itself — escaped `Parallel.ForEach` as an `AggregateException` and took every file the run had not reached with it. The CLI's outer catch names the same four, so it would have surfaced as a crash rather than exit 3. Now everything except cancellation and `OutOfMemoryException`, since carrying on after the latter would be pretending to process. `RunParallel` became internal so the isolation could be tested at all: no file can be made to throw the exceptions that mattered, which is exactly what made them dangerous. |
+| A folder EC could not read left no trace a machine could see | fixed | An unreadable *file* becomes a row with `ScanFailed` and drives exit 3. An unreadable *directory* produced a warning on stderr and nothing else: no row, no counter, exit 0 — and nothing whatever in the window, which passes no warning callback. Measured against a deny ACE: `-Validate -FailOnChanges` over a tree with one denied folder reported "1 file(s) processed" and exited 0, and a scan whose entire base directory was unreadable printed a header-only CSV and exited 0. A run that examined none of the tree could report success. `DirectoriesUnreadable` is now counted at both catch blocks, apart from the two exclusion counters, which record folders EC *chose* not to enter. The exit code is deliberately unchanged and the documentation now says what that means for a script. |
+| Folders skipped by name were counted nowhere | fixed | Twelve directory names are skipped deliberately and that is documented, but unlike attribute-excluded folders they incremented no counter. A scan of a tree whose only content sat under `build/` reported one file, zero exclusions and no warning — while `docs/CLI.md` promised that EC reports how many files each exclusion skipped. Counted separately from the attribute exclusions, whose message says "(hidden, system, or reparse point)" and would become untrue if the two were merged. What is scanned is unchanged: letting an explicit include reach into these folders was considered and declined, because both documents state they are skipped. |
+| `-Validate` rejections could carry no reason at all | fixed | Four ways to return `Invalid`, two of them explained. A charset outside the allowed list and a file EC could not identify both arrived as a bare `Invalid` with an empty reason, though they are not the same situation: one means widen the list or convert the file, the other means EC could not tell what it is, which `-DetectOnly` already calls `UnknownEncoding`. `CharsetNotAllowed` is new; `UnknownEncoding` is reused deliberately, because two names for one condition depending on which mode ran would be its own defect. This was the only outcome in the product where the reader had to re-derive a reason the producer already knew. |
+| A refusal's reason was re-derived instead of read from the decision | fixed | `ApplyConversion` worked the reason code out again from the four raw facts `Decide` had already reduced to a `SourceInterpretation`. The two copies were textually identical and their operands never changed between them, so they could not disagree — but nothing tied them together, and a fourth refusal reason added to the policy would have fallen through to `LegacySourceRequired` at the call site: a correct refusal carrying the wrong explanation, with nothing to fail. That shape had already needed one bolt-on `when` guard. Now `ConversionPolicy.ReasonCodeFor`, verified equivalent across all 256 reachable combinations of `Decide`'s inputs, with a test that fails if any refusal ever produces no reason. |
+| A decode failure reported a position no file has | fixed | `DecoderFallbackException.Index` is relative to the decoder call, not the file, and goes negative when the bad sequence began in bytes carried over from the previous call. A UTF-8 file ending in a truncated three-byte sequence produced "offset -2 within the failing read chunk", a message naming a frame it did not describe. The offending bytes are reported instead, which mean the same thing wherever the failure happened. An absolute file offset would need the streaming loop restructured to keep each chunk's base position in scope. |
+| Standard output was UTF-8 whatever the console was | fixed | After attaching to the parent console, both writers were rebuilt with `StreamWriter`'s default encoding. On the machine this was found on `Console.OutputEncoding` is `ibm437`, and the per-file CSV rendered "Grüße aus München" as "Gr├╝├ƒe aus M├╝nchen" — the tool producing in its own output the failure it exists to detect. A redirected stream stays UTF-8, matching the `-Report` file apart from its BOM; a console gets its own encoding, so characters it cannot represent become "?", which is visibly lossy rather than quietly wrong. No global console state is mutated. |
+| The documented parallelism default was the old one | fixed | `DefaultMaxParallelism` was raised from `min(CPU, 4)` to `min(CPU, 8)` with the measurement recorded beside it, and both statements of it were left saying 4: the built-in help and `docs/CLI.md`, which are the two places someone tuning `-MaxParallelism` against a slow share would look. The cause was an unnamed literal, with no identity a document could be checked against; it is now `ScanEngine.MaxParallelismCap`. A test finds the one line in each document that states the default, extracts every run of digits from it, and asserts the set equals the cap, so a stale number cannot hide beside a fresh one. |
+| The lifetime of `<file>.bak` was undocumented | fixed | `<file>.bak` is a fixed name holding the version the most recent run replaced, so converting the same file again replaces it and removes its sidecar. That is deliberate, and pinned by `BackupIntegrityTests.Backup_OverwritesAnyPreviousBackupFile` since the first commit of the test suite — but no document said so, and a user converting twice lost the original with nothing having warned them. Raised in review as a defect and **withdrawn**: refusing to overwrite a non-matching `.bak` breaks four existing tests and would block an ordinary "wrong target, convert again" run until the user deleted the backups by hand. See CX-02, whose fix accepted the replacement and removed the stale record instead. |
+
+### From the same review, and not tracked here
+
+Four findings the same review left open are recorded nowhere else in this file.
+The first is the one worth reading:
+
+- **A BOM-less UTF-16 file can be detected as UTF-32 and converted.** Silent, and
+  output verification cannot catch it, because both sides of the comparison use
+  the same wrong codec. It needs a file in which every other UTF-16 code unit is
+  a C0 control — one character per line with LF endings, say. Measured over
+  nineteen realistic file shapes: 41 of 44 detect correctly, and the three that
+  do not are the same degenerate shape. Scored Critical impact, low reach.
+- ASCII text with 2.3% or more NUL bytes is labelled `utf-16`. Conversion is
+  refused by the ambiguity guard in every case constructed, so the wrong label
+  reaches `-DetectOnly` and `-Validate` only.
+- Two hard links to one file are converted twice, once per name. Both runs
+  succeeded when tested, because `File.Replace` breaks the link; the `File.Move`
+  fallback would not.
+- Detection accepts a truncated trailing sequence, because it decodes without
+  flushing, while conversion flushes and rejects it. `-DetectOnly` can therefore
+  bless a file conversion refuses.
 
 ## Hashing: three optimisations measured and rejected
 
@@ -212,6 +256,7 @@ trips over is not noise.
 |---|---|---|---|---|
 | CX-06 | Entropy gate outranks a valid BOM | Medium | Occasional | EC reports the wrong encoding for a file that says what it is. The only open item that changes what EC tells you. |
 | — | Ambiguous BOM-less UTF-32 converts silently | **Critical** | **Theoretical** | Rewrites on an unproven byte order — the exact thing this release line exists to prevent. Needs every scalar to be a multiple of 0x100, so real text will not reach it. Scored high on impact and dismissed on reach, deliberately. |
+| EC-08 | An include pattern can hang the scan indefinitely | Medium | **Theoretical** | Availability, not data: a scan no token can cancel, and if it hangs partway through a conversion the tree is left partly converted with no journal. Needs *both* halves built on purpose — a mask of ~10+ wildcards separated by one character, and a filename carrying ~24+ mostly consecutive repeats of that same character. Measured at twelve wildcards: every realistic name answered in 0–5 ms; forty consecutive `a` took >20 s. The mask comes from the operator's own command line, so there is no untrusted path. Fix measured and not taken: see below. |
 | — | CSV report does not neutralise leading formula characters | Medium | Rare | Needs an attacker-influenced filename and a reader who opens the report in a spreadsheet. |
 | EC-16 | Settings.xml written truncate-in-place | Low | Occasional | Loses preferences, not data, and reverts toward safer defaults. Already caused one smoke-test failure that looked like a product bug. |
 | EC-20 | Detection reads with looser file sharing | Low | Rare | Detect and validate only; nothing is written. Can describe bytes another process is changing. |
@@ -225,9 +270,25 @@ trips over is not noise.
 Nothing here writes to a file nobody approved, which is why none of it blocked a
 release.
 
+### EC-08: the fix that was measured and not taken
+
+`RegexOptions.NonBacktracking` in place of `Compiled` removes the blow-up
+entirely, agrees with the current engine on every mask tested, and costs nothing
+measurable beside per-file I/O. It was implemented with tests and then reverted
+deliberately: the defect needs a mask *and* a filename both built for it, and
+neither arrives from anywhere but the operator's own hands.
+
+Three dead ends, recorded so nobody walks them again. Testing a pathological
+mask against a **matching** filename proves nothing, because the engine stops at
+the first success — that is how this was first recorded "not reproduced". `*`
+crossing directory separators is deliberate rather than a Windows-wildcard bug:
+`src/*.cs` is meant to scope a subtree, pinned by
+`PathAwarePatternTests.PathQualifiedPattern_MatchesOnlyTheIntendedSubtree`. And
+`[^/]*` in place of `.*` does not reduce the backtracking, because a filename
+contains no separator for it to bound.
+
 ### Not reproduced
 
 | | Finding | Why it is not listed as open |
 |---|---|---|
-| EC-08 | An include pattern can hang the scan indefinitely | A pathological mask completed inside a 10 s budget. No match timeout was added, so this is not *proven fixed* either. |
 | EC-19 | The double-BOM guard's reach depends on which object supplied the codec | An inspection-only finding that traced the wrong object. `ConvertFiles` re-resolves the codec by name through `Encoding.GetEncoding`, which carries a 3-byte preamble, so the detector's BOM-less instance never reaches the guard. Tested against a file beginning with two BOMs: both the automatic path and `-From utf-8` refuse with `MultipleLeadingByteOrderMarks`. |

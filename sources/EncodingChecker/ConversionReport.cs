@@ -225,6 +225,17 @@ internal static class ConversionReasonCodes
         nameof(ExplicitSourceOnUnprovableBomlessUnicode);
     internal const string AmbiguousBomlessUtf16 = BomlessUnicodeSafety.AmbiguousReasonCode;
     internal const string StrictValidationFailed = nameof(StrictValidationFailed);
+
+    /// <summary>
+    /// <c>-Validate</c> identified the file, and its charset is not in the allowed list.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from <see cref="UnknownEncoding"/>, which these rows used to be
+    /// indistinguishable from: one says widen the list or convert the file, the other says
+    /// EC could not tell what the file is. Both arrived as a bare <c>Invalid</c> with an
+    /// empty reason, the only outcome in the product that did not explain itself.
+    /// </remarks>
+    internal const string CharsetNotAllowed = nameof(CharsetNotAllowed);
     internal const string SourceSnapshotFailed = nameof(SourceSnapshotFailed);
     internal const string BackupFailed = nameof(BackupFailed);
     internal const string MultipleLeadingByteOrderMarks = nameof(MultipleLeadingByteOrderMarks);

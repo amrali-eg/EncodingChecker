@@ -100,8 +100,12 @@ internal static class ScanEngine
     // above the point where CPU count would matter. Measured on 2,000 files: 4 gave
     // 4,207 ms and 8 gave 2,511 ms without backups, 10,516 and 7,305 with them. Past 8
     // the curve flattens, and backup runs stop improving entirely.
+    // Named rather than inlined so the documentation stating it can be asserted against
+    // it. Both the help text and CLI.md still said 4 a release after this became 8.
+    internal const int MaxParallelismCap = 8;
+
     internal static readonly int DefaultMaxParallelism =
-        Math.Min(Environment.ProcessorCount, 8);
+        Math.Min(Environment.ProcessorCount, MaxParallelismCap);
 
     /// <summary>Charset label used when the source encoding cannot be established.</summary>
     internal const string UnknownCharset = "(Unknown)";
@@ -552,13 +556,29 @@ internal static class ScanEngine
                         ? ConversionRowResult.Unchanged
                         : ConversionRowResult.Invalid;
 
-                if (isValid && entry.Result == ConversionRowResult.Invalid)
+                if (!isValid)
+                {
+                    // Two unlike situations used to arrive here as the same bare Invalid:
+                    // a file EC could not identify, and one it identified as something the
+                    // caller did not allow. Every other mode names both. Leaving these
+                    // blank made -Validate the only outcome whose reason the reader had to
+                    // reconstruct from the encoding column and the list they passed in.
+                    bool identified = sourceCharset != UnknownCharset;
+
+                    entry.ReasonCode = identified
+                        ? ConversionReasonCodes.CharsetNotAllowed
+                        : ConversionReasonCodes.UnknownEncoding;
+
+                    entry.Diagnostic = identified
+                        ? $"The file is {label}, which is not in the allowed list."
+                        : "The file's encoding could not be identified from its contents.";
+                }
+                else if (entry.Result == ConversionRowResult.Invalid)
                 {
                     entry.ReasonCode = ConversionReasonCodes.StrictValidationFailed;
                     entry.Diagnostic = validationDiagnostic;
                 }
-                else if (entry.Result == ConversionRowResult.Unchanged &&
-                         entry.HasAmbiguousBomlessUtf16)
+                else if (entry.HasAmbiguousBomlessUtf16)
                 {
                     // The two byte orders are separate entries in the allowed set; the
                     // label matched only because .NET names both "utf-16". Passing the
@@ -823,8 +843,10 @@ internal static class ScanEngine
 
         PlannedAction action = ConversionPolicy.Decide(
             sourceCharset,
+            sourceEncoding.CodePage,
             sourceHasBom,
             targetCharset,
+            targetEncoding.CodePage,
             targetWriteBom,
             entry.SourceEncodingWasSpecified,
             TextEncoding.IsUnicodeOrAscii(sourceEncoding),
@@ -851,18 +873,7 @@ internal static class ScanEngine
 
         entry.Action = action;
         entry.SourceInterpretation = sourceInterpretation;
-        entry.ReasonCode = action switch
-        {
-            PlannedAction.Skip => ConversionReasonCodes.UnknownEncoding,
-            PlannedAction.Refuse when automaticBomlessUtf16IsAmbiguous =>
-                ConversionReasonCodes.AmbiguousBomlessUtf16,
-            PlannedAction.Refuse => entry.SourceEncodingWasSpecified &&
-                entry.HasReliableUnicodeDetection && automaticallyDetected is not null &&
-                automaticallyDetected.CodePage != sourceEncoding.CodePage
-                ? ConversionReasonCodes.ExplicitSourceConflictsWithDetection
-                : ConversionReasonCodes.LegacySourceRequired,
-            _ => null,
-        };
+        entry.ReasonCode = ConversionPolicy.ReasonCodeFor(action, sourceInterpretation);
 
         // A retry must not carry a diagnostic from an earlier failed attempt.
         // The optional BOM-less Unicode advisory below is added back for this pass.
@@ -894,6 +905,26 @@ internal static class ScanEngine
                   + "your explicit selection and kept all strict conversion checks enabled.";
         }
 
+        // "Already in the target encoding" is a claim about the whole file, and detection
+        // saw at most the first 64 KiB of it. Without this check a file whose later bytes
+        // are not valid in the codec just named was reported as already correct, and
+        // whether EC noticed depended only on which target the caller happened to type:
+        // the same corrupt file was an Error under -Target utf-16 and Unchanged under
+        // -Target utf-8. -Validate has always read the whole file; this is the same check,
+        // reached from the one path that had decided it had nothing to do.
+        if (action == PlannedAction.Unchanged &&
+            !StrictFileValidation.TryValidateFile(
+                path, sourceEncoding, out string? unchangedDiagnostic))
+        {
+            entry.Result = ConversionRowResult.Error;
+            entry.ReasonCode = ConversionReasonCodes.StrictValidationFailed;
+            entry.Diagnostic = unchangedDiagnostic;
+
+            // Nothing was written, and nothing was going to be.
+            entry.ReplacementCommitted = false;
+            return;
+        }
+
         if (action != PlannedAction.Convert)
         {
             entry.Result = ConversionPolicy.ToRowResult(action);
@@ -916,6 +947,27 @@ internal static class ScanEngine
 
         if (whatIf)
         {
+            // A preview saying "would be converted" has to have read what it is promising
+            // about. Nothing here decoded the file, so -Plan - which sets WhatIf - recorded
+            // Action=Convert with no reason for a source that cannot be read, exited 0, and
+            // showed the reviewer nothing; the failure surfaced at -Apply, after approval
+            // and part-way through the batch. Refuse rather than schedule it, so the plan
+            // never carries a file it cannot carry out.
+            //
+            // The decode only. A source that reads cleanly can still fail on a target that
+            // cannot represent it, and no amount of reading the source predicts that;
+            // closing that half means running the whole conversion into a discarded buffer.
+            if (!StrictFileValidation.TryValidateFile(
+                    path, sourceEncoding, out string? previewDiagnostic))
+            {
+                entry.Action = PlannedAction.Refuse;
+                entry.Result = ConversionRowResult.Error;
+                entry.ReasonCode = ConversionReasonCodes.StrictValidationFailed;
+                entry.Diagnostic = previewDiagnostic;
+                entry.ReplacementCommitted = false;
+                return;
+            }
+
             entry.Result = ConversionRowResult.Converted; // "would be converted"
             return;
         }
@@ -1216,7 +1268,13 @@ internal static class ScanEngine
     /// Processes items with bounded parallelism and isolates per-file errors.
     /// Cancellation propagates normally.
     /// </summary>
-    private static void RunParallel<T>(
+    /// <remarks>
+    /// Internal rather than private so the isolation itself can be tested. No file can be
+    /// made to throw the exceptions this has to survive - that is what makes them the
+    /// dangerous ones - so the only way to prove one file's failure stays one row is to
+    /// hand it a <paramref name="processItem"/> that throws.
+    /// </remarks>
+    internal static void RunParallel<T>(
         IEnumerable<T> items,
         int maxParallelism,
         Func<T, string> getPath,
@@ -1244,11 +1302,15 @@ internal static class ScanEngine
                 {
                     entry = processItem(item);
                 }
+                // One file's failure is one row. This used to name four exception types,
+                // so anything else - a SecurityException the enumerator did not surface, a
+                // regex timeout, a defect in this code - escaped Parallel.ForEach as an
+                // AggregateException and took every file the run had not reached yet with
+                // it. Cancellation still propagates, and OutOfMemoryException is left alone
+                // because carrying on after it would be pretending to process, not
+                // processing.
                 catch (Exception ex) when (
-                    ex is IOException or
-                    UnauthorizedAccessException or
-                    ArgumentException or
-                    NotSupportedException)
+                    ex is not OperationCanceledException and not OutOfMemoryException)
                 {
                     if (item is ConversionReportEntry existing)
                     {

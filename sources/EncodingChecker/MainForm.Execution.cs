@@ -372,7 +372,7 @@ public partial class MainForm
         if (counters is null)
             return string.Empty;
 
-        var parts = new List<string>(3);
+        var parts = new List<string>(5);
 
         if (counters.FilesExcludedByAttribute > 0)
         {
@@ -390,6 +390,20 @@ public partial class MainForm
         {
             parts.Add(
                 $"{counters.DirectoriesExcludedByAttribute} folder(s) not entered");
+        }
+
+        if (counters.DirectoriesExcludedByName > 0)
+        {
+            parts.Add(
+                $"{counters.DirectoriesExcludedByName} build/metadata folder(s) not entered");
+        }
+
+        // The window passes no warning callback, so before this counter a directory the
+        // scan could not read left no trace in the GUI at all.
+        if (counters.DirectoriesUnreadable > 0)
+        {
+            parts.Add(
+                $"{counters.DirectoriesUnreadable} folder(s) could not be read");
         }
 
         return string.Join(", ", parts);

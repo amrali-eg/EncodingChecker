@@ -381,6 +381,20 @@ internal static partial class Program
                 + "(hidden, system, or reparse point); their contents were not counted.");
         }
 
+        if (traversalCounters.DirectoriesExcludedByName > 0)
+        {
+            Console.Error.WriteLine(
+                $"{traversalCounters.DirectoriesExcludedByName} folder(s) not entered "
+                + "(build or metadata name); their contents were not counted.");
+        }
+
+        if (traversalCounters.DirectoriesUnreadable > 0)
+        {
+            Console.Error.WriteLine(
+                $"{traversalCounters.DirectoriesUnreadable} folder(s) could not be read; "
+                + "their contents were not examined.");
+        }
+
         // Quiet mode must not hide the reason for exit code 3.
         foreach (ConversionReportEntry entry in entries
                      .Where(e => e.Result == ConversionRowResult.Error))

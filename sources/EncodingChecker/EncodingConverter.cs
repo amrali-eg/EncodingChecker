@@ -961,9 +961,13 @@ internal static partial class EncodingConverter
 
     private static string DescribeDecoderFailure(DecoderFallbackException ex)
     {
-        // The index is relative to the failing read chunk.
-        return
-            $"invalid byte sequence (offset {ex.Index} within the failing read chunk).";
+        // Index is relative to the decoder call that failed, not to the file, and goes
+        // negative when the sequence began in bytes carried over from the previous call -
+        // so reporting it as a position produced "offset -2", a place no file has. The
+        // bytes themselves identify the fault and mean the same thing wherever it happened.
+        return ex.BytesUnknown is { Length: > 0 } bytes
+            ? $"invalid byte sequence 0x{System.Convert.ToHexString(bytes)}."
+            : "invalid byte sequence.";
     }
 
     private static string DescribeEncoderFailure(EncoderFallbackException ex)

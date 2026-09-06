@@ -40,13 +40,22 @@ conversion of the same folder will rewrite them like anything else. Keep exporte
 plans, journals, and reports outside the folder you scan.
 
 Common metadata and build folders such as `.git`, `bin`, `obj`, and
-`node_modules` are skipped. Hidden, system, and reparse-point files are left
-alone, and hidden, system, and reparse-point folders are not entered.
+`node_modules` are skipped, and no pattern reaches into them. Hidden, system,
+and reparse-point files are left alone, and hidden, system, and reparse-point
+folders are not entered.
 
-EC reports how many files each exclusion skipped, counting only files your
-patterns actually selected — so `-Include "*.bak"` reports that they were
-skipped instead of returning nothing at all. These counts do not change the
-exit code.
+EC reports what each exclusion skipped, so a clean result cannot stand in for
+complete coverage. For files it reports counts, limited to files your patterns
+actually selected — so `-Include "*.bak"` reports that they were skipped instead
+of returning nothing at all. For skipped folders it reports the folders, not
+their contents, because it does not walk them to find out.
+
+A folder EC tried to read and could not — a permission denial, or one removed
+mid-scan — is reported the same way, counted separately from the folders it
+skipped on purpose. **These counts do not change the exit code.** A run that
+could not read part of the tree still exits 0, so a script that must not pass
+over unexamined content has to read the counts on stderr rather than the exit
+code alone.
 
 ## Conversion
 
@@ -54,7 +63,7 @@ exit code.
 |---|---|
 | `-Target <encoding>` | Target encoding, for example `utf-8` or `utf-8-bom`. Required for conversion. |
 | `-From <encoding>` | Explicit original encoding for every selected file. Use when you know a legacy source encoding. |
-| `-Backup` | Save every replaced original as `<file>.bak`. |
+| `-Backup` | Save the replaced original as `<file>.bak`. The name is fixed, so converting the same file again replaces that backup. |
 | `-WhatIf` | Show a one-time preview without writing files. |
 | `-Plan <path>` | Write a reviewable conversion plan; do not modify files. |
 | `-Apply <path>` | Execute a saved plan. Its scope and conversion settings are fixed. |
@@ -101,7 +110,7 @@ combined with conversion options.
 | `-Journal <path>` | Write a JSON record of the conversion decision and final result for every file. Convert mode only. |
 | `-Quiet` | Suppress per-file CSV and normal summaries. Errors and coverage warnings still go to stderr. |
 | `-Verbose` | Include error details and a result breakdown. |
-| `-MaxParallelism <N>` | Maximum simultaneous files. Default: the smaller of CPU count and 4. |
+| `-MaxParallelism <N>` | Maximum simultaneous files. Default: the smaller of CPU count and 8. |
 
 `-Quiet` and `-Verbose` cannot be combined.
 
