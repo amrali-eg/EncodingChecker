@@ -67,20 +67,31 @@ internal static partial class Program
         if (!AttachConsole(AttachParentProcess))
             return false;
 
-        var stdout = new StreamWriter(Console.OpenStandardOutput())
-        {
-            AutoFlush = true
-        };
-        Console.SetOut(stdout);
+        Console.SetOut(
+            OpenStandardWriter(Console.OpenStandardOutput(), Console.IsOutputRedirected));
 
-        var stderr = new StreamWriter(Console.OpenStandardError())
-        {
-            AutoFlush = true
-        };
-        Console.SetError(stderr);
+        Console.SetError(
+            OpenStandardWriter(Console.OpenStandardError(), Console.IsErrorRedirected));
 
         return true;
     }
+
+    /// <summary>
+    /// A writer encoded for whatever is going to read it.
+    /// </summary>
+    /// <remarks>
+    /// A redirected stream is a file or a pipe, so UTF-8 is the useful answer and matches
+    /// the <c>-Report</c> file apart from its BOM. A console decodes with its own code page
+    /// instead, and these writers were UTF-8 either way: handing CP437 the UTF-8 for
+    /// "Gr&#252;&#223;e" displays "Gr&#9500;&#9565;&#9500;&#402;e", which is precisely the failure this program
+    /// exists to find. Characters the console cannot represent become "?", which is visibly
+    /// lossy rather than quietly wrong.
+    /// </remarks>
+    internal static StreamWriter OpenStandardWriter(Stream stream, bool redirected) =>
+        new(stream, redirected ? new UTF8Encoding(false) : Console.OutputEncoding)
+        {
+            AutoFlush = true,
+        };
 
     #endregion
 
