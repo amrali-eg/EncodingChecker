@@ -5,6 +5,7 @@ preceded v3.11.0, plus what has been found since.
 
 **Of the original thirty-five: 26 fixed, 8 open, 1 could not be reproduced.**
 Six further findings have been raised since v3.11.1, two of them already fixed.
+Three more since v3.11.2, all three fixed.
 **Twelve open in total.**
 
 ## Why this file exists
@@ -81,6 +82,40 @@ report.
 | Conversion parallelism was capped at 4 | fixed | Raised to 8 on 2026-09-04; measured 1.5–1.7x faster. |
 | A ticked file can be dropped from a source choice in silence | fixed | Each row in the review's refused list carries its resolved path. `TickedFiles()` filters out rows whose path is null and says nothing, so a file the user ticked is left refused with no message. This was live until EC-06 was fixed: with a drive-root base directory every row resolved to null, so choosing an encoding reported "Conversion cancelled. No files were modified." The trigger is gone; the silent drop is not. |
 | Force-closing during a run can throw on the way out | **open** | The second close request abandons a run deliberately, which is correct. But the worker may then marshal its next confirmation to a form that no longer exists, and the completion handler runs against disposed controls. An error dialog at exit rather than lost work — finished files are installed and the one in flight is untouched. Reasoned from the code, not reproduced: it needs precise timing. |
+
+## Found after v3.11.2
+
+Three findings from an independent review of 74d5b3d, run from the source rather
+than from this file, and new to the project. All three are fixed; each has its
+own commit carrying the measurement and the mutation result.
+
+| Finding | Status | Note |
+|---|---|---|
+| A folder EC could not read left no trace a machine could see | fixed | An unreadable *file* becomes a row with `ScanFailed` and drives exit 3. An unreadable *directory* produced a warning on stderr and nothing else: no row, no counter, exit 0 — and nothing whatever in the window, which passes no warning callback. Measured against a deny ACE: `-Validate -FailOnChanges` over a tree with one denied folder reported "1 file(s) processed" and exited 0, and a scan whose entire base directory was unreadable printed a header-only CSV and exited 0. A run that examined none of the tree could report success. `DirectoriesUnreadable` is now counted at both catch blocks, apart from the two exclusion counters, which record folders EC *chose* not to enter. The exit code is deliberately unchanged and the documentation now says what that means for a script. |
+| "Already in the target encoding" was a whole-file claim made from a 64 KiB sample | fixed | Detection reads at most 64 KiB, and when the source codec matched the target nothing read further. A file clean for 64 KiB and invalid afterwards was reported `Unchanged`, and whether EC noticed depended only on which target was named: the same corrupt file was `Error` under `-Target utf-16` and `Unchanged` under `-Target utf-8`. `-Validate` always read the whole file; Convert never reached that check once it had decided it had nothing to do. Costs almost nothing, and not for the expected reason — Convert already reads every byte, because `CaptureSourceSnapshot` hashes the whole stream before anything is decided. Measured at 0.04–0.10 ms per MiB. |
+| A preview promised conversions that would fail, and a plan recorded them as approved | fixed | `ApplyConversion` returned at the `whatIf` branch before the converter ran, so nothing decoded the file. `-Plan` sets `WhatIf`, so a plan recorded `Action=Convert` with no reason for a source that cannot be read, exited 0, and showed the reviewer nothing; the failure surfaced at `-Apply`, after approval and part-way through the batch. `FindStaleFiles` can prove the bytes have not changed since review and cannot prove they are readable, because that needs a decode nobody performed. The entry is now marked `Refuse`, not merely given an error, because the plan records the *action*. Decode only: a target that cannot represent the text still fails at conversion time, which reading the source cannot predict, and a test named for that case pins the limit. |
+
+### From the same review, and not tracked here
+
+Its fixed findings are in the git history under their own commits. Four of the
+ones it left open are recorded nowhere in this file, and the first is the one
+worth reading:
+
+- **A BOM-less UTF-16 file can be detected as UTF-32 and converted.** Silent, and
+  output verification cannot catch it, because both sides of the comparison use
+  the same wrong codec. It needs a file in which every other UTF-16 code unit is
+  a C0 control — one character per line with LF endings, say. Measured over
+  nineteen realistic file shapes: 41 of 44 detect correctly, and the three that
+  do not are the same degenerate shape. Scored Critical impact, low reach.
+- ASCII text with 2.3% or more NUL bytes is labelled `utf-16`. Conversion is
+  refused by the ambiguity guard in every case constructed, so the wrong label
+  reaches `-DetectOnly` and `-Validate` only.
+- Two hard links to one file are converted twice, once per name. Both runs
+  succeeded when tested, because `File.Replace` breaks the link; the `File.Move`
+  fallback would not.
+- Detection accepts a truncated trailing sequence, because it decodes without
+  flushing, while conversion flushes and rejects it. `-DetectOnly` can therefore
+  bless a file conversion refuses.
 
 ## Hashing: three optimisations measured and rejected
 
