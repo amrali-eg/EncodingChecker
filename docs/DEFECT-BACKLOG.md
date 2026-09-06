@@ -210,9 +210,19 @@ rough order of what a user could notice:
 2. **EC-16** — Settings.xml truncate-in-place. Already caused one smoke-test
    failure that looked like a product bug.
 3. **EC-20** — detection reads with sharing that permits concurrent writes.
-4. **EC-18** — a redundant full-file decode per pass over BOM-less UTF-16.
-5. **EC-15**, **EC-22**, **EC-23**, **EC-19**, **EC-17** — contract and clarity
-   issues, each a latent trap rather than a live defect.
+4. **EC-15** — the five semantics booleans are written as though they were a
+   contract and enforced nowhere. Nothing can be weakened by editing them, since
+   EC ignores the claim and always does the strict thing; the risk is a reader
+   treating `OutputVerification: true` as evidence that verification ran, when it
+   is a constant that would keep saying true if a future build stopped.
+5. **EC-22**, **EC-23**, **EC-19**, **EC-17** — contract and clarity issues,
+   each a latent trap rather than a live defect.
+6. **EC-18** — measured, and it costs nothing. `IsAmbiguousBomlessUtf16` aborts
+   at the first invalid sequence, so a provable file usually settles in the first
+   buffer. Even the worst case — megabytes of ASCII-range UTF-16 that decodes in
+   either order, with one proving character at the very end — showed no
+   measurable difference against the same content with a byte-order mark
+   (266/261 ms against 267/269 ms over 34 MiB). It is untidy, not slow.
 
 EC-08 sits outside that list because it could not be reproduced, and the absence
 of a reproduction is not evidence of a fix.
