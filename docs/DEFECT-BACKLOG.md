@@ -3,9 +3,9 @@
 Status of the thirty-five findings from the two independent reviews that
 preceded v3.11.0, plus what has been found since.
 
-**Of the original thirty-five: 25 fixed, 9 open, 1 could not be reproduced.**
-Five further findings have been raised since v3.11.1, one of them already fixed.
-**Thirteen open in total.**
+**Of the original thirty-five: 26 fixed, 7 open, 2 could not be reproduced.**
+Six further findings have been raised since v3.11.1, two of them already fixed.
+**Eleven open in total.**
 
 ## Why this file exists
 
@@ -54,10 +54,10 @@ report.
 | EC-16 | Settings.xml is written with truncate-in-place | **open** | `MainForm.Settings.cs:100` still opens `FileMode.Create` and serialises into it. |
 | EC-17 | The text-validation comment contradicts its code | **open** | Control characters are penalised, not ignored. Behaviour is right, comment is wrong — and the file must stay byte-identical across three repos, so the fix is a synchronised change. |
 | EC-18 | Ambiguity is recomputed on every pass over a BOM-less UTF-16 file | **open** | The or-expression short-circuits only when the flag is already true. |
-| EC-19 | The double-BOM guard's reach depends on which object supplied the codec | **open** | `HasMultipleLeadingPreambles` returns false for an empty preamble. |
+| EC-19 | The double-BOM guard's reach depends on which object supplied the codec | *not reproduced* | The detector's BOM-less instance never reaches the guard; both paths refuse. Tested. |
 | EC-20 | `DetectFromFile` opens with looser sharing than every other read path | **open** | Still permits concurrent writes and deletes. |
 | EC-21 | Three save-dialog instances are never disposed | fixed | All three use `using var`. |
-| EC-22 | Plan serialisation and deserialisation use different options objects | **open** | `ConversionPlan.Load` still deserialises without options. |
+| EC-22 | Plan serialisation and deserialisation use different options objects | fixed | Reader and writer now share one options object, in the plan store and the metadata store. |
 | EC-23 | `ApplyPlan` dereferences `ResolvePath` with a null-forgiving operator | **open** | `Program.CliExecution.cs:90`. EC-06 was what happens when that invariant breaks. |
 | CX-01 | An empty option value is silently ignored | fixed | Blank values are rejected with exit 1. |
 | CX-02 | A failed second conversion destroys the first backup | fixed | `RemoveBeforeBackupReplacement` runs before the backup is replaced. |
@@ -200,29 +200,34 @@ interactive desktop, which is exactly what the unit suite must not require.
 The driver defect stays **open** on its own account: it will bite any future
 phase that touches a combo inside a dialog. The refusal itself is closed.
 
-## The nine open from the original thirty-five
+## What is still open, scored
 
-None writes to a file nobody approved, which is why none blocked a release. In
-rough order of what a user could notice:
+Two axes, because one number hides the thing that matters. **Impact** is what a
+user loses when it happens — the original review's rule, severity by consequence
+and not by how hard the fix is. **Reach** is how easily it happens at all. A
+critical impact nobody can trigger is not a crisis, and a low impact everyone
+trips over is not noise.
 
-1. **CX-06** — a valid BOM loses to the entropy gate. The one open finding that
-   changes what EC reports about a file.
-2. **EC-16** — Settings.xml truncate-in-place. Already caused one smoke-test
-   failure that looked like a product bug.
-3. **EC-20** — detection reads with sharing that permits concurrent writes.
-4. **EC-15** — the five semantics booleans are written as though they were a
-   contract and enforced nowhere. Nothing can be weakened by editing them, since
-   EC ignores the claim and always does the strict thing; the risk is a reader
-   treating `OutputVerification: true` as evidence that verification ran, when it
-   is a constant that would keep saying true if a future build stopped.
-5. **EC-22**, **EC-23**, **EC-19**, **EC-17** — contract and clarity issues,
-   each a latent trap rather than a live defect.
-6. **EC-18** — measured, and it costs nothing. `IsAmbiguousBomlessUtf16` aborts
-   at the first invalid sequence, so a provable file usually settles in the first
-   buffer. Even the worst case — megabytes of ASCII-range UTF-16 that decodes in
-   either order, with one proving character at the very end — showed no
-   measurable difference against the same content with a byte-order mark
-   (266/261 ms against 267/269 ms over 34 MiB). It is untidy, not slow.
+| | Finding | Impact | Reach | Note |
+|---|---|---|---|---|
+| CX-06 | Entropy gate outranks a valid BOM | Medium | Occasional | EC reports the wrong encoding for a file that says what it is. The only open item that changes what EC tells you. |
+| — | Ambiguous BOM-less UTF-32 converts silently | **Critical** | **Theoretical** | Rewrites on an unproven byte order — the exact thing this release line exists to prevent. Needs every scalar to be a multiple of 0x100, so real text will not reach it. Scored high on impact and dismissed on reach, deliberately. |
+| — | CSV report does not neutralise leading formula characters | Medium | Rare | Needs an attacker-influenced filename and a reader who opens the report in a spreadsheet. |
+| EC-16 | Settings.xml written truncate-in-place | Low | Occasional | Loses preferences, not data, and reverts toward safer defaults. Already caused one smoke-test failure that looked like a product bug. |
+| EC-20 | Detection reads with looser file sharing | Low | Rare | Detect and validate only; nothing is written. Can describe bytes another process is changing. |
+| EC-15 | Semantics booleans written as a contract, enforced nowhere | Low | Common | Cannot weaken behaviour — EC ignores the claim and always does the strict thing. The risk is a reader treating `OutputVerification: true` as evidence a check ran. |
+| EC-17 | Text-validation comment contradicts its code | Low | Common | Behaviour is right, comment is wrong, and the file must stay byte-identical across three repos. A maintainer "correcting" it the wrong way would weaken binary rejection. |
+| EC-23 | Null-forgiving dereference of `ResolvePath` | Low | Rare | Correct today only because `FindStaleFiles` runs 29 lines earlier. EC-06 is what happened when that invariant broke. |
+| EC-18 | Ambiguity recomputed per pass | Low | Common | Measured: no cost. The probe aborts at the first invalid sequence, so a provable file settles in the first buffer. Untidy, not slow. |
+| — | Automation driver cannot select a combo inside a dialog | Low | — | Blocks a smoke phase, not a user. Suspect: `SelectCombo`'s keyboard fallback targets the main window while a modal review is open. |
+| — | Hash handling has drifted from LineEndingNormalizer | — | — | A decision, not a defect. See above. |
 
-EC-08 sits outside that list because it could not be reproduced, and the absence
-of a reproduction is not evidence of a fix.
+Nothing here writes to a file nobody approved, which is why none of it blocked a
+release.
+
+### Not reproduced
+
+| | Finding | Why it is not listed as open |
+|---|---|---|
+| EC-08 | An include pattern can hang the scan indefinitely | A pathological mask completed inside a 10 s budget. No match timeout was added, so this is not *proven fixed* either. |
+| EC-19 | The double-BOM guard's reach depends on which object supplied the codec | An inspection-only finding that traced the wrong object. `ConvertFiles` re-resolves the codec by name through `Encoding.GetEncoding`, which carries a 3-byte preamble, so the detector's BOM-less instance never reaches the guard. Tested against a file beginning with two BOMs: both the automatic path and `-From utf-8` refuse with `MultipleLeadingByteOrderMarks`. |

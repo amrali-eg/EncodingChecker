@@ -176,6 +176,10 @@ internal sealed record ConversionPlan
     // default encoder escapes every non-ASCII character, which turns the text EC
     // exists to handle into \uXXXX. Relaxed escaping is safe here because none of
     // this JSON is ever embedded in HTML.
+    // One options object for both directions. Writing already used it; reading did not,
+    // so a setting added here for the writer - a naming policy, most obviously - would
+    // have changed what EC produces without changing what EC accepts, and every file it
+    // wrote would have stopped loading. Nothing observable changes today.
     private static readonly JsonSerializerOptions Options = new()
     {
         WriteIndented = true,
@@ -300,7 +304,7 @@ internal sealed record ConversionPlan
         try
         {
             ConversionPlan? plan = JsonSerializer.Deserialize<ConversionPlan>(
-                File.ReadAllText(path));
+                File.ReadAllText(path), Options);
 
             if (plan is null)
             {
