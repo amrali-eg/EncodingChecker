@@ -73,6 +73,11 @@ $rows = foreach ($line in [regex]::Split($ledger, '\r?\n')) {
     }
 }
 
+# The ledger writes an em-dash where a finding carries no score. Built from its code
+# point rather than typed: Windows PowerShell reads a BOM-less .ps1 as the system ANSI
+# codepage, so a literal here parses as three bytes and breaks the string containing it.
+$EmDash = [string][char]0x2014
+
 $knownStatuses = @(
     'Fixed',
     'Open',
@@ -92,7 +97,7 @@ foreach ($row in $rows) {
     }
 
     if ($row.Status -eq 'Open' -and
-        ($row.Impact -in @('', '-', '—') -or $row.Reach -in @('', '-', '—'))) {
+        ($row.Impact -in @('', '-', $EmDash) -or $row.Reach -in @('', '-', $EmDash))) {
         $errors.Add("$($row.Id) is open but lacks impact or reach.")
     }
 
@@ -137,7 +142,7 @@ foreach ($key in $actual.Keys) {
     }
 }
 
-$summary = "**Derived count: $($actual.total) findings — $($actual.fixed) fixed, " +
+$summary = "**Derived count: $($actual.total) findings $EmDash $($actual.fixed) fixed, " +
     "$($actual.open) open, $($actual['not-reproduced']) not reproduced, " +
     "$($actual.withdrawn) withdrawn, $($actual['not-a-defect']) not a defect, " +
     "and $($actual.decision) design decision.**"
