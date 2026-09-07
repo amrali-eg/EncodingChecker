@@ -1,10 +1,23 @@
 [CmdletBinding()]
 param(
-    [string] $Path = (Join-Path $PSScriptRoot 'DEFECT-BACKLOG.md')
+    [string] $Path
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# Resolved here rather than as a parameter default: Windows PowerShell does not
+# populate $PSScriptRoot while evaluating defaults under -File, so the documented
+# invocation failed on the only shell guaranteed to be installed.
+if (-not $Path) {
+    $scriptDirectory = $PSScriptRoot
+
+    if (-not $scriptDirectory) {
+        $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
+    }
+
+    $Path = Join-Path $scriptDirectory 'DEFECT-BACKLOG.md'
+}
 
 $resolvedPath = (Resolve-Path -LiteralPath $Path).Path
 $content = [IO.File]::ReadAllText($resolvedPath)

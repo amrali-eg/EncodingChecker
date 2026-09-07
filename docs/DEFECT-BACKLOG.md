@@ -11,8 +11,13 @@ one place. Longer evidence and history follow the ledger.
 these figures with:
 
 ```powershell
-pwsh -NoProfile -File docs/Test-DefectBacklog.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File docs/Test-DefectBacklog.ps1
 ```
+
+`powershell` rather than `pwsh` because it is present on every Windows machine; the script
+is ASCII-only and needs no BOM, so either shell runs it. `-ExecutionPolicy Bypass` because
+this repository ships no signed scripts and a stock machine refuses to run them at all. It
+applies to that one process and changes nothing on the machine.
 
 The checker reads the canonical tables below, verifies unique IDs and known
 statuses, and requires both impact and reach for every open finding.
