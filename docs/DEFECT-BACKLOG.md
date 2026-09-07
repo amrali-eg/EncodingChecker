@@ -8,8 +8,8 @@ Six further findings have been raised since v3.11.1, two of them already fixed.
 Twelve more since v3.11.2, all twelve fixed. Three more since v3.12.0, all three
 fixed, which also closed EC-16 and corrected two rows that were wrong.
 
-**Eight rows below are still open, plus the four findings kept as prose under
-"From the same review, and not tracked here" — twelve in total.** Counted from
+**Nine rows below are still open, plus the four findings kept as prose under
+"From the same review, and not tracked here" — thirteen in total.** Counted from
 the rows rather than carried forward: the running arithmetic this line used to
 state stopped reconciling with the table it summarises, which is the exact drift
 this file exists to prevent.
