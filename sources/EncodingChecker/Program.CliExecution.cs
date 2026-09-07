@@ -498,17 +498,16 @@ internal static partial class Program
 
         if (!string.IsNullOrEmpty(options.ReportPath))
         {
-            try
+            string? reportError = AtomicArtifactFile.Write(options.ReportPath, stream =>
             {
                 using var writer = new StreamWriter(
-                    options.ReportPath, false, ConversionReport.CsvFileEncoding);
+                    stream, ConversionReport.CsvFileEncoding, leaveOpen: true);
                 ConversionReport.WriteCsv(entries, writer);
-            }
-            catch (Exception ex) when (
-                ex is IOException or UnauthorizedAccessException)
+            });
+
+            if (reportError is not null)
             {
-                Console.Error.WriteLine(
-                    $"Failed to write report file: {ex.Message}");
+                Console.Error.WriteLine($"Failed to write report file: {reportError}");
                 return 3;
             }
         }

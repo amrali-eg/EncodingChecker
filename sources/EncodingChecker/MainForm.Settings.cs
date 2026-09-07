@@ -96,10 +96,12 @@ public partial class MainForm
 
         try
         {
-            using var settingsFile = new FileStream(
-                GetSettingsFileName(), FileMode.Create, FileAccess.Write, FileShare.None);
-            new XmlSerializer(typeof(Settings)).Serialize(settingsFile, _settings);
-            settingsFile.Flush();
+            // EC-16: this truncated the settings in place, so an interruption left the
+            // user with no preferences rather than the previous ones. It has already
+            // produced a smoke-test failure that read as a product bug.
+            _ = AtomicArtifactFile.Write(
+                GetSettingsFileName(),
+                stream => new XmlSerializer(typeof(Settings)).Serialize(stream, _settings));
         }
         catch (Exception ex) when (
             ex is IOException or UnauthorizedAccessException or InvalidOperationException

@@ -354,9 +354,10 @@ internal sealed record ConversionJournal
     {
         try
         {
-            File.WriteAllText(
-                path, JsonSerializer.Serialize(this, Options), new UTF8Encoding(false));
-            return null;
+            // Serialised first: a failure here must not have truncated anything.
+            string json = JsonSerializer.Serialize(this, Options);
+
+            return AtomicArtifactFile.WriteText(path, json, new UTF8Encoding(false));
         }
         catch (Exception ex) when (
             ex is IOException or UnauthorizedAccessException or JsonException)
