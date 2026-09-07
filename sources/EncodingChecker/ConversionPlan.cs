@@ -352,6 +352,26 @@ internal sealed record ConversionPlan
                     return null;
                 }
 
+                // A number deserialises into any enum, so a damaged or hand-edited plan
+                // can carry an action and an interpretation no build ever wrote. Rejected
+                // here, before a source is touched, rather than left to be reported as
+                // whatever the mapping's fallback happened to be.
+                if (!Enum.IsDefined(file.Action))
+                {
+                    error = "The plan records an unknown action for "
+                            + $"'{file.RelativePath}'. Re-run -Plan to produce one this "
+                            + "build can carry out.";
+                    return null;
+                }
+
+                if (!Enum.IsDefined(file.SourceInterpretation))
+                {
+                    error = "The plan records an unknown source interpretation for "
+                            + $"'{file.RelativePath}'. Re-run -Plan to produce one this "
+                            + "build can carry out.";
+                    return null;
+                }
+
                 // Only writes need a hash; hashless refusals remain visible and harmless.
                 if (file.Action == PlannedAction.Convert &&
                     string.IsNullOrWhiteSpace(file.Sha256))

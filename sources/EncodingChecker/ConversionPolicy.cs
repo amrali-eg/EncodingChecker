@@ -111,12 +111,22 @@ internal static class ConversionPolicy
     /// <summary>
     /// Maps a planned action to its report result.
     /// </summary>
+    /// <remarks>
+    /// Every action is named. The fallback used to be
+    /// <see cref="ConversionRowResult.Converted"/>, so an action no build ever wrote -
+    /// System.Text.Json accepts a number for any enum, and a hand-edited plan carrying
+    /// <c>"Action": 99</c> loaded without complaint - was reported as a conversion that
+    /// never happened, in the report and in the journal. Throwing is right for a value
+    /// that cannot arise from a decision this build made.
+    /// </remarks>
     internal static ConversionRowResult ToRowResult(PlannedAction action) => action switch
     {
+        PlannedAction.Convert => ConversionRowResult.Converted,
         PlannedAction.Unchanged => ConversionRowResult.Unchanged,
         PlannedAction.Skip => ConversionRowResult.Skipped,
         PlannedAction.Refuse => ConversionRowResult.Refused,
-        _ => ConversionRowResult.Converted,
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(action), action, "Unknown planned action."),
     };
 
     /// <summary>
