@@ -47,7 +47,7 @@ description that turned out to be wrong.
 
 ### Running it
 
-Nine phases drive the built executable through Windows UI Automation and verify the
+Ten phases drive the built executable through Windows UI Automation and verify the
 resulting bytes.
 
 ```powershell
@@ -59,7 +59,7 @@ Exit 0 is a pass. Each run writes `gui-smoke-report.json` and `gui-smoke-report.
 carrying the EC version, the executable and managed-assembly hashes, and every phase's
 before and after file hashes.
 
-**[What each of the nine phases proves, and what it would catch →](GUI-SMOKE-TEST.md)**
+**[What each of the ten phases proves, and what it would catch →](GUI-SMOKE-TEST.md)**
 
 **The release workflow runs this for you, and a failure stops the release.** It drives
 the signed, published executable — the bytes that ship, not a rebuild of the same
@@ -86,7 +86,7 @@ checks the status line *against* the bytes on disk rather than trusting it.
 
 ### Record
 
-The nine phases record themselves. `gui-smoke-report.md` and `gui-smoke-report.json`
+The ten phases record themselves. `gui-smoke-report.md` and `gui-smoke-report.json`
 already carry the EC version, the executable and managed-assembly hashes, the OS and
 .NET versions, and every phase's before and after file hashes — better evidence than a
 transcribed letter, and not subject to a typo. Keep both files with the release.

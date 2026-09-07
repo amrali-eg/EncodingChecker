@@ -8,8 +8,8 @@ Six further findings have been raised since v3.11.1, two of them already fixed.
 Twelve more since v3.11.2, all twelve fixed. Three more since v3.12.0, all three
 fixed, which also closed EC-16 and corrected two rows that were wrong.
 
-**Nine rows below are still open, plus the four findings kept as prose under
-"From the same review, and not tracked here" — thirteen in total.** Counted from
+**Eight rows below are still open, plus the four findings kept as prose under
+"From the same review, and not tracked here" — twelve in total.** Counted from
 the rows rather than carried forward: the running arithmetic this line used to
 state stopped reconciling with the table it summarises, which is the exact drift
 this file exists to prevent.
@@ -239,10 +239,10 @@ drift: the detector-parity job exists to stop exactly this happening to the
 shared detector, and nothing plays that role for the safety machinery around it.
 **Open** — decide whether the two should converge, and on which.
 
-## The source-choice refusal is covered by a unit test, not a smoke phase
+## The source-choice refusal is covered by both a unit test and smoke phase J
 
-Both the defect and its fix were reproduced manually. That is how the defect was
-finally confirmed at all — until then it existed only as a reading of the code.
+Both the defect and its fix were first reproduced manually. The unit test still
+checks the form's decision without requiring an interactive desktop.
 
 **Before the fix:** scan a directory, point the window at a different one without
 scanning again, tick the refused file, choose an encoding, press confirm. The
@@ -252,27 +252,17 @@ modified." The choice is discarded and blamed on a cancellation nobody made.
 **After the fix:** the review stays open and says which ticked files are no
 longer inside its directory, and what to do about it.
 
-A smoke phase for the sequence was attempted and abandoned. The setup drives
-correctly — the refused row appears labelled `..\scanned\french.txt`, which only
-happens when the plan's root does not contain the file — but `SelectCombo` times
-out on the source-encoding dropdown in that dialog state, while the identical
-call in phase C succeeds. Driving the review to the foreground and ticking the
-row first were both tried; neither changed it.
+Smoke phase J now drives the same sequence against the built application. It
+requires the review to stay open, show `..\scanned\french.txt` and the refusal,
+and leave every source byte unchanged.
 
-**The dropdown works perfectly by hand**, so this is a defect in the automation
-driver, not in EC. One candidate: `SelectCombo`'s keyboard fallback calls
-`SetForegroundWindow` on the *main* window, which is the wrong target while a
-modal review is open.
-
-**The refusal is covered instead by a unit test**, not by a manual step. The
-decision is now a method on the form — `DescribeUnusableScope` — so a test can
-build a plan rooted outside its own files, tick the row, and assert on the
-refusal without showing a window. `PerformClick` does nothing on a control that
-is not effectively visible, and a test that had to show one would need an
-interactive desktop, which is exactly what the unit suite must not require.
-
-The driver defect stays **open** on its own account: it will bite any future
-phase that touches a combo inside a dialog. The refusal itself is closed.
+The blocked automation had two causes. Phase C chooses `iso-8859-1`, which UI
+Automation exposes inside the visible part of the dropdown. Phase J chooses
+`windows-1252`, which exists under the same combo but is reported offscreen.
+`SelectCombo` rejected that exact item, then its keyboard fallback foregrounded
+the disabled main form instead of the modal passed to it. The driver now accepts
+an exact item scoped to the combo regardless of popup visibility and uses the
+supplied window for fallback input.
 
 ## What is still open, scored
 
@@ -294,7 +284,6 @@ trips over is not noise.
 | EC-17 | Text-validation comment contradicts its code | Low | Common | Behaviour is right, comment is wrong, and the file must stay byte-identical across three repos. A maintainer "correcting" it the wrong way would weaken binary rejection. |
 | EC-23 | Null-forgiving dereference of `ResolvePath` | Low | Rare | Correct today only because `FindStaleFiles` runs 29 lines earlier. EC-06 is what happened when that invariant broke. |
 | EC-18 | Ambiguity recomputed per pass | Low | Common | Measured: no cost. The probe aborts at the first invalid sequence, so a provable file settles in the first buffer. Untidy, not slow. |
-| — | Automation driver cannot select a combo inside a dialog | Low | — | Blocks a smoke phase, not a user. Suspect: `SelectCombo`'s keyboard fallback targets the main window while a modal review is open. |
 | — | Hash handling has drifted from LineEndingNormalizer | — | — | A decision, not a defect. See above. |
 
 Nothing here writes to a file nobody approved, which is why none of it blocked a
