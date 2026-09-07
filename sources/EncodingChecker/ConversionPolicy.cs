@@ -129,15 +129,8 @@ internal static class ConversionPolicy
     /// The machine-readable reason for a decision, read from the decision itself.
     /// </summary>
     /// <remarks>
-    /// Beside <see cref="Decide"/> because it answers the same question. The caller used to
-    /// work the reason out again from the raw inputs, re-deriving the distinction
-    /// <see cref="SourceInterpretation"/> had already been handed back to express. The two
-    /// could not disagree - the expressions were identical and their operands never changed
-    /// between them - but a refusal reason added to <see cref="Decide"/> would have fallen
-    /// through to <see cref="ConversionReasonCodes.LegacySourceRequired"/> at the call site:
-    /// a correct refusal carrying the wrong explanation, with nothing to fail. That already
-    /// happened once, when the ambiguous BOM-less case had to be bolted on as a guard rather
-    /// than added as a case.
+    /// Keep this beside <see cref="Decide"/> so a new refusal cannot silently inherit an
+    /// unrelated fallback reason.
     /// </remarks>
     internal static string? ReasonCodeFor(
         PlannedAction action,
