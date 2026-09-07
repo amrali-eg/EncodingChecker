@@ -3,10 +3,16 @@
 Status of the thirty-five findings from the two independent reviews that
 preceded v3.11.0, plus what has been found since.
 
-**Of the original thirty-five: 26 fixed, 8 open, 1 could not be reproduced.**
+**Of the original thirty-five: 27 fixed, 7 open, 1 could not be reproduced.**
 Six further findings have been raised since v3.11.1, two of them already fixed.
-Twelve more since v3.11.2, all twelve fixed.
-**Twelve open in total.**
+Twelve more since v3.11.2, all twelve fixed. Three more since v3.12.0, all three
+fixed, which also closed EC-16 and corrected two rows that were wrong.
+
+**Nine rows below are still open, plus the four findings kept as prose under
+"From the same review, and not tracked here" — thirteen in total.** Counted from
+the rows rather than carried forward: the running arithmetic this line used to
+state stopped reconciling with the table it summarises, which is the exact drift
+this file exists to prevent.
 
 ## Why this file exists
 
@@ -52,7 +58,7 @@ report.
 | EC-13 | The plan's explicit-source field can name one encoding for a run that used several | fixed | `DescribeSourceChoice` reports per-file choices. |
 | EC-14 | `OutputTextSha256` is a copy of `SourceTextSha256` | fixed | The record takes the digest verification computed, and throws if absent. |
 | EC-15 | The five conversion-semantics booleans are written everywhere and read nowhere | **open** | Only `SemanticsVersion` is enforced on load. |
-| EC-16 | Settings.xml is written with truncate-in-place | **open** | `MainForm.Settings.cs:100` still opens `FileMode.Create` and serialises into it. |
+| EC-16 | Settings.xml is written with truncate-in-place | fixed | Closed by the shared artifact writer added in v3.12.1, not on its own account. `MainForm.Settings.cs` now writes through `AtomicArtifactFile`, so an interruption leaves the previous preferences rather than none. |
 | EC-17 | The text-validation comment contradicts its code | **open** | Control characters are penalised, not ignored. Behaviour is right, comment is wrong — and the file must stay byte-identical across three repos, so the fix is a synchronised change. |
 | EC-18 | Ambiguity is recomputed on every pass over a BOM-less UTF-16 file | **open** | The or-expression short-circuits only when the flag is already true. |
 | EC-19 | The double-BOM guard's reach depends on which object supplied the codec | *not reproduced* | The detector's BOM-less instance never reaches the guard; both paths refuse. Tested. |
@@ -125,6 +131,30 @@ The first is the one worth reading:
 - Detection accepts a truncated trailing sequence, because it decodes without
   flushing, while conversion flushes and rejects it. `-DetectOnly` can therefore
   bless a file conversion refuses.
+
+## Found after v3.12.0
+
+Two findings from an independent review of the released `518a844`, and two rows
+of this file that did not survive being re-derived from the source. The second
+kind is the one this file exists to catch.
+
+| Finding | Status | Note |
+|---|---|---|
+| An unwritable output destination was discovered only after conversion | fixed | The journal and report are written once scanning has returned, so a destination that could never be written was found after the files had been rewritten. A user who asked for a journal ended with changed files and no record of the change. Measured on all four shapes — `-Journal` or `-Report`, under a missing directory or onto an existing one — and all four converted first. Now checked in `RunConsoleMode`, before either mode dispatches. Exit **3**, unchanged: `docs/CLI.md` calls a report failure a processing failure and a test pins it, so finding it earlier must change when it is reported, not what. It deliberately does not probe by creating a file, which would leave one behind on every path that then fails, and still could not promise the later write. |
+| A plan action no build ever wrote was reported as a conversion | fixed | `System.Text.Json` accepts a number for any enum, so a damaged or hand-edited plan could carry `"Action": 99` and load without complaint. It reached `ConversionPolicy.ToRowResult`, whose fallback arm was `Converted`. Measured: `-Apply` exited 0, printed "1 selected, 1 converted, 0 failed", wrote a journal recording `Status=Converted` and `PlannedAction=99`, and the source hash was unchanged. The journal asserted work that never happened. `Load` now rejects an undefined `Action` or `SourceInterpretation` before a source is touched, and `ToRowResult` names every action and throws for anything else. Both halves were needed; either alone leaves the other reachable. |
+| EC wrote its own artifacts less carefully than everyone else's | fixed | Not raised as a defect but as a refactor, and taken because the inconsistency is the finding: EC installs a converted file through a temporary file and a replacement, and writes its recovery sidecar the same way with a read-back check, while its plan, journal, report and settings each truncated their destination and wrote into it. The mechanism already existed and shipped. The plan is the worst case — a truncated one destroys the reviewed plan a user was about to apply. `AtomicArtifactFile` routes all four through the existing replacement; the sidecar keeps its own writer, which verifies more than the shared one and should not be reduced to it. Closes EC-16. |
+| CX-07 recorded a fix that was never made | corrected | See its row above. |
+| CSV formula injection | withdrawn | See its row above. |
+
+### What the same review left open
+
+Its two silent-corruption findings are the BOM-less UTF-16-as-UTF-32 and
+ambiguous BOM-less UTF-32 rows already recorded below, both reproduced exactly
+and both scored the same way as before. The proposed fix is one conservative
+policy change — refuse automatically detected BOM-less UTF-32 and require an
+explicit source — which closes both without touching the shared detector. It
+changes what EC guarantees about automatic conversion, so whether
+`ConversionSemantics.Current` advances is a decision that has not been made.
 
 ## Hashing: three optimisations measured and rejected
 
@@ -258,7 +288,7 @@ trips over is not noise.
 | — | Ambiguous BOM-less UTF-32 converts silently | **Critical** | **Theoretical** | Rewrites on an unproven byte order — the exact thing this release line exists to prevent. Needs every scalar to be a multiple of 0x100, so real text will not reach it. Scored high on impact and dismissed on reach, deliberately. |
 | EC-08 | An include pattern can hang the scan indefinitely | Medium | **Theoretical** | Availability, not data: a scan no token can cancel, and if it hangs partway through a conversion the tree is left partly converted with no journal. Needs *both* halves built on purpose — a mask of ~10+ wildcards separated by one character, and a filename carrying ~24+ mostly consecutive repeats of that same character. Measured at twelve wildcards: every realistic name answered in 0–5 ms; forty consecutive `a` took >20 s. The mask comes from the operator's own command line, so there is no untrusted path. Fix measured and not taken: see below. |
 | — | CSV report does not neutralise leading formula characters | — | *withdrawn* | Does not reproduce: the `File` column is always an absolute path, so it cannot begin with a formula character. See above. |
-| EC-16 | Settings.xml written truncate-in-place | Low | Occasional | Loses preferences, not data, and reverts toward safer defaults. Already caused one smoke-test failure that looked like a product bug. |
+| EC-16 | Settings.xml written truncate-in-place | — | *fixed in v3.12.1* | Was: loses preferences, not data. It had already caused one smoke-test failure that looked like a product bug, which is why it is worth recording that the fix came from generalising a mechanism rather than from anyone deciding this row was urgent. |
 | EC-20 | Detection reads with looser file sharing | Low | Rare | Detect and validate only; nothing is written. Can describe bytes another process is changing. |
 | EC-15 | Semantics booleans written as a contract, enforced nowhere | Low | Common | Cannot weaken behaviour — EC ignores the claim and always does the strict thing. The risk is a reader treating `OutputVerification: true` as evidence a check ran. |
 | EC-17 | Text-validation comment contradicts its code | Low | Common | Behaviour is right, comment is wrong, and the file must stay byte-identical across three repos. A maintainer "correcting" it the wrong way would weaken binary rejection. |
