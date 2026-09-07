@@ -211,6 +211,56 @@ internal static partial class Program
     }
 
     // Internal so tests can pin the published CLI exit-code contract.
+    /// <summary>
+    /// The first output destination the run could not write to, or <see langword="null"/>.
+    /// </summary>
+    /// <remarks>
+    /// This cannot promise the later write will succeed - the disk can fill and permissions
+    /// can change in between - and it deliberately does not probe by creating a file, which
+    /// would leave one behind on every path that fails afterwards. It removes the two
+    /// mistakes a caller can make before the run starts.
+    /// </remarks>
+    private static string? FindUnusableOutputDestination(CliOptions options)
+    {
+        (string Name, string? Path)[] outputs =
+        [
+            ("-Plan", options.PlanPath),
+            ("-Journal", options.JournalPath),
+            ("-Report", options.ReportPath),
+        ];
+
+        foreach ((string name, string? path) in outputs)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                continue;
+
+            string fullPath;
+
+            try
+            {
+                fullPath = Path.GetFullPath(path);
+            }
+            catch (Exception ex) when (
+                ex is IOException or ArgumentException or NotSupportedException)
+            {
+                return $"{name} contains an invalid path: {ex.Message}";
+            }
+
+            if (Directory.Exists(fullPath))
+                return $"{name} names an existing directory. Give it a file path.";
+
+            string? parent = Path.GetDirectoryName(fullPath);
+
+            if (!string.IsNullOrEmpty(parent) && !Directory.Exists(parent))
+            {
+                return $"{name} is under '{parent}', which does not exist. Create it "
+                       + "first, or choose a path whose folder already exists.";
+            }
+        }
+
+        return null;
+    }
+
     internal static int RunConsoleMode(string[] args)
     {
         if (args is ["--version"])
@@ -237,6 +287,24 @@ internal static partial class Program
         {
             Console.Error.WriteLine(validationError);
             return 1;
+        }
+
+        // The journal and report are written after the run returns, so a destination that
+        // cannot exist was discovered only once the files had been rewritten: a user who
+        // asked for a journal ended up with changed files and no record of the change.
+        // Measured on all four shapes of the mistake - either output, under a missing
+        // directory or onto an existing one.
+        //
+        // Here rather than in TryValidateOptions, because this is a processing failure and
+        // not a usage error. docs/CLI.md assigns 3 to a report failure and
+        // ExitCodeContractTests pins it. Finding it earlier changes when it is reported,
+        // which was the defect; it must not change what is reported.
+        string? destinationError = FindUnusableOutputDestination(options);
+
+        if (destinationError is not null)
+        {
+            Console.Error.WriteLine(destinationError);
+            return 3;
         }
 
         if (!string.IsNullOrWhiteSpace(options.ApplyPath))
