@@ -288,7 +288,7 @@ internal sealed record ConversionPlan
     {
         try
         {
-            // Serialised first: a failure here must not have truncated anything.
+            // Serialize before opening the destination so failure preserves the previous plan.
             string json = JsonSerializer.Serialize(this, Options);
 
             return AtomicArtifactFile.WriteText(path, json, new UTF8Encoding(false));
@@ -353,10 +353,8 @@ internal sealed record ConversionPlan
                     return null;
                 }
 
-                // A number deserialises into any enum, so a damaged or hand-edited plan
-                // can carry an action and an interpretation no build ever wrote. Rejected
-                // here, before a source is touched, rather than left to be reported as
-                // whatever the mapping's fallback happened to be.
+                // A number deserializes into any enum, so a plan can name a value no build
+                // wrote. Reject it before touching a source.
                 if (!Enum.IsDefined(file.Action))
                 {
                     error = "The plan records an unknown action for "

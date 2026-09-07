@@ -3,16 +3,12 @@ using System.Text;
 namespace EncodingChecker.Tests;
 
 /// <summary>
-/// EC's own artifacts must survive a failed write the way a converted file does.
+/// A failed artifact write must preserve the previous complete file.
 /// </summary>
 /// <remarks>
-/// The plan, journal, report and settings each truncated their destination and then wrote
-/// into it, so an interruption left a half-written artifact where a readable one had been.
-/// A truncated plan is the worst of the four: it destroys the reviewed plan a user was
-/// about to apply, and re-running <c>-Plan</c> produces one that has not been reviewed.
-///
-/// These pin the property that matters - the previous version is still there - rather
-/// than the mechanism, so the writer can change without the tests having to.
+/// An interrupted in-place write once left plans, journals, reports, and settings
+/// incomplete. Losing a reviewed plan is especially unsafe because regenerating it creates
+/// a different, unreviewed plan. These tests pin preservation, not the writer's mechanism.
 /// </remarks>
 public sealed class AtomicArtifactFileTests : IDisposable
 {
@@ -55,9 +51,7 @@ public sealed class AtomicArtifactFileTests : IDisposable
         Assert.Empty(TempArtifacts());
     }
 
-    /// <summary>
-    /// A failure the writer does not model must still not cost the previous version.
-    /// </summary>
+    /// <summary>An unexpected write failure must still preserve the previous version.</summary>
     [Fact]
     public void AnUnexpectedFailureAlsoLeavesThePreviousArtifactIntact()
     {
@@ -97,10 +91,7 @@ public sealed class AtomicArtifactFileTests : IDisposable
         Assert.Empty(TempArtifacts());
     }
 
-    /// <summary>
-    /// The report is UTF-8 with a BOM so it opens correctly in Excel. Writing into a
-    /// stream rather than onto a path must not drop the preamble.
-    /// </summary>
+    /// <summary>Writing a report through a stream must preserve its UTF-8 BOM for Excel.</summary>
     [Fact]
     public void TheEncodingsPreambleIsStillWritten()
     {
@@ -114,10 +105,7 @@ public sealed class AtomicArtifactFileTests : IDisposable
             File.ReadAllBytes(path).Take(3));
     }
 
-    /// <summary>
-    /// The temporary file carries the suffix a scan already excludes, so a leftover from a
-    /// crashed run cannot become a scan candidate in the user's output directory.
-    /// </summary>
+    /// <summary>A leftover temporary artifact must use the suffix excluded from scans.</summary>
     [Fact]
     public void TheTemporaryFileUsesTheSuffixScansAlreadyExclude()
     {

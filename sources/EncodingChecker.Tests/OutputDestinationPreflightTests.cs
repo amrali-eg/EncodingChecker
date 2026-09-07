@@ -3,17 +3,12 @@ using System.Text;
 namespace EncodingChecker.Tests;
 
 /// <summary>
-/// An output destination that cannot be written must be refused before the run, not after.
+/// An unusable report or journal destination must stop the run before files change.
 /// </summary>
 /// <remarks>
-/// The journal and the report are written once scanning has returned, so a destination
-/// that cannot exist used to be discovered only after conversion had rewritten the files.
-/// A user who asked for a journal ended with changed files and no record of the change,
-/// which is the one outcome the journal exists to prevent.
-///
-/// The exit code is deliberately unchanged. <c>docs/CLI.md</c> assigns 3 to a report
-/// failure and <see cref="ExitCodeContractTests"/> pins it; finding the failure earlier
-/// must change *when* it is reported, not *what* is reported.
+/// EC once found these failures after conversion, leaving changed files without the
+/// requested record. Preflight changes when the failure is found, not its meaning:
+/// <c>docs/CLI.md</c> and <see cref="ExitCodeContractTests"/> keep exit code 3.
 /// </remarks>
 public sealed class OutputDestinationPreflightTests : IDisposable
 {
@@ -60,9 +55,7 @@ public sealed class OutputDestinationPreflightTests : IDisposable
         return path;
     }
 
-    /// <summary>
-    /// The defect itself: the bytes must survive a destination the run cannot write.
-    /// </summary>
+    /// <summary>An unwritable destination must leave every selected file unchanged.</summary>
     [Theory]
     [InlineData("-Journal")]
     [InlineData("-Report")]
@@ -81,7 +74,7 @@ public sealed class OutputDestinationPreflightTests : IDisposable
         Assert.Equal(before, File.ReadAllBytes(source));
     }
 
-    /// <summary>The other shape of the same mistake: the path is an existing folder.</summary>
+    /// <summary>An existing directory is not a valid report-file destination.</summary>
     [Theory]
     [InlineData("-Journal")]
     [InlineData("-Report")]
@@ -103,10 +96,7 @@ public sealed class OutputDestinationPreflightTests : IDisposable
         Assert.Equal(before, File.ReadAllBytes(source));
     }
 
-    /// <summary>
-    /// A usable destination must still be accepted, or the guard would be indistinguishable
-    /// from refusing every run that asks for output.
-    /// </summary>
+    /// <summary>A usable output path must pass preflight and allow the run.</summary>
     [Fact]
     public void AUsableDestinationStillRuns()
     {

@@ -354,7 +354,7 @@ internal sealed record ConversionJournal
     {
         try
         {
-            // Serialised first: a failure here must not have truncated anything.
+            // Serialize before opening the destination so failure preserves the previous journal.
             string json = JsonSerializer.Serialize(this, Options);
 
             return AtomicArtifactFile.WriteText(path, json, new UTF8Encoding(false));

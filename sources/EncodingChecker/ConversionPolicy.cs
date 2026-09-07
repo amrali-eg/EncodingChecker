@@ -112,12 +112,8 @@ internal static class ConversionPolicy
     /// Maps a planned action to its report result.
     /// </summary>
     /// <remarks>
-    /// Every action is named. The fallback used to be
-    /// <see cref="ConversionRowResult.Converted"/>, so an action no build ever wrote -
-    /// System.Text.Json accepts a number for any enum, and a hand-edited plan carrying
-    /// <c>"Action": 99</c> loaded without complaint - was reported as a conversion that
-    /// never happened, in the report and in the journal. Throwing is right for a value
-    /// that cannot arise from a decision this build made.
+    /// JSON can deserialize undefined enum values. Throw rather than report an action no
+    /// build wrote as a completed conversion.
     /// </remarks>
     internal static ConversionRowResult ToRowResult(PlannedAction action) => action switch
     {

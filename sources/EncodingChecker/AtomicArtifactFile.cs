@@ -5,29 +5,17 @@ using System.Text;
 namespace EncodingChecker;
 
 /// <summary>
-/// Writes one of EC's own artifacts so that a failure leaves the previous version intact.
+/// Writes plans, journals, reports, and settings without replacing the previous
+/// artifact until its successor is complete.
 /// </summary>
 /// <remarks>
-/// EC installs a converted file by writing a temporary file beside it and replacing the
-/// original, and it writes its recovery sidecar the same way. Its plan, journal, report
-/// and settings did not: each truncated its destination and then wrote into it, so an
-/// interruption left a half-written artifact where a readable one had been. The plan is
-/// the worst of the four - a truncated one destroys the reviewed plan a user was about to
-/// apply - and the settings file is the one already known to have failed this way,
-/// recorded as EC-16.
-///
-/// The machinery to avoid this already existed and already ships; this routes the
-/// remaining four through it rather than adding a fifth way to save a file.
+/// Recovery sidecars keep their own writer because it also reads back and validates
+/// each record.
 /// </remarks>
 internal static class AtomicArtifactFile
 {
-    /// <summary>
-    /// Writes what <paramref name="writeContent"/> produces to <paramref name="path"/>,
-    /// installing it only once it is complete.
-    /// </summary>
-    /// <returns>
-    /// <see langword="null"/> when the artifact is installed, or the message to report.
-    /// </returns>
+    /// <summary>Writes to a temporary file, then installs the completed artifact.</summary>
+    /// <returns><see langword="null"/> on success; otherwise, a diagnostic.</returns>
     internal static string? Write(string path, Action<Stream> writeContent)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -35,9 +23,7 @@ internal static class AtomicArtifactFile
 
         string fullPath = Path.GetFullPath(path);
 
-        // Beside the destination, so the replacement stays within one volume, and under
-        // the suffix a scan already excludes, so a leftover cannot become a scan
-        // candidate.
+        // Keep the temporary file on the destination volume and under a suffix scans ignore.
         string tempPath =
             $"{fullPath}.{Guid.NewGuid():N}.{EncodingConverter.TempFileSuffix}";
 
@@ -48,8 +34,7 @@ internal static class AtomicArtifactFile
             {
                 writeContent(stream);
 
-                // Renaming a file whose contents are still only in the page cache would
-                // make the install atomic and the artifact empty after a power loss.
+                // Flush to disk before installation so a power loss cannot expose an empty file.
                 stream.Flush(flushToDisk: true);
             }
 
@@ -71,16 +56,14 @@ internal static class AtomicArtifactFile
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // A leftover temporary file cannot make the installed artifact wrong.
+                // Cleanup failure cannot invalidate an artifact already installed.
             }
         }
     }
 
-    /// <summary>Writes <paramref name="content"/> in <paramref name="encoding"/>.</summary>
-    /// <remarks>
-    /// The encoding's preamble is written, because the stream is new and positioned at
-    /// zero - matching what <see cref="StreamWriter"/> did when it owned the destination.
-    /// </remarks>
+    /// <summary>
+    /// Writes text, including any preamble required by <paramref name="encoding"/>.
+    /// </summary>
     internal static string? WriteText(string path, string content, Encoding encoding)
     {
         ArgumentNullException.ThrowIfNull(content);

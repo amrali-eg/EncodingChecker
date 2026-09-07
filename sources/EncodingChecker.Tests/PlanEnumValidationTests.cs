@@ -7,14 +7,9 @@ namespace EncodingChecker.Tests;
 /// A plan carrying an action no build ever wrote must be refused, not reported as done.
 /// </summary>
 /// <remarks>
-/// System.Text.Json accepts a number for any enum, so a hand-edited or damaged plan could
-/// hold <c>"Action": 99</c> and load without complaint. It then reached
-/// <c>ConversionPolicy.ToRowResult</c>, whose fallback arm was
-/// <see cref="ConversionRowResult.Converted"/> - so the run exited 0, reported "1
-/// converted", and wrote a journal asserting a conversion that never touched the file.
-///
-/// The journal is this product's audit trail. A journal that can claim work it did not do
-/// is worse than one that is missing.
+/// JSON accepts undefined numeric enum values. The former fallback mapped one to
+/// <see cref="ConversionRowResult.Converted"/>, producing a false success and journal
+/// record. Plan validation and the mapping's throw now guard both boundaries.
 /// </remarks>
 public sealed class PlanEnumValidationTests : IDisposable
 {
@@ -91,14 +86,11 @@ public sealed class PlanEnumValidationTests : IDisposable
         Assert.NotEqual(0, exitCode);
         Assert.Equal(before, File.ReadAllBytes(source));
 
-        // The point of the fix: nothing may record this as a conversion.
+        // No journal may claim the rejected action ran.
         Assert.False(File.Exists(journal));
     }
 
-    /// <summary>
-    /// The mapping names every action. Its fallback used to be Converted, which is how an
-    /// undefined value became a reported success.
-    /// </summary>
+    /// <summary>The result mapping must reject every undefined planned action.</summary>
     [Fact]
     public void AnUndefinedActionHasNoReportResult()
     {

@@ -96,9 +96,7 @@ public partial class MainForm
 
         try
         {
-            // EC-16: this truncated the settings in place, so an interruption left the
-            // user with no preferences rather than the previous ones. It has already
-            // produced a smoke-test failure that read as a product bug.
+            // EC-16: atomic replacement preserves the previous settings after a write failure.
             _ = AtomicArtifactFile.Write(
                 GetSettingsFileName(),
                 stream => new XmlSerializer(typeof(Settings)).Serialize(stream, _settings));
