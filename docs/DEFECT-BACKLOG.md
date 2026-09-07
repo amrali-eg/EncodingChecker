@@ -3,8 +3,10 @@
 Status of the thirty-five findings from the two independent reviews that
 preceded v3.11.0, plus what has been found since.
 
-**Of the original thirty-five: 27 fixed, 7 open, 1 could not be reproduced.**
-Six further findings have been raised since v3.11.1, two of them already fixed.
+**Of the original thirty-five: 26 fixed, 7 open, 1 could not be reproduced,
+and 1 was corrected as not a defect.** The old total of 27 fixed incorrectly
+counted CX-07 as both corrected and fixed.
+Five further findings have table rows since v3.11.1, two of them already fixed.
 Twelve more since v3.11.2, all twelve fixed. Three more since v3.12.0, all three
 fixed, which also closed EC-16 and corrected two rows that were wrong.
 
@@ -33,7 +35,7 @@ twice and fixed late. Hence this file.
 `fixed` means the code that caused it is demonstrably gone — a named
 replacement, a test that pins the behaviour, or a check re-run against the
 current build. `open` means the cited code is still present and was read again
-on 2026-09-04. `not reproduced` means an attempt to trigger it failed, which is
+on 2026-09-08. `not reproduced` means an attempt to trigger it failed, which is
 weaker than either.
 
 Statuses were re-derived from the source, not carried over from the earlier
@@ -86,7 +88,7 @@ report.
 | Ambiguous BOM-less UTF-32 converts silently | **open** | The ambiguity guard covers only code pages 1200 and 1201, so the UTF-32 detector's prefer-little-endian wins with no refusal. Demonstrated end to end; reaching it needs every scalar to be a multiple of 0x100, so real text is unlikely to trigger it. |
 | CSV report does not neutralise leading formula characters | *withdrawn* | It does not reproduce. `DirectoryTraversal` resolves every file through `Path.GetFullPath`, so the `File` column always begins with a drive letter or a UNC prefix and can never begin with `=`, `+`, `-` or `@`. A source named `=1+1.txt` produces a cell reading `C:\...\=1+1.txt`. Every other column is a controlled value. Reopen only with a demonstrated reachable field. |
 | Conversion parallelism was capped at 4 | fixed | Raised to 8 on 2026-09-04; measured 1.5–1.7x faster. |
-| A ticked file can be dropped from a source choice in silence | fixed | Each row in the review's refused list carries its resolved path. `TickedFiles()` filters out rows whose path is null and says nothing, so a file the user ticked is left refused with no message. This was live until EC-06 was fixed: with a drive-root base directory every row resolved to null, so choosing an encoding reported "Conversion cancelled. No files were modified." The trigger is gone; the silent drop is not. |
+| A ticked file can be dropped from a source choice in silence | fixed | `DescribeUnusableScope` now detects a ticked row with no resolved path, keeps the review open, names the problem, and tells the user to run View again. `ASourceChoiceThatCannotBeAppliedIsRefusedRatherThanDropped` and GUI smoke phase J pin both the message and the unchanged files. |
 | Force-closing during a run can throw on the way out | **open** | The second close request abandons a run deliberately, which is correct. But the worker may then marshal its next confirmation to a form that no longer exists, and the completion handler runs against disposed controls. An error dialog at exit rather than lost work — finished files are installed and the one in flight is untouched. Reasoned from the code, not reproduced: it needs precise timing. |
 
 ## Found after v3.11.2
@@ -122,12 +124,14 @@ The first is the one worth reading:
   a C0 control — one character per line with LF endings, say. Measured over
   nineteen realistic file shapes: 41 of 44 detect correctly, and the three that
   do not are the same degenerate shape. Scored Critical impact, low reach.
-- ASCII text with 2.3% or more NUL bytes is labelled `utf-16`. Conversion is
+- ASCII text with about 1% or more NUL bytes overall can be labelled `utf-16`
+  (the detector's threshold is 2% in one UTF-16 byte channel). Conversion is
   refused by the ambiguity guard in every case constructed, so the wrong label
   reaches `-DetectOnly` and `-Validate` only.
-- Two hard links to one file are converted twice, once per name. Both runs
-  succeeded when tested, because `File.Replace` breaks the link; the `File.Move`
-  fallback would not.
+- Two hard links to one file are converted independently, once per selected
+  path. Both paths preserved the exact text, received separate verified backups
+  and sidecars, and no loss reproduced through the normal `File.Replace` path.
+  The platform-only `File.Move` fallback was not forced in this recheck.
 - Detection accepts a truncated trailing sequence, because it decodes without
   flushing, while conversion flushes and rejects it. `-DetectOnly` can therefore
   bless a file conversion refuses.
@@ -311,3 +315,117 @@ contains no separator for it to bound.
 | | Finding | Why it is not listed as open |
 |---|---|---|
 | EC-19 | The double-BOM guard's reach depends on which object supplied the codec | An inspection-only finding that traced the wrong object. `ConvertFiles` re-resolves the codec by name through `Encoding.GetEncoding`, which carries a 3-byte preamble, so the detector's BOM-less instance never reaches the guard. Tested against a file beginning with two BOMs: both the automatic path and `-From utf-8` refuse with `MultipleLeadingByteOrderMarks`. |
+
+## Full source recheck — 2026-09-08
+
+This recheck treated the document as untrusted. `R001` through `R079` are the
+data-shaped rows in their order before the reformat, including duplicated score
+rows, benchmark rows, comparison rows, and three malformed blank-cell headers.
+`P001` through `P004` are the four prose-only findings. `S001` is the GUI-driver
+finding preserved in a prose section but no longer present in a table.
+
+The source inspection was against `c071c10`. The Release build completed with no
+warnings. Behavioural probes used that build and temporary files outside the
+repository.
+
+| Old row | What was checked | Recheck result |
+|---|---|---|
+| R001 / EC-01 | `PlannedFile.HasReliableUnicodeDetection` and `AppliedPlanFidelityTests` | Fixed confirmed. |
+| R002 / EC-02 | `ReadOnlyModeAmbiguityTests` and the read-only decision path | Fixed confirmed. |
+| R003 / EC-03 | GUI smoke phase H and its rendered-text assertion | Fixed confirmed. |
+| R004 / EC-04 | Plan exit ordering and `PlanPreflightReportingTests` | Fixed confirmed. |
+| R005 / EC-05 | Plan-load hash requirements and unreadable-entry tests | Fixed confirmed; only `Convert` entries require a source hash. |
+| R006 / EC-06 | `ConversionPlan.ResolvePath` and drive-root theory cases | Fixed confirmed. The two-release escape remains historically accurate. |
+| R007 / EC-07 | `BomlessUnicodeSafety.DescribeRefusal` and documentation-contract tests | Fixed confirmed; both byte orders are offered. |
+| R008 / EC-08 | `CompilePatterns`, `MatchesAny`, and a child-process probe using twelve separated wildcards against forty `a` characters | Open confirmed. The scan did not finish within three seconds; the regex still has no timeout. |
+| R009 / EC-09 | `TraversalCounters.FilesExcludedAsEcArtifact` and `ArtifactExclusionCoverageTests` | Fixed confirmed. |
+| R010 / EC-10 | scan-failure journal mapping and `JournalOutcomeFidelityTests` | Fixed confirmed; it records `Error`. |
+| R011 / EC-11 | both console cancellation-handler sites | Fixed confirmed; each unsubscribes in `finally`. |
+| R012 / EC-12 | GUI tally logic and `SkippedFilesAreNotCountedAsUnchanged` | Fixed confirmed. |
+| R013 / EC-13 | `DescribeSourceChoice` and mixed-source provenance tests | Fixed confirmed. |
+| R014 / EC-14 | the independently computed output digest and `RecordedProvenanceTests` | Fixed confirmed. |
+| R015 / EC-15 | `ConversionSemantics` serialisation and `ConversionPlan.Load` | Open confirmed; only `SemanticsVersion` is enforced. |
+| R016 / EC-16 | `MainForm.Settings.cs` and `AtomicArtifactFileTests` | Fixed confirmed; settings use the shared atomic writer. |
+| R017 / EC-17 | `TextValidation.cs` printable-ratio loop | Open confirmed; controls and private-use scalars remain in the denominator despite the comment saying they are ignored. |
+| R018 / EC-18 | `ScanEngine`'s `entry.HasAmbiguousBomlessUtf16 || ...` expression | Open confirmed; a cached false recomputes. |
+| R019 / EC-19 | source path, conversion tests, and automatic plus explicit conversion of a two-BOM UTF-8 file | Not reproduced confirmed; both paths refused with `MultipleLeadingByteOrderMarks` and exit 5. |
+| R020 / EC-20 | every file-open mode in detection and validation | Open confirmed; `DetectFromFile` alone still permits writes and deletes. |
+| R021 / EC-21 | all three `SaveFileDialog` creation sites | Fixed confirmed; each uses `using var`. |
+| R022 / EC-22 | plan and metadata JSON options | Fixed confirmed; each store shares its reader/writer options object. |
+| R023 / EC-23 | `Program.CliExecution.cs:90` and the preceding stale-plan guard | Open confirmed; the null-forgiving dereference is still present and relies on earlier validation. |
+| R024 / CX-01 | parser value validation and `BlankOptionValueSafetyTests` | Fixed confirmed. |
+| R025 / CX-02 | backup replacement order and `BackupRecordPairingTests` | Fixed confirmed. |
+| R026 / CX-03 | `HasReparsePointInPath` and applied-plan path tests | Fixed confirmed. |
+| R027 / CX-05 | journal terminal-state mapping and `JournalOutcomeFidelityTests` | Fixed confirmed. |
+| R028 / CX-06 | `TextEncoding.DetectFromBuffer` | Open confirmed; the entropy return still precedes BOM detection at current lines 175 and 182. |
+| R029 / CX-07 | traversal exclusions, CLI documentation, and an `old-plan.json` probe | Not a defect confirmed. The old plan was scanned as ordinary ASCII, by design. |
+| R030 / CX-08 | option compatibility rules and `DocumentedOptionContractTests` | Fixed confirmed. |
+| R031 / CX-09 | interrupted-run journal creation and smoke phase I | Fixed confirmed. |
+| R032 / CX-10 | plan summary wording and provenance tests | Fixed confirmed. |
+| R033 / CX-11 | settings-path creation inside the guarded startup block | Fixed confirmed. |
+| R034 / CX-12 | `WindowPosition.IsReachable` and synthetic-monitor tests | Fixed confirmed. |
+| R035 / CX-13 | pull-request parity trigger and release job dependency | Fixed confirmed. |
+| R036 | BOM-less UTF-32 ambiguity guard and an end-to-end UTF-32BE probe (`00 00 01 00` repeated) | Open confirmed. Detection chose little-endian UTF-32 and conversion changed U+0100 to U+10000. |
+| R037 | every reachable CSV field and a file named `=1+1.txt` | Withdrawn confirmed. The first cell began with its absolute path; the other fields are controlled values. |
+| R038 | `ScanEngine.MaxParallelismCap` and documentation tests | Fixed confirmed at 8. The historical 1.5–1.7x timing was not rerun. |
+| R039 | `DescribeUnusableScope`, its unit test, and GUI smoke phase J | Fixed confirmed. The old note was stale and has been corrected in this commit. |
+| R040 | form-close, worker confirmation, and completion paths | Open by inspection. The timing-dependent exception was not reproduced. |
+| R041 | target-code-page comparison and `TargetAliasIdentityTests` | Fixed confirmed. |
+| R042 | full-file validation before `Unchanged` and `UnchangedVerificationTests` | Fixed confirmed. |
+| R043 | preview decoding and `PreviewVerificationTests` | Fixed confirmed. |
+| R044 | per-file exception isolation and `ScanFailureIsolationTests` | Fixed confirmed. |
+| R045 | unreadable-directory counters and `UnreadableFolderCoverageTests` | Fixed confirmed. |
+| R046 | skipped-name counters and `NameExcludedFolderCoverageTests` | Fixed confirmed. |
+| R047 | validation reason codes and `ValidateReasonCodeTests` | Fixed confirmed. |
+| R048 | `ConversionPolicy.ReasonCodeFor` and exhaustive refusal-reason tests | Fixed confirmed. |
+| R049 | decoder-failure byte diagnostics and `DecodeFailureDiagnosticTests` | Fixed confirmed. |
+| R050 | console/redirection writer selection and `ConsoleOutputEncodingTests` | Fixed confirmed. |
+| R051 | the named parallelism cap and `DocumentedParallelismDefaultTests` | Fixed confirmed. |
+| R052 | backup-overwrite behaviour, tests, and current documentation | Fixed as a documentation gap; the rejected refusal-on-existing-backup proposal remains recorded. |
+| R053 | output-path preflight and its four-shape tests | Fixed confirmed. |
+| R054 | plan enum validation and `PlanEnumValidationTests` | Fixed confirmed. |
+| R055 | plan, journal, report, and settings writes through `AtomicArtifactFile` | Fixed confirmed. |
+| R056 | duplicate correction row for CX-07 | Same result as R029; the prior fixed record was wrong. |
+| R057 | duplicate CSV row | Same result as R037; withdrawn remains correct. |
+| R058 | historical hashing baseline | The recorded timing was not rerun; retained as historical measurement, not a current-status claim. |
+| R059 | backup-digest optimisation | Current code still re-reads and verifies the backup. Historical 872 ms / 15.3% measurement was not rerun. |
+| R060 | streaming source/output hash optimisation | Current code keeps independent reads. Historical 3.5% measurement was not rerun. |
+| R061 | XxHash optimisation | Current code still persists SHA-256. Historical throughput and slowdown measurements were not rerun. |
+| R062 | malformed blank-cell EC/LEN comparison header | Structural row, not a finding; its three following claims were checked separately. |
+| R063 | raw source/backup algorithms in EC and LEN | Source-confirmed: both use SHA-256 for durable byte evidence. |
+| R064 | content-digest algorithms in EC and LEN | Source-confirmed: EC persists SHA-256; LEN uses an internal XxHash3 digest. |
+| R065 | backup comparisons in EC and LEN | Source-confirmed: EC compares hexadecimal SHA-256 strings; LEN compares digest bytes with `FixedTimeEquals`. |
+| R066 | malformed blank-cell score-table header | Structural row, not a finding. |
+| R067 | scored duplicate of CX-06 | Same open result as R028; impact/reach reasoning remains supported. |
+| R068 | scored duplicate of the UTF-32 finding | Same open result as R036. |
+| R069 | scored duplicate of EC-08 | Same open result as R008; the hostile-mask probe reproduced it. |
+| R070 | scored duplicate of the CSV finding | Same withdrawn result as R037. |
+| R071 | scored duplicate of EC-16 | Same fixed result as R016. |
+| R072 | scored duplicate of EC-20 | Same open result as R020. |
+| R073 | scored duplicate of EC-15 | Same open result as R015. |
+| R074 | scored duplicate of EC-17 | Same open result as R017. |
+| R075 | scored duplicate of EC-23 | Same open result as R023. |
+| R076 | scored duplicate of EC-18 | Same open result as R018. |
+| R077 | EC/LEN hash-handling drift | Source-confirmed as a design decision, not a product defect. |
+| R078 | malformed blank-cell not-reproduced header | Structural row, not a finding. |
+| R079 | duplicate detail row for EC-19 | Same not-reproduced result as R019. |
+| P001 | BOM-less UTF-16 detected as UTF-32 | Open confirmed end to end. UTF-16LE bytes `00 01 0A 00` repeated were detected as BOM-less UTF-32 and rewritten to different Unicode with exit 0. |
+| P002 | NUL-heavy ASCII detected as UTF-16 | Open confirmed and safe at conversion. A 65,536-byte ASCII fixture with a NUL every 100 bytes (1.001% overall) was labelled UTF-16BE; conversion refused with exit 5 and left it unchanged. The old 2.3% wording was corrected. |
+| P003 | hard-linked paths processed independently | Open behaviour confirmed. Two names for one UTF-8 file both converted with exact text preservation and separate backups/sidecars. The normal replacement broke the link; the platform fallback was not forced. |
+| P004 | truncated trailing sequence accepted only by detection | Open confirmed. A UTF-8 sample ending in `E2 82` was reported as UTF-8 by `-DetectOnly`; conversion failed strict decoding with `SourceDecodeError`, exit 3, and left the file unchanged. |
+| S001 | GUI smoke driver rejected offscreen source encodings | Fixed confirmed from `EcGuiDriver` and smoke phase J. Both combo-scoped and process-wide exact-name searches now follow the documented rule. |
+
+### Recheck limits
+
+**Unchecked rows: none.** Every old row and every prose-only finding was traced to
+source, a current test, a current behavioural probe, or an explicitly historical
+measurement.
+
+Three parts could not be independently reproduced on this machine:
+
+- R040's force-close exception remains a source-derived race requiring precise UI
+  timing.
+- P003's `File.Move(..., overwrite: true)` fallback requires a platform on which
+  `File.Replace` is unsupported; only the normal Windows path was exercised.
+- R058 through R061 contain historical performance figures. Their current safety
+  properties were source-checked, but the benchmark was not rerun.
