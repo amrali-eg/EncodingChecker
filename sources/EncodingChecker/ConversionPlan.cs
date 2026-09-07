@@ -288,9 +288,10 @@ internal sealed record ConversionPlan
     {
         try
         {
-            File.WriteAllText(
-                path, JsonSerializer.Serialize(this, Options), new UTF8Encoding(false));
-            return null;
+            // Serialize before opening the destination so failure preserves the previous plan.
+            string json = JsonSerializer.Serialize(this, Options);
+
+            return AtomicArtifactFile.WriteText(path, json, new UTF8Encoding(false));
         }
         catch (Exception ex) when (
             ex is IOException or UnauthorizedAccessException or JsonException)
@@ -349,6 +350,24 @@ internal sealed record ConversionPlan
                             + (file?.RelativePath is { Length: > 0 } named
                                 ? $": {named}."
                                 : ".");
+                    return null;
+                }
+
+                // A number deserializes into any enum, so a plan can name a value no build
+                // wrote. Reject it before touching a source.
+                if (!Enum.IsDefined(file.Action))
+                {
+                    error = "The plan records an unknown action for "
+                            + $"'{file.RelativePath}'. Re-run -Plan to produce one this "
+                            + "build can carry out.";
+                    return null;
+                }
+
+                if (!Enum.IsDefined(file.SourceInterpretation))
+                {
+                    error = "The plan records an unknown source interpretation for "
+                            + $"'{file.RelativePath}'. Re-run -Plan to produce one this "
+                            + "build can carry out.";
                     return null;
                 }
 

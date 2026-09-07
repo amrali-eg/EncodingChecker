@@ -67,6 +67,7 @@ internal sealed class SmokeSuite
         RunIf("G", "Backup failure leaves the source unchanged", PhaseG);
         RunIf("H", "A source choice matching an unprovable estimate is flagged", PhaseH);
         RunIf("I", "An interrupted run reports what it actually wrote", PhaseI);
+        RunIf("J", "An out-of-directory source choice is refused visibly", PhaseJ);
 
         return new SmokeReport
         {
@@ -421,6 +422,51 @@ internal sealed class SmokeSuite
         }
     }
 
+    /// <summary>
+    /// A source choice that cannot be mapped back to the review's directory stays visible.
+    /// </summary>
+    /// <remarks>
+    /// The main window can be retargeted after View without replacing its old results.
+    /// Those rows then appear outside the new directory. They used to be dropped when
+    /// the user confirmed an encoding, which closed the review as an unexplained
+    /// cancellation. This phase drives that exact sequence and checks the files rather
+    /// than trusting the dialog text alone.
+    /// </remarks>
+    private void PhaseJ(PhaseContext phase)
+    {
+        string scanned = Directory.CreateDirectory(
+            Path.Combine(phase.Directory, "scanned")).FullName;
+        string retargeted = Directory.CreateDirectory(
+            Path.Combine(phase.Directory, "retargeted")).FullName;
+        Write(scanned, "french.txt", "Prix: 100€ pour le café", CodePage("windows-1252"));
+
+        Dictionary<string, string> before = phase.CaptureBefore();
+
+        using var gui = new EcGuiDriver(_app);
+        System.Windows.Automation.AutomationElement review =
+            gui.OpenReviewAfterRetarget(scanned, retargeted, 1);
+
+        const string outsideFile = @"..\scanned\french.txt";
+        Check(
+            gui.ReviewText(review).Contains(outsideFile, StringComparison.OrdinalIgnoreCase),
+            "The review did not identify the file outside its current directory.");
+
+        gui.TryConfirmSource(review, "windows-1252", outsideFile);
+        Check(gui.ReviewIsOpen(review),
+            "The review closed after refusing an unusable source choice.");
+        gui.WaitForReviewText(review, "no longer inside this review");
+
+        Check(gui.ReviewIsOpen(review),
+            "The review closed after refusing an unusable source choice.");
+        Check(
+            gui.ReviewText(review).Contains(outsideFile, StringComparison.OrdinalIgnoreCase),
+            "The refusal no longer named the file outside the review directory.");
+
+        gui.CancelReview(review);
+        AssertSameFiles(before, Snapshot(phase.Directory));
+        AssertNoArtifacts(phase.Directory);
+    }
+
     /// <summary>Files whose byte-order mark has been stripped, so they were written.</summary>
     private static int RewrittenCount(string directory) =>
         Directory.EnumerateFiles(directory, "file-*.txt")
@@ -549,7 +595,8 @@ internal sealed class SmokeSuite
 
     private static void AssertNoArtifacts(string directory)
     {
-        string[] artifacts = Directory.GetFileSystemEntries(directory)
+        string[] artifacts = Directory.EnumerateFileSystemEntries(
+                directory, "*", SearchOption.AllDirectories)
             .Where(path =>
                 path.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) ||
                 path.EndsWith(".ecmeta.json", StringComparison.OrdinalIgnoreCase) ||
@@ -561,10 +608,10 @@ internal sealed class SmokeSuite
     }
 
     private static Dictionary<string, string> Snapshot(string directory) =>
-        Directory.EnumerateFiles(directory)
+        Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
-                path => Path.GetFileName(path)!,
+                path => Path.GetRelativePath(directory, path),
                 Hash,
                 StringComparer.OrdinalIgnoreCase);
 

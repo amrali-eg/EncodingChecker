@@ -211,6 +211,52 @@ internal static partial class Program
     }
 
     // Internal so tests can pin the published CLI exit-code contract.
+    /// <summary>Returns the first output path known to be unusable before the run.</summary>
+    /// <remarks>
+    /// It does not probe by creating a file because a later failure would leave that probe
+    /// behind. The actual write can still fail.
+    /// </remarks>
+    private static string? FindUnusableOutputDestination(CliOptions options)
+    {
+        (string Name, string? Path)[] outputs =
+        [
+            ("-Plan", options.PlanPath),
+            ("-Journal", options.JournalPath),
+            ("-Report", options.ReportPath),
+        ];
+
+        foreach ((string name, string? path) in outputs)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                continue;
+
+            string fullPath;
+
+            try
+            {
+                fullPath = Path.GetFullPath(path);
+            }
+            catch (Exception ex) when (
+                ex is IOException or ArgumentException or NotSupportedException)
+            {
+                return $"{name} contains an invalid path: {ex.Message}";
+            }
+
+            if (Directory.Exists(fullPath))
+                return $"{name} names an existing directory. Give it a file path.";
+
+            string? parent = Path.GetDirectoryName(fullPath);
+
+            if (!string.IsNullOrEmpty(parent) && !Directory.Exists(parent))
+            {
+                return $"{name} is under '{parent}', which does not exist. Create it "
+                       + "first, or choose a path whose folder already exists.";
+            }
+        }
+
+        return null;
+    }
+
     internal static int RunConsoleMode(string[] args)
     {
         if (args is ["--version"])
@@ -237,6 +283,16 @@ internal static partial class Program
         {
             Console.Error.WriteLine(validationError);
             return 1;
+        }
+
+        // Keep output preflight outside argument validation: docs/CLI.md assigns report
+        // failures exit 3, and ExitCodeContractTests pins that contract.
+        string? destinationError = FindUnusableOutputDestination(options);
+
+        if (destinationError is not null)
+        {
+            Console.Error.WriteLine(destinationError);
+            return 3;
         }
 
         if (!string.IsNullOrWhiteSpace(options.ApplyPath))
@@ -430,17 +486,16 @@ internal static partial class Program
 
         if (!string.IsNullOrEmpty(options.ReportPath))
         {
-            try
+            string? reportError = AtomicArtifactFile.Write(options.ReportPath, stream =>
             {
                 using var writer = new StreamWriter(
-                    options.ReportPath, false, ConversionReport.CsvFileEncoding);
+                    stream, ConversionReport.CsvFileEncoding, leaveOpen: true);
                 ConversionReport.WriteCsv(entries, writer);
-            }
-            catch (Exception ex) when (
-                ex is IOException or UnauthorizedAccessException)
+            });
+
+            if (reportError is not null)
             {
-                Console.Error.WriteLine(
-                    $"Failed to write report file: {ex.Message}");
+                Console.Error.WriteLine($"Failed to write report file: {reportError}");
                 return 3;
             }
         }

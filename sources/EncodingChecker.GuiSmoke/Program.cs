@@ -169,7 +169,7 @@ internal static class Program
     {
         internal const string Usage =
             "Usage: EncodingChecker.GuiSmoke [--app <EncodingChecker.exe>] "
-            + "[--output <folder>] [--phase <A-I>] [--keep-workspace]";
+            + "[--output <folder>] [--phase <A-J>] [--keep-workspace]";
 
         internal static Options Parse(string[] args)
         {
@@ -198,8 +198,8 @@ internal static class Program
                         phase = TakeValue(args, ref i, "--phase").ToUpperInvariant();
 
                         if (phase is not ("A" or "B" or "C" or "D" or "E" or "F" or "G"
-                                          or "H" or "I"))
-                            throw new ArgumentException("--phase must be one letter from A to I.");
+                                          or "H" or "I" or "J"))
+                            throw new ArgumentException("--phase must be one letter from A to J.");
                         break;
                     default:
                         throw new ArgumentException($"Unknown option: {args[i]}");

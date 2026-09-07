@@ -1,294 +1,850 @@
 # Defect backlog
 
-Status of the thirty-five findings from the two independent reviews that
-preceded v3.11.0, plus what has been found since.
+This is the current ledger for defects and review findings in EncodingChecker.
+It is organised by status, not discovery date, so the open work is visible in
+one place. Longer evidence and history follow the ledger.
 
-**Of the original thirty-five: 26 fixed, 8 open, 1 could not be reproduced.**
-Six further findings have been raised since v3.11.1, two of them already fixed.
-Twelve more since v3.11.2, all twelve fixed.
-**Twelve open in total.**
+<!-- backlog-counts total=61 fixed=44 open=13 not-reproduced=1 withdrawn=1 not-a-defect=1 decision=1 -->
 
-## Why this file exists
+**Derived count: 61 findings — 44 fixed, 13 open, 1 not reproduced,
+1 withdrawn, 1 not a defect, and 1 design decision.** Recompute and validate
+these figures with:
 
-The original review lived in a generated HTML report and in a chat transcript.
-Neither survived into the repository, so weeks later the only way to answer
-"what is still open?" was to trust a summary — and the summary was wrong.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File docs/Test-DefectBacklog.ps1
+```
 
-EC-06 is the demonstration. It was found before v3.11.0, recorded as Medium and
-Confirmed, reported as closed, and shipped broken in **both** v3.11.0 and
-v3.11.1. It was rediscovered from scratch during an unrelated review, filed as a
-new finding, and only then recognised as a known one.
+`powershell` rather than `pwsh` because it is present on every Windows machine; the script
+is ASCII-only and needs no BOM, so either shell runs it. `-ExecutionPolicy Bypass` because
+this repository ships no signed scripts and a stock machine refuses to run them at all. It
+applies to that one process and changes nothing on the machine.
 
-A finding that is written down but not tracked is a finding that gets found
-twice and fixed late. Hence this file.
+The checker reads the canonical tables below, verifies unique IDs and known
+statuses, and requires both impact and reach for every open finding.
 
-## How each status was reached
+## Status and scoring rules
 
-`fixed` means the code that caused it is demonstrably gone — a named
-replacement, a test that pins the behaviour, or a check re-run against the
-current build. `open` means the cited code is still present and was read again
-on 2026-09-04. `not reproduced` means an attempt to trigger it failed, which is
-weaker than either.
+- **Fixed** means the responsible code is gone and a current source location,
+  regression test, or current-build probe demonstrates the replacement.
+- **Open** means the behavior remains reachable or a source path to it remains.
+- **Not reproduced** means a current attempt did not trigger the proposed
+  behavior; that is weaker than proof that it cannot occur.
+- **Withdrawn** means the proposed defect was disproved.
+- **Not a defect** means the implementation matches an intentional contract.
+- **Decision** records a deliberate design difference that needs a choice, not
+  a product correction.
 
-Statuses were re-derived from the source, not carried over from the earlier
-report.
+Impact asks what a user loses if a finding occurs. Reach asks how readily the
+preconditions occur. They are kept separate because a severe but constructed
+case and a harmless common case require different decisions.
 
-## The thirty-five
+## Canonical ledger
 
-| ID | Finding | Status | Evidence |
-|---|---|---|---|
-| EC-01 | Applying a plan converts a file the plan refused | fixed | `PlannedFile.HasReliableUnicodeDetection` carries the flag the plan boundary was dropping. |
-| EC-02 | `-Validate` marks an unprovable file valid; `-Target` refuses it | fixed | v3.11.0 reports unprovable BOM-less UTF-16 as `Invalid`. |
-| EC-03 | The GUI never shows the advisory v3.10.1 added | fixed | GUI smoke phase H asserts on the rendered advisory text. |
-| EC-04 | `-Plan` exits 0 when files failed the scan | fixed | The plan branch returns 3 before considering 2. |
-| EC-05 | A plan holding an unreadable file can never be applied | fixed | A hash is required only for `Convert` entries. |
-| EC-06 | A drive-root base path makes every plan unusable | fixed | Fixed 2026-09-04. **Shipped broken in v3.11.0 and v3.11.1.** |
-| EC-07 | The refusal advises the very encoding it cannot justify | fixed | `DescribeRefusal` offers both byte orders. |
-| EC-08 | An include pattern can hang the scan indefinitely | **open** | Reproduced 2026-09-06, but only against inputs built for it. `CompilePatterns` still emits `RegexOptions.Compiled` with `Regex.InfiniteMatchTimeout`. The 2026-09-04 attempt used a *matching* filename, which stops at the first success and cannot show it. Scored below. |
-| EC-09 | `.bak` files are excluded, uncounted, and unreported | fixed | `TraversalCounters.FilesExcludedAsEcArtifact`. |
-| EC-10 | A scan failure is journaled as a refusal | fixed | A failed snapshot is recorded as `Error`, not `Refused`. |
-| EC-11 | `ApplyPlan` leaks its Ctrl+C handler onto a disposed token source | fixed | Both handler sites unsubscribe in a `finally`. |
-| EC-12 | The GUI status line counts skipped files as unchanged | fixed | Pinned by a test naming EC-12. |
-| EC-13 | The plan's explicit-source field can name one encoding for a run that used several | fixed | `DescribeSourceChoice` reports per-file choices. |
-| EC-14 | `OutputTextSha256` is a copy of `SourceTextSha256` | fixed | The record takes the digest verification computed, and throws if absent. |
-| EC-15 | The five conversion-semantics booleans are written everywhere and read nowhere | **open** | Only `SemanticsVersion` is enforced on load. |
-| EC-16 | Settings.xml is written with truncate-in-place | **open** | `MainForm.Settings.cs:100` still opens `FileMode.Create` and serialises into it. |
-| EC-17 | The text-validation comment contradicts its code | **open** | Control characters are penalised, not ignored. Behaviour is right, comment is wrong — and the file must stay byte-identical across three repos, so the fix is a synchronised change. |
-| EC-18 | Ambiguity is recomputed on every pass over a BOM-less UTF-16 file | **open** | The or-expression short-circuits only when the flag is already true. |
-| EC-19 | The double-BOM guard's reach depends on which object supplied the codec | *not reproduced* | The detector's BOM-less instance never reaches the guard; both paths refuse. Tested. |
-| EC-20 | `DetectFromFile` opens with looser sharing than every other read path | **open** | Still permits concurrent writes and deletes. |
-| EC-21 | Three save-dialog instances are never disposed | fixed | All three use `using var`. |
-| EC-22 | Plan serialisation and deserialisation use different options objects | fixed | Reader and writer now share one options object, in the plan store and the metadata store. |
-| EC-23 | `ApplyPlan` dereferences `ResolvePath` with a null-forgiving operator | **open** | `Program.CliExecution.cs:90`. EC-06 was what happens when that invariant breaks. |
-| CX-01 | An empty option value is silently ignored | fixed | Blank values are rejected with exit 1. |
-| CX-02 | A failed second conversion destroys the first backup | fixed | `RemoveBeforeBackupReplacement` runs before the backup is replaced. |
-| CX-03 | `-Apply` follows a plan root replaced by a junction | fixed | `HasReparsePointInPath` checks the whole path. |
-| CX-05 | The journal cannot represent a post-install failure | fixed | `ConvertedWithWarning` and `InstallationUnknown` added. |
-| CX-06 | The entropy gate outranks a valid BOM | **open** | `TextEncoding.cs:175` returns null before `UnicodeDetector.DetectFromBuffer` at line 182 reads the BOM. |
-| CX-07 | Older plans, journals and reports are ordinary scan candidates | fixed | Reserved suffixes are excluded and rejected as output paths. |
-| CX-08 | Documentation and validation disagree about `-DetectOnly` | fixed | Conflicting option combinations are rejected. |
-| CX-09 | Cancelling a partly completed GUI run produces no journal | fixed | GUI smoke phase I covers it. |
-| CX-10 | Plan summaries say "detection bypassed" when detection still ran | fixed | Now "chosen by you; detection still ran and is recorded". |
-| CX-11 | GUI startup can fail if the settings directory cannot be created | fixed | `GetSettingsFileName()` moved inside the `try`. |
-| CX-12 | A saved window position is not validated against current monitors | fixed | `WindowPosition.IsReachable` tests the title bar against attached monitors. |
-| CX-13 | Detector parity is not a pull-request check or a release gate | fixed | Parity runs on pull requests, and the release workflow declares `needs: parity`. |
+This is the only place that assigns a current status to an individual finding.
+Existing `EC-nn` and `CX-nn` IDs are unchanged. `BL-nn` IDs were assigned during
+the 2026-09-08 reformat to findings that previously had only a sentence.
 
-## Found after v3.11.1
+<!-- backlog-ledger:start -->
 
-| Finding | Status | Note |
+### Open findings
+
+| ID | Finding | Status | Impact | Reach | Details |
+|---|---|---|---|---|---|
+| EC-08 | An include pattern can hang a scan indefinitely | Open | Medium | Theoretical | [EC-08](#ec-08) |
+| EC-15 | Serialized conversion guarantees are not enforced individually | Open | Low | Common | [EC-15](#ec-15) |
+| EC-17 | A text-validation comment contradicts the calculation | Open | Low | Common | [EC-17](#ec-17) |
+| EC-18 | A negative BOM-less UTF-16 ambiguity result is recomputed | Open | Low | Common | [EC-18](#ec-18) |
+| EC-20 | Detection permits concurrent writes and deletes | Open | Low | Rare | [EC-20](#ec-20) |
+| EC-23 | Plan application relies on a null-forgiving path dereference | Open | Low | Rare | [EC-23](#ec-23) |
+| CX-06 | The entropy gate runs before BOM detection | Open | Medium | Occasional | [CX-06](#cx-06) |
+| BL-01 | Ambiguous BOM-less UTF-32 can be converted under the wrong byte order | Open | Critical | Theoretical | [BL-01](#bl-01) |
+| BL-05 | Force-closing during a run can race UI callbacks | Open | Low | Rare | [BL-05](#bl-05) |
+| BL-18 | BOM-less UTF-16 can be detected and converted as UTF-32 | Open | Critical | Rare | [BL-18](#bl-18) |
+| BL-19 | NUL-heavy ASCII can be reported as BOM-less UTF-16 | Open | Medium | Rare | [BL-19](#bl-19) |
+| BL-20 | Hard-linked paths are processed independently | Open | Low | Rare | [BL-20](#bl-20) |
+| BL-21 | Detection can accept a truncated trailing sequence that conversion rejects | Open | Low | Rare | [BL-21](#bl-21) |
+
+### Closed and other findings
+
+| ID | Finding | Status | Impact | Reach | Details |
+|---|---|---|---|---|---|
+| EC-01 | Applying a plan could convert a file the plan refused | Fixed | — | — | [EC-01](#ec-01) |
+| EC-02 | Read-only validation disagreed with the BOM-less Unicode safety policy | Fixed | — | — | [EC-02](#ec-02) |
+| EC-03 | The GUI omitted the source-choice advisory | Fixed | — | — | [EC-03](#ec-03) |
+| EC-04 | `-Plan` could exit successfully after scan failures | Fixed | — | — | [EC-04](#ec-04) |
+| EC-05 | An unreadable non-conversion plan entry made a plan unusable | Fixed | — | — | [EC-05](#ec-05) |
+| EC-06 | A drive-root base path made every plan unusable | Fixed | — | — | [EC-06](#ec-06) |
+| EC-07 | A refusal advised the same ambiguous encoding it rejected | Fixed | — | — | [EC-07](#ec-07) |
+| EC-09 | Excluded EC artifacts were uncounted | Fixed | — | — | [EC-09](#ec-09) |
+| EC-10 | A scan failure was journaled as a policy refusal | Fixed | — | — | [EC-10](#ec-10) |
+| EC-11 | Plan application leaked a Ctrl+C handler | Fixed | — | — | [EC-11](#ec-11) |
+| EC-12 | The GUI counted skipped files as unchanged | Fixed | — | — | [EC-12](#ec-12) |
+| EC-13 | A mixed-source plan could report one source encoding for the run | Fixed | — | — | [EC-13](#ec-13) |
+| EC-14 | The output-text hash copied the source-text hash | Fixed | — | — | [EC-14](#ec-14) |
+| EC-16 | Settings were written by truncating the live file | Fixed | — | — | [EC-16](#ec-16) |
+| EC-19 | Double-BOM handling depended on the encoding instance | Not reproduced | — | — | [EC-19](#ec-19) |
+| EC-21 | Save dialogs were not disposed | Fixed | — | — | [EC-21](#ec-21) |
+| EC-22 | Plan and metadata readers used different JSON options from writers | Fixed | — | — | [EC-22](#ec-22) |
+| CX-01 | Empty option values were silently treated as absent | Fixed | — | — | [CX-01](#cx-01) |
+| CX-02 | A failed second conversion could destroy the first recovery record | Fixed | — | — | [CX-02](#cx-02) |
+| CX-03 | Applying a plan followed a root replaced by a junction | Fixed | — | — | [CX-03](#cx-03) |
+| CX-05 | The journal could not represent uncertainty after installation | Fixed | — | — | [CX-05](#cx-05) |
+| CX-07 | Old plans, journals, and reports should be excluded from scans | Not a defect | — | — | [CX-07](#cx-07) |
+| CX-08 | Documentation and validation disagreed about `-DetectOnly` conflicts | Fixed | — | — | [CX-08](#cx-08) |
+| CX-09 | Cancelling after writes produced no journal | Fixed | — | — | [CX-09](#cx-09) |
+| CX-10 | Plan summaries said detection was bypassed when it ran | Fixed | — | — | [CX-10](#cx-10) |
+| CX-11 | GUI startup could fail before settings error handling began | Fixed | — | — | [CX-11](#cx-11) |
+| CX-12 | Saved window positions ignored the current monitor layout | Fixed | — | — | [CX-12](#cx-12) |
+| CX-13 | Detector parity was not a pull-request or release gate | Fixed | — | — | [CX-13](#cx-13) |
+| BL-02 | CSV cells need formula neutralization | Withdrawn | — | — | [BL-02](#bl-02) |
+| BL-03 | Conversion parallelism was capped at four | Fixed | — | — | [BL-03](#bl-03) |
+| BL-04 | A ticked source choice could be discarded without explanation | Fixed | — | — | [BL-04](#bl-04) |
+| BL-06 | Target identity was compared by label rather than codec | Fixed | — | — | [BL-06](#bl-06) |
+| BL-07 | A whole-file unchanged claim came from a 64 KiB sample | Fixed | — | — | [BL-07](#bl-07) |
+| BL-08 | Preview could approve a source that conversion could not decode | Fixed | — | — | [BL-08](#bl-08) |
+| BL-09 | One unexpected file exception could stop the whole run | Fixed | — | — | [BL-09](#bl-09) |
+| BL-10 | An unreadable folder was invisible to machine output | Fixed | — | — | [BL-10](#bl-10) |
+| BL-11 | Folders skipped by name were uncounted | Fixed | — | — | [BL-11](#bl-11) |
+| BL-12 | Some validation failures had no reason code | Fixed | — | — | [BL-12](#bl-12) |
+| BL-13 | Refusal reasons were re-derived after the policy decision | Fixed | — | — | [BL-13](#bl-13) |
+| BL-14 | Decode failures could report a negative chunk offset | Fixed | — | — | [BL-14](#bl-14) |
+| BL-15 | Console output ignored the console's encoding | Fixed | — | — | [BL-15](#bl-15) |
+| BL-16 | Help and CLI documentation stated an old parallelism default | Fixed | — | — | [BL-16](#bl-16) |
+| BL-17 | The lifetime of `<file>.bak` was undocumented | Fixed | — | — | [BL-17](#bl-17) |
+| BL-22 | An unwritable report or journal path was discovered after conversion | Fixed | — | — | [BL-22](#bl-22) |
+| BL-23 | An undefined plan action was reported as a conversion | Fixed | — | — | [BL-23](#bl-23) |
+| BL-24 | Plans, journals, reports, and settings used truncate-in-place writes | Fixed | — | — | [BL-24](#bl-24) |
+| BL-25 | EC and LEN use different transient content-hash machinery | Decision | — | — | [BL-25](#bl-25) |
+| BL-26 | The GUI smoke driver rejected an exact offscreen combo item | Fixed | — | — | [BL-26](#bl-26) |
+
+<!-- backlog-ledger:end -->
+
+## Open-finding evidence
+
+### EC-08
+
+**A hostile include mask can monopolize the regex engine.**
+`DirectoryTraversal.CompilePatterns` still translates `*` to `.*`, creates a
+regex with `RegexOptions.Compiled`, and therefore uses
+`Regex.InfiniteMatchTimeout`. On 2026-09-08 a scan with
+twelve separated wildcards against a nonmatching forty-character run of `a`
+did not finish within three seconds and had to be terminated.
+
+The trigger requires both inputs to be deliberately hostile: roughly ten or
+more separated wildcards and a filename with roughly twenty-four or more mostly
+consecutive copies of the separating character. Earlier measurements found
+realistic names answered in 0–5 ms, while the forty-`a` case exceeded 20 s.
+The mask comes from the operator, not an untrusted file.
+
+`RegexOptions.NonBacktracking` removed the blow-up, matched the current engine on
+the tested masks, and cost nothing measurable beside file I/O. It was measured
+and deliberately reverted because of the constructed reach. Three dead ends are
+worth preserving: a matching filename stops at the first success and proves
+nothing; `*` crossing directory separators is deliberate and tested; replacing
+`.*` with `[^/]*` does not prevent backtracking in a separator-free filename.
+`PathAwarePatternTests.PathQualifiedPattern_MatchesOnlyTheIntendedSubtree` pins
+the intended `src/*.cs` directory behavior.
+
+### EC-15
+
+**The five serialized guarantee flags look enforceable but are descriptive.**
+`ConversionSemantics` writes `StrictDecoding`, `StrictEncoding`,
+`OutputVerification`, `AtomicInstall`, and `LegacyRequiresExplicitSource`.
+`ConversionPlan.Load` enforces `SemanticsVersion` only. EC always executes its
+current strict behavior, so this cannot weaken conversion, but a reader may
+mistake a serialized `true` value for proof that the specific check ran.
+
+### EC-17
+
+**The printable-ratio comment says the opposite of the calculation.**
+`TextValidation.cs` increments the total rune count before its category switch.
+Control and private-use scalars do not increment `printable`, so they lower the
+ratio; they are not ignored. The behavior is the intended binary-rejection
+behavior. The comment is shared byte-for-byte with LineEndingNormalizer and
+CorpusTesters, so its correction must be synchronized.
+
+### EC-18
+
+**Only a positive ambiguity result is cached.** In `ScanEngine`,
+`entry.HasAmbiguousBomlessUtf16 || IsAmbiguousBomlessUtf16(...)` short-circuits
+when the stored value is true. A stored false runs the full check again on each
+pass. Measurement found no meaningful cost because a provable file normally
+fails the opposite-order decode in its first buffer; the issue is redundant
+work and unclear state, not observed slowness.
+
+### EC-20
+
+**The detector has a looser sharing mode than the paths that rely on its result.**
+`TextEncoding.DetectFromFile` opens with `FileShare.ReadWrite |
+FileShare.Delete`; validation and source-snapshot paths use `FileShare.Read`.
+Detection can therefore describe bytes while another process changes or deletes
+them. This affects detection and validation output; conversion later takes its
+own bound snapshot before writing.
+
+### EC-23
+
+**Plan application still depends on ordering to make a nullable path non-null.**
+At the current source location `Program.CliExecution.cs:90`, the code uses
+`plan.ResolvePath(f)!`. `FindStaleFiles` validates the same paths 29 lines
+earlier, so the dereference is safe under the present flow. EC-06 demonstrates
+why leaving that invariant implicit is fragile.
+
+### CX-06
+
+**High entropy can hide an otherwise valid BOM.** At current
+`TextEncoding.cs:175`, the entropy guard returns before
+`UnicodeDetector.DetectFromBuffer` examines the BOM at line 182. The result can
+be an unknown or wrong encoding even when the file declares it. This changes
+what EC reports; it is not evidence that conversion writes the file.
+
+### BL-01
+
+**BOM-less UTF-32 byte order can be guessed and then treated as proven.** The
+ambiguity guard covers code pages 1200 and 1201, not 12000 and 12001. A current
+end-to-end fixture containing UTF-32BE `00 00 01 00` units was detected as
+little-endian UTF-32 and converted from U+0100 to U+10000 with exit 0. Reaching
+the case requires every scalar to have the special byte shape, so ordinary text
+is unlikely to do it; its consequence is nevertheless silent text change.
+
+### BL-05
+
+**A second close request can outlive the form while its worker still uses it.**
+`OnFormClosing` deliberately allows a confirmed second close because
+cancellation is cooperative. A worker can subsequently call the synchronous
+confirmation `Invoke`, and completion accesses form controls. Finished files
+have already been installed independently and the in-flight file remains
+protected; the expected symptom is an exception during exit, not lost file
+content. The timing-dependent path was source-confirmed but not reproduced.
+
+### BL-18
+
+**A degenerate BOM-less UTF-16 stream can look like UTF-32.** A current fixture
+containing UTF-16LE `00 01 0A 00` units was detected as BOM-less UTF-32 and
+rewritten to different Unicode with exit 0. Output verification cannot expose a
+wrong source interpretation because both sides use that same interpretation.
+
+The original measurement used nineteen realistic shapes: 41 of 44 detections
+were right, and all three misses had the same constructed shape—one character
+per line, with every other UTF-16 code unit a C0 control. The reach is low; the
+impact when reached is silent text change.
+
+### BL-19
+
+**The UTF-16 structure heuristic can claim NUL-heavy ASCII.** The earlier
+document said 2.3% of all bytes; that was wrong. A current 65,536-byte ASCII
+fixture with a NUL every 100 bytes—1.001% overall—was reported as UTF-16BE. The
+detector threshold is 2% in one putative UTF-16 byte channel, approximately 1%
+of all bytes for this shape. Conversion refused with exit 5 and the source hash
+did not change, so the wrong claim currently reaches detection and validation,
+not installation.
+
+### BL-20
+
+**Filesystem aliases are treated as separate selected paths.** Two hard links
+to one UTF-8 file were both converted in a current probe. Both retained exact
+text, and each received its own verified `.bak` and `.ecmeta.json`; the normal
+Windows `File.Replace` path broke their link relationship. This can duplicate
+work and does not preserve hard-link identity. The fallback
+`File.Move(..., overwrite: true)` path could not be forced on this platform, so
+no claim is made about that branch.
+
+### BL-21
+
+**Sample detection and complete conversion intentionally use different flush
+semantics.** A UTF-8 file ending in incomplete bytes `E2 82` was reported as
+UTF-8 by `-DetectOnly`, because sample detection does not flush an incomplete
+tail. Conversion flushed the strict decoder, returned `SourceDecodeError` and
+exit 3, and left the source unchanged. The safety path is correct; the detector
+can still bless a complete file that conversion rejects.
+
+## Evidence for the original review findings
+
+### EC-01
+
+**A reviewed refusal is binding.** `PlannedFile.HasReliableUnicodeDetection`
+carries the policy input that was formerly lost at the plan boundary.
+`AppliedPlanFidelityTests.ThePlanCarriesTheDetectionReliabilityTheVetoDependsOn`
+pins it.
+
+### EC-02
+
+**Read-only modes use the conversion safety decision.**
+`ReadOnlyModeAmbiguityTests` proves that an unprovable BOM-less Unicode source is
+not reported valid when conversion would refuse it.
+
+### EC-03
+
+**The v3.10.1 advisory reaches the real window.** GUI smoke phase H asserts on
+the rendered source-choice text rather than only on an internal decision.
+
+### EC-04
+
+**Plan failures control the exit code.** The plan branch returns processing
+failure before considering `-FailOnChanges`; `PlanPreflightReportingTests`
+covers the ordering.
+
+### EC-05
+
+**Only scheduled conversions require a source hash.** Plan loading no longer
+makes an unreadable skipped or refused entry render the whole plan unusable.
+
+### EC-06
+
+**Drive roots resolve without manufacturing `C:\\`.**
+`ConversionPlan.ResolvePath` now uses a root-aware containment check, with
+theories for `C:\`, nested paths, and outside paths.
+
+This defect was found before v3.11.0, recorded as confirmed, reported as closed,
+and shipped broken in both **v3.11.0 and v3.11.1**. It was rediscovered during an
+unrelated review. This history is why status is now derived from a checkable
+ledger rather than a summary.
+
+### EC-07
+
+**The refusal gives two actionable choices.**
+`BomlessUnicodeSafety.DescribeRefusal` offers both UTF-16 byte orders instead of
+recommending the unproved estimate.
+
+### EC-09
+
+**Selected EC artifacts are counted.** `.bak`, `.ecmeta.json`, and temporary
+conversion files update `TraversalCounters.FilesExcludedAsEcArtifact`, pinned by
+`ArtifactExclusionCoverageTests`.
+
+### EC-10
+
+**A failed snapshot is an error, not a policy decision.** Journal outcome tests
+pin `ScanFailed` to `Error` rather than `Refused`.
+
+### EC-11
+
+**Both console cancellation subscriptions have bounded lifetimes.** Each Ctrl+C
+handler is removed in `finally`, so it cannot retain a disposed token source.
+
+### EC-12
+
+**Skipped and unchanged are separate GUI counts.** The tally is pinned by
+`SkippedFilesAreNotCountedAsUnchanged`.
+
+### EC-13
+
+**Mixed batches describe source choice per file.** `DescribeSourceChoice` no
+longer presents one run-wide explicit encoding when several were used.
+
+### EC-14
+
+**Source and output text hashes come from separate reads.** The conversion
+record accepts the output digest produced by verification and rejects a missing
+one; `RecordedProvenanceTests` compares the installed output independently.
+
+### EC-16
+
+**Settings use the same atomic artifact writer as other records.** An
+interruption before replacement leaves the previous preferences intact. This
+was closed incidentally by the v3.12.1 artifact-writer refactor, not by a
+settings-specific change.
+
+### EC-19
+
+**The proposed encoding-instance gap did not reach conversion.** Conversion
+re-resolves the codec name through `Encoding.GetEncoding`, whose UTF-8 instance
+has the expected preamble. A current file beginning with two UTF-8 BOMs was
+refused with `MultipleLeadingByteOrderMarks` and exit 5 through both automatic
+detection and `-From utf-8`.
+
+### EC-21
+
+**All three save dialogs have deterministic disposal.** Each construction site
+uses `using var`.
+
+### EC-22
+
+**Each JSON store shares its reader and writer options.** Plan and recovery
+metadata no longer serialize and deserialize through mismatched option objects.
+
+### CX-01
+
+**A present option must carry a usable value.** Empty values for all value-taking
+flags are rejected with exit 1; `BlankOptionValueSafetyTests` verifies that
+nothing changes.
+
+### CX-02
+
+**A stale sidecar cannot survive backup replacement.**
+`RemoveBeforeBackupReplacement` removes the old record before replacing the
+backup, including a read-only record.
+
+### CX-03
+
+**Applied plans re-check every path component.**
+`HasReparsePointInPath` rejects a root or descendant replaced by a junction;
+applied-plan integrity tests cover the final component and outside-root cases.
+
+### CX-05
+
+**The journal can say what is and is not known after installation.**
+`ConvertedWithWarning` distinguishes a completed install with a later warning;
+`InstallationUnknown` represents a failure after the replacement outcome can no
+longer be proved.
+
+### CX-07
+
+**Old JSON and CSV artifacts are intentionally ordinary input.** The earlier
+ledger claimed they were excluded and even described a correction that was
+never made. `docs/CLI.md` deliberately says old plans, journals, and reports are
+scanned because a user may wish to convert them. A current `old-plan.json` probe
+was detected as ASCII. Only backups, sidecars, temporary files, and the current
+command's output paths are excluded.
+
+This false correction was discovered by re-deriving the row from source rather
+than trusting its own note.
+
+### CX-08
+
+**CLI mode conflicts are executable documentation.**
+`DocumentedOptionContractTests` pins the rejected combinations around
+`-DetectOnly`, validation, conversion, plan, and apply.
+
+### CX-09
+
+**An interrupted GUI write run still produces a journal.** Unit coverage and
+GUI smoke phase I reconcile completed and unattempted entries.
+
+### CX-10
+
+**An explicit choice does not erase detection history.** Plan summaries now say
+“chosen by you; detection still ran and is recorded,” with provenance tests.
+
+### CX-11
+
+**Settings-path creation is inside startup error handling.** A failure no longer
+escapes before the guarded settings load begins.
+
+### CX-12
+
+**Window restoration checks the monitors that exist now.**
+`WindowPosition.IsReachable` requires a useful title-bar intersection, with
+tests for removed, left-side, and secondary displays.
+
+### CX-13
+
+**Detector parity is enforced before integration and release.** The parity
+workflow runs on pull requests, and the release workflow declares it as a job
+dependency.
+
+## Evidence for later findings
+
+### BL-02
+
+**No reachable report field begins with a spreadsheet formula marker.**
+`DirectoryTraversal` resolves the `File` value with `Path.GetFullPath`, so it
+begins with a drive letter or UNC prefix. A current file named `=1+1.txt`
+produced `C:\...\=1+1.txt`. Encoding, BOM, target, result, reason code, and
+diagnostic are product-controlled values. Reopen this only if a reachable field
+starting with `=`, `+`, `-`, or `@` is demonstrated.
+
+### BL-03
+
+**The named default cap is eight.** `ScanEngine.MaxParallelismCap` and
+`DocumentedParallelismDefaultTests` keep code, help, and `docs/CLI.md` aligned.
+The change from four was measured on 2026-09-04 at 1.5–1.7x faster; that
+historical timing was not rerun during the 2026-09-08 source recheck.
+
+### BL-04
+
+**A source choice that cannot be scoped remains visible.** Each review row
+carries its resolved path. `DescribeUnusableScope` detects a ticked row whose
+path is unavailable, keeps the review open, names how many rows are affected,
+and asks the user to run View again. The unit test
+`ASourceChoiceThatCannotBeAppliedIsRefusedRatherThanDropped` and GUI smoke phase
+J verify the message and unchanged bytes.
+
+Before this correction, choosing an encoding after the review's directory had
+changed could close the dialog and report “Conversion cancelled. No files were
+modified,” although the user had not cancelled. EC-06 made every row hit that
+path when the review root was a drive root.
+
+### BL-06
+
+**Already-target identity is canonical codec identity, not spelling.** The old
+comparison used `WebName` against the caller's label. `-Target unicode`,
+`ucs-2`, or `utf-16le` could therefore decode, re-encode, verify, and reinstall
+files already in UTF-16LE with identical bytes, changing timestamps and creating
+backups and sidecars. Under `-FailOnChanges`, spelling alone changed the exit
+code; on BOM-less UTF-16 it could change a no-op into a refusal. The decision now
+compares nonzero resolved code pages. ASCII-to-UTF-8 behavior was left separate
+until full-file validation made folding it safe.
+
+### BL-07
+
+**An unchanged decision validates the complete file.** Detection examines at
+most 64 KiB. Previously, a matching source and target label skipped every later
+byte, so a file valid for 64 KiB and invalid afterward was `Unchanged` under one
+target and `Error` under another. Conversion already captures a whole-file
+snapshot hash; the added validation measured at 0.04–0.10 ms per MiB.
+
+### BL-08
+
+**A preview reads the source it promises to convert.** The old `WhatIf` branch
+returned before decoding, so `-Plan` could approve an unreadable source and defer
+failure until `-Apply`, after approval and potentially partway through a batch.
+The source now receives strict full-file decode validation and an unreadable
+entry is planned as `Refuse`. This remains source-only preflight: target
+representability is tested by actual conversion, and a dedicated test pins that
+limit.
+
+### BL-09
+
+**Unexpected per-file exceptions are isolated.** The old `Parallel.ForEach`
+worker caught four named exception types; a `SecurityException`, regex timeout,
+or product defect escaped as `AggregateException` and ended work on files the
+run had not reached. The CLI outer catch had the same four-name limit. The
+worker now propagates only cancellation and `OutOfMemoryException`.
+`RunParallel` is internal so a test can inject the otherwise difficult
+exceptions and prove another file still runs.
+
+### BL-10
+
+**Unreadable directories are visible as coverage loss.** An unreadable file
+already produced a `ScanFailed` row and exit 3. An unreadable folder formerly
+produced only an optional stderr warning—and no GUI trace because the GUI passes
+no warning callback. In the original deny-ACE measurement, a tree with one
+unreadable folder reported “1 file(s) processed” and exit 0; a wholly unreadable
+root produced a header-only CSV and exit 0. `DirectoriesUnreadable` now counts
+both traversal failure points separately from intentional exclusions. The exit
+code deliberately remains unchanged, so strict automation must inspect coverage
+output.
+
+### BL-11
+
+**Folders skipped by reserved name have their own counter.** `.git`, `bin`,
+`obj`, `build`, and the other documented names were skipped without appearing in
+coverage. They are now counted separately from hidden, system, and reparse-point
+folders, preserving the truth of both messages. An include pattern still cannot
+override these exclusions, matching both user documents.
+
+### BL-12
+
+**Every validation rejection names its cause.** A charset outside the allowed
+list now uses `CharsetNotAllowed`; a file EC cannot identify uses
+`UnknownEncoding`. Previously both reached `Invalid` with no reason, forcing a
+consumer to re-derive information the producer already had.
+
+### BL-13
+
+**The policy owns refusal reason codes.** `ApplyConversion` formerly repeated
+the condition already reduced to `SourceInterpretation`. The copies were
+textually identical, but nothing tied them together; a future refusal could
+fall through the caller's bolt-on guard to `LegacySourceRequired`.
+`ConversionPolicy.ReasonCodeFor` now owns the mapping. Tests cover all 256
+reachable input combinations and require every refusal to carry a reason.
+
+### BL-14
+
+**Decode errors name offending bytes, not a misleading chunk offset.**
+`DecoderFallbackException.Index` is relative to one decoder call and can be
+negative when an invalid sequence began in carried bytes. A truncated UTF-8
+tail reported offset -2. The diagnostic now reports the byte sequence. An
+absolute file offset would require restructuring the streaming loop and is not
+claimed.
+
+### BL-15
+
+**Interactive output follows the console; redirected output remains UTF-8.**
+Reattaching to a parent console formerly rebuilt writers with UTF-8 even when
+`Console.OutputEncoding` was IBM437, turning “Grüße aus München” into
+“Gr├╝├ƒe aus M├╝nchen”. The console now receives its own encoding, where
+unrepresentable characters become visibly lossy `?`; redirected CSV remains
+UTF-8, and `-Report` is UTF-8 with BOM. EC does not mutate global console state.
+
+### BL-16
+
+**The parallelism default has one code identity and checked documentation.** The
+help and `docs/CLI.md` both used to say four after the implementation moved to
+eight. A test reads the statement in each document and verifies its digits equal
+`ScanEngine.MaxParallelismCap`.
+
+### BL-17
+
+**A backup is the version replaced by the most recent run.** Re-converting a
+file replaces `<file>.bak` and removes its old sidecar. This long-standing
+behavior was tested but undocumented. The documents now say it plainly.
+
+The review initially proposed refusing to overwrite a nonmatching backup. That
+proposal was rejected after it broke four existing tests and would have blocked
+an ordinary “wrong target, convert again” workflow until the user manually
+deleted recovery files. CX-02 instead ensures stale metadata cannot describe a
+new backup.
+
+### BL-22
+
+**Requested report and journal destinations are checked before mode dispatch.**
+Previously, a missing output directory or an existing directory used as the
+output path was discovered after source files had been rewritten, leaving the
+requested record absent. All four combinations were reproduced. Preflight now
+returns processing exit code 3 before conversion. It does not create a probe
+file, which would itself leave artifacts and still could not promise a later
+write.
+
+### BL-23
+
+**Undefined plan enums are rejected before a source is touched.**
+`System.Text.Json` accepts any number for an enum. An action value of 99 formerly
+fell through the result mapper as `Converted`: apply exited 0, reported one
+conversion, and journaled action 99 even though the source hash was unchanged.
+Plan loading now validates both `Action` and `SourceInterpretation`, while the
+result mapper exhaustively names known actions and throws for anything else.
+
+### BL-24
+
+**All durable EC artifacts use replacement writes.** Converted files and
+recovery sidecars already used temporary files and replacement; plans, journals,
+reports, and settings truncated their live destinations. A failed plan write
+could destroy the reviewed plan immediately before use. `AtomicArtifactFile`
+now handles all four. The sidecar retains its stronger dedicated writer and
+read-back verification. This same refactor addressed EC-16.
+
+### BL-25
+
+**EC and LineEndingNormalizer make the same safety argument with different
+transient machinery.** Both use SHA-256 for source bytes and backup evidence.
+EC also uses SHA-256 for content digests and persists them as
+`SourceTextSha256` and `OutputTextSha256`; LEN uses XxHash3 for a private
+normalized-content digest that is discarded. EC compares hexadecimal digest
+strings with `string.Equals(..., OrdinalIgnoreCase)`; LEN compares digest bytes
+with `CryptographicOperations.FixedTimeEquals`.
+
+| Evidence | EC | LEN |
 |---|---|---|
-| Ambiguous BOM-less UTF-32 converts silently | **open** | The ambiguity guard covers only code pages 1200 and 1201, so the UTF-32 detector's prefer-little-endian wins with no refusal. Demonstrated end to end; reaching it needs every scalar to be a multiple of 0x100, so real text is unlikely to trigger it. |
-| CSV report does not neutralise leading formula characters | **open** | A filename beginning with an equals, plus, minus or at sign becomes a live formula in a spreadsheet. |
-| Conversion parallelism was capped at 4 | fixed | Raised to 8 on 2026-09-04; measured 1.5–1.7x faster. |
-| A ticked file can be dropped from a source choice in silence | fixed | Each row in the review's refused list carries its resolved path. `TickedFiles()` filters out rows whose path is null and says nothing, so a file the user ticked is left refused with no message. This was live until EC-06 was fixed: with a drive-root base directory every row resolved to null, so choosing an encoding reported "Conversion cancelled. No files were modified." The trigger is gone; the silent drop is not. |
-| Force-closing during a run can throw on the way out | **open** | The second close request abandons a run deliberately, which is correct. But the worker may then marshal its next confirmation to a form that no longer exists, and the completion handler runs against disposed controls. An error dialog at exit rather than lost work — finished files are installed and the one in flight is untouched. Reasoned from the code, not reproduced: it needs precise timing. |
-
-## Found after v3.11.2
-
-An independent review of 74d5b3d, run from the source rather than from this file.
-Everything it found and fixed is below, one commit each, carrying that commit's
-measurement and mutation result. Ordered by what a reader needs first: what EC
-did to files, then what it reported, then what it documented.
-
-| Finding | Status | Note |
-|---|---|---|
-| "Already in the target encoding" was decided by label, not by codec | fixed | `Decide` compared the detected charset's `WebName` against whatever the caller typed, so every accepted alias for one code page failed the test. `-Target unicode`, `ucs-2` or `utf-16le` on a tree already in UTF-16LE decoded, re-encoded, verified and reinstalled every file to produce **identical bytes**, resetting every modification time and, with `-Backup`, leaving a `.bak` and an `.ecmeta.json` beside each. Under `-FailOnChanges` the same tree exits 0 for `-Target utf-16` and 2 for `-Target unicode`; on BOM-less UTF-16 the alias reaches the ambiguity guard and exits 5, so the spelling alone moved a clean run to a refusal. Now compares resolved code pages; a zero code page proves nothing and never matches. ASCII to UTF-8 was deliberately left a conversion, on reasoning the 64 KiB finding below then disproved — folding them together is now safe and is not yet done. |
-| "Already in the target encoding" was a whole-file claim made from a 64 KiB sample | fixed | Detection reads at most 64 KiB, and when the source codec matched the target nothing read further. A file clean for 64 KiB and invalid afterwards was reported `Unchanged`, and whether EC noticed depended only on which target was named: the same corrupt file was `Error` under `-Target utf-16` and `Unchanged` under `-Target utf-8`. `-Validate` always read the whole file; Convert never reached that check once it had decided it had nothing to do. Costs almost nothing, and not for the expected reason — Convert already reads every byte, because `CaptureSourceSnapshot` hashes the whole stream before anything is decided. Measured at 0.04–0.10 ms per MiB. |
-| A preview promised conversions that would fail, and a plan recorded them as approved | fixed | `ApplyConversion` returned at the `whatIf` branch before the converter ran, so nothing decoded the file. `-Plan` sets `WhatIf`, so a plan recorded `Action=Convert` with no reason for a source that cannot be read, exited 0, and showed the reviewer nothing; the failure surfaced at `-Apply`, after approval and part-way through the batch. `FindStaleFiles` can prove the bytes have not changed since review and cannot prove they are readable, because that needs a decode nobody performed. The entry is now marked `Refuse`, not merely given an error, because the plan records the *action*. Decode only: a target that cannot represent the text still fails at conversion time, which reading the source cannot predict, and a test named for that case pins the limit. |
-| One file's failure could end the whole run | fixed | The per-item catch in `RunParallel` named four exception types. Anything else — a `SecurityException` from an ACL the enumerator did not surface, a regex timeout, a defect in EC itself — escaped `Parallel.ForEach` as an `AggregateException` and took every file the run had not reached with it. The CLI's outer catch names the same four, so it would have surfaced as a crash rather than exit 3. Now everything except cancellation and `OutOfMemoryException`, since carrying on after the latter would be pretending to process. `RunParallel` became internal so the isolation could be tested at all: no file can be made to throw the exceptions that mattered, which is exactly what made them dangerous. |
-| A folder EC could not read left no trace a machine could see | fixed | An unreadable *file* becomes a row with `ScanFailed` and drives exit 3. An unreadable *directory* produced a warning on stderr and nothing else: no row, no counter, exit 0 — and nothing whatever in the window, which passes no warning callback. Measured against a deny ACE: `-Validate -FailOnChanges` over a tree with one denied folder reported "1 file(s) processed" and exited 0, and a scan whose entire base directory was unreadable printed a header-only CSV and exited 0. A run that examined none of the tree could report success. `DirectoriesUnreadable` is now counted at both catch blocks, apart from the two exclusion counters, which record folders EC *chose* not to enter. The exit code is deliberately unchanged and the documentation now says what that means for a script. |
-| Folders skipped by name were counted nowhere | fixed | Twelve directory names are skipped deliberately and that is documented, but unlike attribute-excluded folders they incremented no counter. A scan of a tree whose only content sat under `build/` reported one file, zero exclusions and no warning — while `docs/CLI.md` promised that EC reports how many files each exclusion skipped. Counted separately from the attribute exclusions, whose message says "(hidden, system, or reparse point)" and would become untrue if the two were merged. What is scanned is unchanged: letting an explicit include reach into these folders was considered and declined, because both documents state they are skipped. |
-| `-Validate` rejections could carry no reason at all | fixed | Four ways to return `Invalid`, two of them explained. A charset outside the allowed list and a file EC could not identify both arrived as a bare `Invalid` with an empty reason, though they are not the same situation: one means widen the list or convert the file, the other means EC could not tell what it is, which `-DetectOnly` already calls `UnknownEncoding`. `CharsetNotAllowed` is new; `UnknownEncoding` is reused deliberately, because two names for one condition depending on which mode ran would be its own defect. This was the only outcome in the product where the reader had to re-derive a reason the producer already knew. |
-| A refusal's reason was re-derived instead of read from the decision | fixed | `ApplyConversion` worked the reason code out again from the four raw facts `Decide` had already reduced to a `SourceInterpretation`. The two copies were textually identical and their operands never changed between them, so they could not disagree — but nothing tied them together, and a fourth refusal reason added to the policy would have fallen through to `LegacySourceRequired` at the call site: a correct refusal carrying the wrong explanation, with nothing to fail. That shape had already needed one bolt-on `when` guard. Now `ConversionPolicy.ReasonCodeFor`, verified equivalent across all 256 reachable combinations of `Decide`'s inputs, with a test that fails if any refusal ever produces no reason. |
-| A decode failure reported a position no file has | fixed | `DecoderFallbackException.Index` is relative to the decoder call, not the file, and goes negative when the bad sequence began in bytes carried over from the previous call. A UTF-8 file ending in a truncated three-byte sequence produced "offset -2 within the failing read chunk", a message naming a frame it did not describe. The offending bytes are reported instead, which mean the same thing wherever the failure happened. An absolute file offset would need the streaming loop restructured to keep each chunk's base position in scope. |
-| Standard output was UTF-8 whatever the console was | fixed | After attaching to the parent console, both writers were rebuilt with `StreamWriter`'s default encoding. On the machine this was found on `Console.OutputEncoding` is `ibm437`, and the per-file CSV rendered "Grüße aus München" as "Gr├╝├ƒe aus M├╝nchen" — the tool producing in its own output the failure it exists to detect. A redirected stream stays UTF-8, matching the `-Report` file apart from its BOM; a console gets its own encoding, so characters it cannot represent become "?", which is visibly lossy rather than quietly wrong. No global console state is mutated. |
-| The documented parallelism default was the old one | fixed | `DefaultMaxParallelism` was raised from `min(CPU, 4)` to `min(CPU, 8)` with the measurement recorded beside it, and both statements of it were left saying 4: the built-in help and `docs/CLI.md`, which are the two places someone tuning `-MaxParallelism` against a slow share would look. The cause was an unnamed literal, with no identity a document could be checked against; it is now `ScanEngine.MaxParallelismCap`. A test finds the one line in each document that states the default, extracts every run of digits from it, and asserts the set equals the cap, so a stale number cannot hide beside a fresh one. |
-| The lifetime of `<file>.bak` was undocumented | fixed | `<file>.bak` is a fixed name holding the version the most recent run replaced, so converting the same file again replaces it and removes its sidecar. That is deliberate, and pinned by `BackupIntegrityTests.Backup_OverwritesAnyPreviousBackupFile` since the first commit of the test suite — but no document said so, and a user converting twice lost the original with nothing having warned them. Raised in review as a defect and **withdrawn**: refusing to overwrite a non-matching `.bak` breaks four existing tests and would block an ordinary "wrong target, convert again" run until the user deleted the backups by hand. See CX-02, whose fix accepted the replacement and removed the stale record instead. |
-
-### From the same review, and not tracked here
-
-Four findings the same review left open are recorded nowhere else in this file.
-The first is the one worth reading:
-
-- **A BOM-less UTF-16 file can be detected as UTF-32 and converted.** Silent, and
-  output verification cannot catch it, because both sides of the comparison use
-  the same wrong codec. It needs a file in which every other UTF-16 code unit is
-  a C0 control — one character per line with LF endings, say. Measured over
-  nineteen realistic file shapes: 41 of 44 detect correctly, and the three that
-  do not are the same degenerate shape. Scored Critical impact, low reach.
-- ASCII text with 2.3% or more NUL bytes is labelled `utf-16`. Conversion is
-  refused by the ambiguity guard in every case constructed, so the wrong label
-  reaches `-DetectOnly` and `-Validate` only.
-- Two hard links to one file are converted twice, once per name. Both runs
-  succeeded when tested, because `File.Replace` breaks the link; the `File.Move`
-  fallback would not.
-- Detection accepts a truncated trailing sequence, because it decodes without
-  flushing, while conversion flushes and rejects it. `-DetectOnly` can therefore
-  bless a file conversion refuses.
-
-## Hashing: three optimisations measured and rejected
-
-Conversion looked as though it hashed the same bytes several times over. Three
-variants were built on throwaway branches and measured against the same
-baseline, interleaved to cancel machine drift (292 MiB, 60 large files, backup
-and journal enabled).
-
-| Variant | Median | vs baseline | What it costs |
-|---|---|---|---|
-| Baseline | 1030 ms | — | — |
-| Digest the backup while copying | 872 ms | −15.3% | The `.bak` is no longer read back, so nothing proves the restore point on disk is intact. |
-| Hash source and output while streaming | −3.5% (own batch) | −3.5% | Two independent measurements become values derived from what EC intended to write. |
-| XxHash128 in place of SHA-256 | 1078 ms | **+4.7%, slower** | Recorded hashes stop being verifiable with `Get-FileHash`, and lose collision resistance. |
-
-**The reads are not redundant.** Each is an independent measurement: the source
-re-read proves the file still matches what was approved, the backup re-read
-proves the restore point is real, the output re-read proves what landed on disk.
-Removing them is the same defect class as EC-14, which this project fixed
-deliberately.
-
-**Hashing is not the bottleneck.** In isolation XxHash128 runs at 16,447 MiB/s
-against SHA-256's 2,429 — 6.8x — yet replacing it made no difference at all,
-because at eight-way parallelism the hashing hides behind the I/O it accompanies.
-SHA-256 is also the fastest algorithm available here: hardware acceleration puts
-it ahead of SHA-1 (981 MiB/s), MD5 (754) and SHA-512 (805), so every "lighter"
-cryptographic option is slower as well as weaker.
-
-**What this means for future work.** Conversion is bound by cold reads, not by
-CPU. The only variant that helped removed a read of a file that had just been
-flushed to disk. Optimise reads, and treat the hashes as the verifications they
-are.
-
-### If you are reading this because you want to try again
-
-This idea looks obviously right from the source: the same bytes are read up to
-seven times per converted file, and one of the hashes is computed twice over
-data already in memory. It reads like waste. It is not, and the window in which
-it would pay is narrower than it appears.
-
-**The ceiling is 15%, and it is the expensive 15%.** Every variant was measured,
-not estimated. The two that preserve safety bought 3.5% and nothing at all. The
-one worth having costs the only check that proves the restore point on disk is
-intact — on a tool whose entire proposition is that it can undo what it did.
-
-**These numbers are conditional, and the conditions favour the status quo.** They
-were taken on a 24-core machine with a fast local disk, a warm cache, and
-eight-way parallelism. Change those and the results move, but mostly in ways that
-do not help: on cold or network storage the read-elimination wins grow, yet so
-does the value of verifying what actually landed there. Only a single-worker run
-on a slow CPU would make the hashing itself visible, and that is not how EC runs.
-
-**The safety argument does not depend on the measurement.** Even if a future
-machine made these changes worth 40%, the source re-read would still be the only
-thing proving the file matches what was approved, and the backup re-read the only
-thing proving the restore point exists. Speed is not the reason to decline; it is
-merely the reason not to have to argue about it.
-
-If you still want the throughput, the honest target is the read that costs most —
-the `.bak` read immediately after its `Flush(flushToDisk: true)` — and the honest
-approach is to make that read cheaper, not to delete it.
-
-## Hash handling differs from LineEndingNormalizer
-
-LEN uses two algorithms, split by whether the value is durable: SHA-256 for the
-raw source bytes and the backup check, XxHash3 for the normalised-content digest
-that lives in a private record and is discarded after the run.
-
-EC uses SHA-256 for both, and persists its content digests as `SourceTextSha256`
-and `OutputTextSha256`. That is defensible — EC-14 exists precisely to keep those
-two independent — but the two tools now justify the same safety claim by
-different means, and nothing checks that they agree:
-
-| | EC | LEN |
-|---|---|---|
-| Raw file / backup hash | SHA-256 | SHA-256 |
+| Raw source and backup | SHA-256 | SHA-256 |
 | Content digest | SHA-256, persisted | XxHash3, discarded |
-| Backup comparison | `string.Equals(..., OrdinalIgnoreCase)` on hex | `CryptographicOperations.FixedTimeEquals` on bytes |
+| Backup comparison | Case-insensitive hexadecimal strings | Fixed-time byte comparison |
 
-Neither comparison is wrong for an accidental-corruption model. The point is the
-drift: the detector-parity job exists to stop exactly this happening to the
-shared detector, and nothing plays that role for the safety machinery around it.
-**Open** — decide whether the two should converge, and on which.
+Neither comparison is wrong for accidental corruption. This is recorded so a
+future maintainer can decide whether safety machinery should converge; detector
+parity does not cover it.
 
-## The source-choice refusal is covered by a unit test, not a smoke phase
+### BL-26
 
-Both the defect and its fix were reproduced manually. That is how the defect was
-finally confirmed at all — until then it existed only as a reading of the code.
+**The smoke driver now treats an exact combo item consistently even when UI
+Automation calls it offscreen.** Phase J selected `windows-1252`, which was below
+the visible part of the source dropdown. The combo-scoped search rejected it,
+then a keyboard fallback foregrounded the disabled main form instead of the
+modal review. Phase C had not exposed this because its `iso-8859-1` choice was
+inside the visible part of the same dropdown. Both combo-scoped and process-wide
+exact-name searches now follow the same documented rule, and fallback input
+uses the supplied window. Phase J drives the source-choice refusal against the
+built application.
 
-**Before the fix:** scan a directory, point the window at a different one without
-scanning again, tick the refused file, choose an encoding, press confirm. The
-review closes and the status bar reads "Conversion cancelled. No files were
-modified." The choice is discarded and blamed on a cancellation nobody made.
+## Decisions and mistakes that must remain visible
 
-**After the fix:** the review stays open and says which ticked files are no
-longer inside its directory, and what to do about it.
+### A known defect shipped after being reported closed
 
-A smoke phase for the sequence was attempted and abandoned. The setup drives
-correctly — the refused row appears labelled `..\scanned\french.txt`, which only
-happens when the plan's root does not contain the file — but `SelectCombo` times
-out on the source-encoding dropdown in that dialog state, while the identical
-call in phase C succeeds. Driving the review to the foreground and ticking the
-row first were both tried; neither changed it.
+EC-06 was present before v3.11.0, recorded as confirmed, and reported as closed.
+It shipped broken in v3.11.0 and v3.11.1, then was rediscovered from scratch
+during unrelated work. Neither the corpus audit nor the GUI suite covered a
+drive-root plan. The record failed because it trusted a summary instead of the
+source.
 
-**The dropdown works perfectly by hand**, so this is a defect in the automation
-driver, not in EC. One candidate: `SelectCombo`'s keyboard fallback calls
-`SetForegroundWindow` on the *main* window, which is the wrong target while a
-modal review is open.
+### A correction was recorded for code that should not change
 
-**The refusal is covered instead by a unit test**, not by a manual step. The
-decision is now a method on the form — `DescribeUnusableScope` — so a test can
-build a plan rooted outside its own files, tick the row, and assert on the
-refusal without showing a window. `PerformClick` does nothing on a control that
-is not effectively visible, and a test that had to show one would need an
-interactive desktop, which is exactly what the unit suite must not require.
+CX-07 said old plans, journals, and reports had been excluded. No such change
+had been made, and `docs/CLI.md` intentionally promises the opposite. The false
+record was corrected on 2026-09-07 only after the row was re-derived from code.
 
-The driver defect stays **open** on its own account: it will bite any future
-phase that touches a combo inside a dialog. The refusal itself is closed.
+### Aggregate counts drifted repeatedly
 
-## What is still open, scored
+The open count had already stopped reconciling with its rows three times. The
+2026-09-08 recheck found a separate error: “27 fixed” counted CX-07 as fixed
+although the ledger called its alleged behavior not a defect. The current header
+is generated from the canonical rows, and `Test-DefectBacklog.ps1` fails if it
+drifts again.
 
-Two axes, because one number hides the thing that matters. **Impact** is what a
-user loses when it happens — the original review's rule, severity by consequence
-and not by how hard the fix is. **Reach** is how easily it happens at all. A
-critical impact nobody can trigger is not a crisis, and a low impact everyone
-trips over is not noise.
+### A later review over-rated four of its own findings
 
-| | Finding | Impact | Reach | Note |
-|---|---|---|---|---|
-| CX-06 | Entropy gate outranks a valid BOM | Medium | Occasional | EC reports the wrong encoding for a file that says what it is. The only open item that changes what EC tells you. |
-| — | Ambiguous BOM-less UTF-32 converts silently | **Critical** | **Theoretical** | Rewrites on an unproven byte order — the exact thing this release line exists to prevent. Needs every scalar to be a multiple of 0x100, so real text will not reach it. Scored high on impact and dismissed on reach, deliberately. |
-| EC-08 | An include pattern can hang the scan indefinitely | Medium | **Theoretical** | Availability, not data: a scan no token can cancel, and if it hangs partway through a conversion the tree is left partly converted with no journal. Needs *both* halves built on purpose — a mask of ~10+ wildcards separated by one character, and a filename carrying ~24+ mostly consecutive repeats of that same character. Measured at twelve wildcards: every realistic name answered in 0–5 ms; forty consecutive `a` took >20 s. The mask comes from the operator's own command line, so there is no untrusted path. Fix measured and not taken: see below. |
-| — | CSV report does not neutralise leading formula characters | Medium | Rare | Needs an attacker-influenced filename and a reader who opens the report in a spreadsheet. |
-| EC-16 | Settings.xml written truncate-in-place | Low | Occasional | Loses preferences, not data, and reverts toward safer defaults. Already caused one smoke-test failure that looked like a product bug. |
-| EC-20 | Detection reads with looser file sharing | Low | Rare | Detect and validate only; nothing is written. Can describe bytes another process is changing. |
-| EC-15 | Semantics booleans written as a contract, enforced nowhere | Low | Common | Cannot weaken behaviour — EC ignores the claim and always does the strict thing. The risk is a reader treating `OutputVerification: true` as evidence a check ran. |
-| EC-17 | Text-validation comment contradicts its code | Low | Common | Behaviour is right, comment is wrong, and the file must stay byte-identical across three repos. A maintainer "correcting" it the wrong way would weaken binary rejection. |
-| EC-23 | Null-forgiving dereference of `ResolvePath` | Low | Rare | Correct today only because `FindStaleFiles` runs 29 lines earlier. EC-06 is what happened when that invariant broke. |
-| EC-18 | Ambiguity recomputed per pass | Low | Common | Measured: no cost. The probe aborts at the first invalid sequence, so a provable file settles in the first buffer. Untidy, not slow. |
-| — | Automation driver cannot select a combo inside a dialog | Low | — | Blocks a smoke phase, not a user. Suspect: `SelectCombo`'s keyboard fallback targets the main window while a modal review is open. |
-| — | Hash handling has drifted from LineEndingNormalizer | — | — | A decision, not a defect. See above. |
+The independent review of `74d5b3d` that produced BL-06 through BL-17 correctly
+found mechanisms, then described their importance before checking realistic
+product behavior. The user caught all four corrections: two findings were
+downgraded after measurement, one proposed correction was rejected when it
+broke four existing tests, and one finding was withdrawn after checking the
+actual CSV. This is kept visible because a true mechanism does not automatically
+justify the claimed product risk.
 
-Nothing here writes to a file nobody approved, which is why none of it blocked a
-release.
+### Three hashing optimisations were measured and rejected
 
-### EC-08: the fix that was measured and not taken
+Conversion can read the same file several times, but each read answers a
+different question: does the source still match approval, did the backup really
+land, and does the installed output contain the verified text? Three throwaway
+variants were interleaved against the same 292 MiB, 60-file workload with backup
+and journal enabled:
 
-`RegexOptions.NonBacktracking` in place of `Compiled` removes the blow-up
-entirely, agrees with the current engine on every mask tested, and costs nothing
-measurable beside per-file I/O. It was implemented with tests and then reverted
-deliberately: the defect needs a mask *and* a filename both built for it, and
-neither arrives from anywhere but the operator's own hands.
-
-Three dead ends, recorded so nobody walks them again. Testing a pathological
-mask against a **matching** filename proves nothing, because the engine stops at
-the first success — that is how this was first recorded "not reproduced". `*`
-crossing directory separators is deliberate rather than a Windows-wildcard bug:
-`src/*.cs` is meant to scope a subtree, pinned by
-`PathAwarePatternTests.PathQualifiedPattern_MatchesOnlyTheIntendedSubtree`. And
-`[^/]*` in place of `.*` does not reduce the backtracking, because a filename
-contains no separator for it to bound.
-
-### Not reproduced
-
-| | Finding | Why it is not listed as open |
+| Variant | Measurement | Safety or usability cost |
 |---|---|---|
-| EC-19 | The double-BOM guard's reach depends on which object supplied the codec | An inspection-only finding that traced the wrong object. `ConvertFiles` re-resolves the codec by name through `Encoding.GetEncoding`, which carries a 3-byte preamble, so the detector's BOM-less instance never reaches the guard. Tested against a file beginning with two BOMs: both the automatic path and `-From utf-8` refuse with `MultipleLeadingByteOrderMarks`. |
+| Baseline | 1030 ms median | None |
+| Digest backup while copying | 872 ms; 15.3% faster | Nothing independently re-reads the restore point on disk |
+| Hash source and output while streaming | 3.5% faster in its own batch | Both values derive from intended I/O rather than independent reads |
+| XxHash128 instead of SHA-256 | 1078 ms; 4.7% slower | Recorded hashes lose `Get-FileHash` interoperability and collision resistance |
+
+The source can be read up to seven times per converted file, and one hash is
+computed twice over bytes already held in memory. Those reads are still not
+redundant. The only materially faster variant removed the backup re-read after
+`Flush(flushToDisk: true)`, which is the only independent check that the restore
+point exists intact. XxHash128 itself measured 16,447 MiB/s against SHA-256 at
+2,429 MiB/s—6.8x—but made the parallel I/O-bound workload slower. On that
+machine SHA-256 also beat SHA-1 (981 MiB/s), MD5 (754 MiB/s), and SHA-512
+(805 MiB/s).
+
+These figures are conditional: a 24-core machine, fast local disk, warm cache,
+and eight workers. Cold or network storage may increase the benefit of removing
+a read while also increasing the value of verifying it. Even a different speed
+result—even 40%—would not change what each check proves. The observed ceiling
+was about 15%, and that was the variant which removed the strongest backup
+evidence. Only a single-worker run on a slow CPU is likely to make hashing itself
+visible. Future throughput work should make the backup re-read cheaper rather
+than delete it.
+
+## The source-choice refusal is covered by both a unit test and smoke phase J
+
+Before BL-04 was addressed, a user could scan one directory, point the main
+window at another without scanning again, tick a refused file, choose an
+encoding, and confirm. The review closed and the status said “Conversion
+cancelled. No files were modified.” The user's choice had been discarded.
+
+The unit test constructs that state directly. Smoke phase J drives it through
+the built application: the review must remain open, name
+`..\scanned\french.txt`, explain that it is no longer inside the review, and
+leave every source byte unchanged. BL-26 records the automation-driver defect
+found while making that phase reliable.
+
+## 2026-09-08 recheck record
+
+Every pre-reformat row was checked against source, a current regression test, a
+current Release-build probe, or a clearly marked historical measurement. The
+source inspection used `c071c10`; the factual recheck is preserved as local
+commit `902f567` immediately before this reformat.
+
+For chronology, BL-06 through BL-17 came from the independent review of
+`74d5b3d` after v3.11.2. BL-22 through BL-24 came from a later independent review
+of released commit `518a844` after v3.12.0. These source identities are retained
+because the observations were made against those builds, even though the
+current statuses were rechecked against `c071c10`.
+
+Current behavioral probes established:
+
+- the EC-08 hostile regex exceeded a three-second child-process budget;
+- automatic and explicit UTF-8 paths both refused a double BOM;
+- an old plan in the scan root was scanned as ASCII;
+- a filename beginning `=1+1` still produced an absolute-path CSV cell;
+- BL-01 and BL-18 both changed Unicode under the wrong automatic interpretation;
+- BL-19 and BL-21 were reported inconsistently but refused or failed before a
+  write; and
+- both names of a hard-linked file preserved exact text and received separate
+  recovery artifacts through the normal Windows replacement path.
+
+No old row was skipped. Three portions remain only partly reproducible:
+
+- BL-05 requires precise force-close timing and was inspected rather than
+  triggered;
+- BL-20's move fallback requires a platform where `File.Replace` is unsupported;
+  and
+- the historical timing figures above were not rerun; their current code and
+  safety properties were checked.
+
+## Pre-reformat row mapping
+
+The task expected 78 rows, 45 with an existing ID and 33 without one. The exact
+`c071c10` input had 79 data-shaped rows, 45 of which mentioned an existing ID.
+The disjoint breakdown is 35 original canonical rows, 21 unique anonymous
+finding or decision rows, 13 duplicate or correction rows, 7 benchmark or
+comparison-evidence rows, and 3 malformed blank-cell headers. Four findings
+existed only as prose, and one GUI-driver finding existed only in a narrative
+section. That yields the 61 unique ledger entries above. The mapping below
+accounts for every old location without pretending that a table header or
+benchmark variant is a new defect.
+
+| Old location | Canonical finding or destination | Note |
+|---|---|---|
+| R001 | [EC-01](#ec-01) | Original ledger row |
+| R002 | [EC-02](#ec-02) | Original ledger row |
+| R003 | [EC-03](#ec-03) | Original ledger row |
+| R004 | [EC-04](#ec-04) | Original ledger row |
+| R005 | [EC-05](#ec-05) | Original ledger row |
+| R006 | [EC-06](#ec-06) | Original ledger row |
+| R007 | [EC-07](#ec-07) | Original ledger row |
+| R008 | [EC-08](#ec-08) | Original ledger row |
+| R009 | [EC-09](#ec-09) | Original ledger row |
+| R010 | [EC-10](#ec-10) | Original ledger row |
+| R011 | [EC-11](#ec-11) | Original ledger row |
+| R012 | [EC-12](#ec-12) | Original ledger row |
+| R013 | [EC-13](#ec-13) | Original ledger row |
+| R014 | [EC-14](#ec-14) | Original ledger row |
+| R015 | [EC-15](#ec-15) | Original ledger row |
+| R016 | [EC-16](#ec-16) | Original ledger row |
+| R017 | [EC-17](#ec-17) | Original ledger row |
+| R018 | [EC-18](#ec-18) | Original ledger row |
+| R019 | [EC-19](#ec-19) | Original ledger row |
+| R020 | [EC-20](#ec-20) | Original ledger row |
+| R021 | [EC-21](#ec-21) | Original ledger row |
+| R022 | [EC-22](#ec-22) | Original ledger row |
+| R023 | [EC-23](#ec-23) | Original ledger row |
+| R024 | [CX-01](#cx-01) | Original ledger row |
+| R025 | [CX-02](#cx-02) | Original ledger row |
+| R026 | [CX-03](#cx-03) | Original ledger row |
+| R027 | [CX-05](#cx-05) | Original ledger row |
+| R028 | [CX-06](#cx-06) | Original ledger row |
+| R029 | [CX-07](#cx-07) | Original ledger row |
+| R030 | [CX-08](#cx-08) | Original ledger row |
+| R031 | [CX-09](#cx-09) | Original ledger row |
+| R032 | [CX-10](#cx-10) | Original ledger row |
+| R033 | [CX-11](#cx-11) | Original ledger row |
+| R034 | [CX-12](#cx-12) | Original ledger row |
+| R035 | [CX-13](#cx-13) | Original ledger row |
+| R036 | [BL-01](#bl-01) | Previously anonymous finding |
+| R037 | [BL-02](#bl-02) | Previously anonymous finding |
+| R038 | [BL-03](#bl-03) | Previously anonymous finding |
+| R039 | [BL-04](#bl-04) | Previously anonymous finding |
+| R040 | [BL-05](#bl-05) | Previously anonymous finding |
+| R041 | [BL-06](#bl-06) | Previously anonymous finding |
+| R042 | [BL-07](#bl-07) | Previously anonymous finding |
+| R043 | [BL-08](#bl-08) | Previously anonymous finding |
+| R044 | [BL-09](#bl-09) | Previously anonymous finding |
+| R045 | [BL-10](#bl-10) | Previously anonymous finding |
+| R046 | [BL-11](#bl-11) | Previously anonymous finding |
+| R047 | [BL-12](#bl-12) | Previously anonymous finding |
+| R048 | [BL-13](#bl-13) | Previously anonymous finding |
+| R049 | [BL-14](#bl-14) | Previously anonymous finding |
+| R050 | [BL-15](#bl-15) | Previously anonymous finding |
+| R051 | [BL-16](#bl-16) | Previously anonymous finding |
+| R052 | [BL-17](#bl-17) | Previously anonymous finding |
+| R053 | [BL-22](#bl-22) | Previously anonymous finding |
+| R054 | [BL-23](#bl-23) | Previously anonymous finding |
+| R055 | [BL-24](#bl-24) | Previously anonymous finding |
+| R056 | [CX-07](#cx-07) | Duplicate correction row |
+| R057 | [BL-02](#bl-02) | Duplicate withdrawal row |
+| R058 | [Hashing measurements](#three-hashing-optimisations-were-measured-and-rejected) | Baseline data, not a finding |
+| R059 | [Hashing measurements](#three-hashing-optimisations-were-measured-and-rejected) | Backup-read variant, not a separate finding |
+| R060 | [Hashing measurements](#three-hashing-optimisations-were-measured-and-rejected) | Streaming-hash variant, not a separate finding |
+| R061 | [Hashing measurements](#three-hashing-optimisations-were-measured-and-rejected) | XxHash variant, not a separate finding |
+| R062 | [BL-25](#bl-25) | Malformed comparison-table header, not a finding |
+| R063 | [BL-25](#bl-25) | Raw-hash comparison evidence |
+| R064 | [BL-25](#bl-25) | Content-digest comparison evidence |
+| R065 | [BL-25](#bl-25) | Backup-comparison evidence |
+| R066 | [Canonical ledger](#canonical-ledger) | Malformed score-table header, not a finding |
+| R067 | [CX-06](#cx-06) | Duplicate score row |
+| R068 | [BL-01](#bl-01) | Duplicate score row |
+| R069 | [EC-08](#ec-08) | Duplicate score row |
+| R070 | [BL-02](#bl-02) | Duplicate score row |
+| R071 | [EC-16](#ec-16) | Duplicate score row |
+| R072 | [EC-20](#ec-20) | Duplicate score row |
+| R073 | [EC-15](#ec-15) | Duplicate score row |
+| R074 | [EC-17](#ec-17) | Duplicate score row |
+| R075 | [EC-23](#ec-23) | Duplicate score row |
+| R076 | [EC-18](#ec-18) | Duplicate score row |
+| R077 | [BL-25](#bl-25) | Design-decision row |
+| R078 | [EC-19](#ec-19) | Malformed not-reproduced table header, not a finding |
+| R079 | [EC-19](#ec-19) | Duplicate evidence row |
+| P001 | [BL-18](#bl-18) | Former prose-only finding |
+| P002 | [BL-19](#bl-19) | Former prose-only finding |
+| P003 | [BL-20](#bl-20) | Former prose-only finding |
+| P004 | [BL-21](#bl-21) | Former prose-only finding |
+| S001 | [BL-26](#bl-26) | Former narrative-only GUI-driver finding |

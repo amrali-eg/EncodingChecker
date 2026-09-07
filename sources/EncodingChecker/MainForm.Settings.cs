@@ -96,10 +96,10 @@ public partial class MainForm
 
         try
         {
-            using var settingsFile = new FileStream(
-                GetSettingsFileName(), FileMode.Create, FileAccess.Write, FileShare.None);
-            new XmlSerializer(typeof(Settings)).Serialize(settingsFile, _settings);
-            settingsFile.Flush();
+            // EC-16: atomic replacement preserves the previous settings after a write failure.
+            _ = AtomicArtifactFile.Write(
+                GetSettingsFileName(),
+                stream => new XmlSerializer(typeof(Settings)).Serialize(stream, _settings));
         }
         catch (Exception ex) when (
             ex is IOException or UnauthorizedAccessException or InvalidOperationException

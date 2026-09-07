@@ -38,18 +38,42 @@ internal sealed class EcGuiDriver : IDisposable
 
     internal AutomationElement OpenReview(string directory, int expectedFiles)
     {
+        ConfigureScan(directory);
+        Scan(expectedFiles);
+        return OpenSelectedReview(expectedFiles);
+    }
+
+    internal AutomationElement OpenReviewAfterRetarget(
+        string scannedDirectory,
+        string reviewDirectory,
+        int expectedFiles)
+    {
+        ConfigureScan(scannedDirectory);
+        Scan(expectedFiles);
+        SetText(MainWindow, "lstBaseDirectory", reviewDirectory);
+        return OpenSelectedReview(expectedFiles);
+    }
+
+    private void ConfigureScan(string directory)
+    {
         SetText(MainWindow, "lstBaseDirectory", directory);
         SetText(MainWindow, "txtFileMasks", "*");
         SetToggle(MainWindow, "chkIncludeSubdirectories", false);
         SetToggle(MainWindow, "chkCreateBackup", true);
         SetToggle(MainWindow, "chkPreviewChanges", false);
         SelectCombo(MainWindow, "lstConvert", "utf-8");
+    }
 
+    private void Scan(int expectedFiles)
+    {
         Invoke(MainWindow, "btnView");
         WaitUntil(
             () => ResultCount() == expectedFiles && IsEnabled(MainWindow, "btnView"),
             $"View did not finish with {expectedFiles} result row(s).");
+    }
 
+    private AutomationElement OpenSelectedReview(int expectedFiles)
+    {
         SetToggle(MainWindow, "chkSelectDeselectAll", true);
         WaitUntil(
             () => CheckedResultCount() == expectedFiles,
@@ -60,6 +84,28 @@ internal sealed class EcGuiDriver : IDisposable
 
         return WaitForReview();
     }
+
+    internal void TryConfirmSource(
+        AutomationElement review,
+        string sourceEncoding,
+        params string[] filesToCheck)
+    {
+        foreach (string file in filesToCheck)
+            SetRefusedFileChecked(review, file, true);
+
+        SelectCombo(review, "lstSourceEncoding", sourceEncoding);
+        Invoke(review, "btnConfirmSourceEncoding");
+    }
+
+    internal bool ReviewIsOpen(AutomationElement review) =>
+        FindReviewWindow() is { } current &&
+        current.Current.NativeWindowHandle == review.Current.NativeWindowHandle;
+
+    internal void WaitForReviewText(AutomationElement review, string expected) =>
+        WaitUntil(
+            () => ReviewIsOpen(review) &&
+                  ReviewText(review).Contains(expected, StringComparison.OrdinalIgnoreCase),
+            $"The review did not show '{expected}'.");
 
     internal AutomationElement ConfirmSource(
         AutomationElement review,
@@ -308,7 +354,7 @@ internal sealed class EcGuiDriver : IDisposable
         }
 
         AutomationElement? item = WaitFor(
-            () => FindNamedItem(combo, value) ?? FindProcessItem(value),
+            () => FindNamedItem(combo, value) ?? FindVisibleProcessItem(value),
             TimeSpan.FromSeconds(5));
 
         if (item is not null &&
@@ -318,7 +364,7 @@ internal sealed class EcGuiDriver : IDisposable
         }
         else
         {
-            SetForegroundWindow(MainWindow.Current.NativeWindowHandle);
+            SetForegroundWindow(root.Current.NativeWindowHandle);
             combo.SetFocus();
             System.Windows.Forms.SendKeys.SendWait(value);
             System.Windows.Forms.SendKeys.SendWait("{ENTER}");
@@ -336,13 +382,14 @@ internal sealed class EcGuiDriver : IDisposable
         AutomationElementCollection items = root.FindAll(
             TreeScope.Descendants, Condition.TrueCondition);
 
+        // UIA can select WinForms items that sit below the popup viewport and are
+        // therefore reported offscreen.
         return items.Cast<AutomationElement>().FirstOrDefault(element =>
             element.Current.ControlType == ControlType.ListItem &&
-            element.Current.Name.Equals(value, StringComparison.OrdinalIgnoreCase) &&
-            !element.Current.IsOffscreen);
+            element.Current.Name.Equals(value, StringComparison.OrdinalIgnoreCase));
     }
 
-    private AutomationElement? FindProcessItem(string value)
+    private AutomationElement? FindVisibleProcessItem(string value)
     {
         var condition = new AndCondition(
             new PropertyCondition(
@@ -355,6 +402,8 @@ internal sealed class EcGuiDriver : IDisposable
         AutomationElementCollection items = AutomationElement.RootElement.FindAll(
             TreeScope.Descendants, condition);
 
+        // A hidden process-wide match may belong to another collapsed combo that
+        // contains the same encoding name, so only its visible popup is safe to use.
         return items.Cast<AutomationElement>().FirstOrDefault(element =>
             element.Current.Name.Equals(value, StringComparison.OrdinalIgnoreCase) &&
             !element.Current.IsOffscreen);

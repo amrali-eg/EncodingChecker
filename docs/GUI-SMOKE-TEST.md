@@ -1,6 +1,6 @@
 # The GUI smoke test
 
-Nine phases that drive a built `EncodingChecker.exe` through Windows UI Automation
+Ten phases that drive a built `EncodingChecker.exe` through Windows UI Automation
 and check the bytes it leaves behind. Every phase creates its own disposable folder,
 performs a real sequence in the real window, and then verifies files — never status
 messages.
@@ -13,7 +13,7 @@ sources/EncodingChecker.GuiSmoke/bin/Release/net10.0-windows/EncodingChecker.Gui
 ```
 --app <path>          the executable to drive; defaults to the Release build
 --output <folder>     where evidence is written; must be empty or new
---phase <A-I>         run one phase
+--phase <A-J>         run one phase
 --keep-workspace      keep the fixtures even when the run passes
 ```
 
@@ -52,6 +52,7 @@ because nothing ran the sequence.
 | **G** | When a backup cannot be created the source is untouched and no recovery record is written. | Converting without the restore point the run promised. |
 | **H** | A source choice that **agrees** with an unprovable byte order is still flagged, saying the order was taken on trust and *not* that it differs from your choice. | A warning that fires for the safer choice and stays silent for the riskier one. |
 | **I** | Cancelling a 400-file run mid-write reports what it actually wrote: the converted count equals the files whose BOM is gone, and unreached files are reported as not attempted. | A cancelled run claiming it changed nothing, or claiming the whole batch converted. |
+| **J** | After View, changing the directory without rescanning leaves out-of-directory results visible. Confirming a source encoding keeps the review open, explains why it cannot apply the choice, and changes no bytes. | A ticked source choice being discarded as an unexplained cancellation, or the automation driver failing to reach that path. |
 
 ### Notes on two of them
 
@@ -120,7 +121,7 @@ exits `0`, because every phase in an empty set passes. The evidence the run uplo
 is what settles it: one phase recorded, `A`, with five files hashed before and five
 after. Read the artifact, not the tick.
 
-**It now gates the release.** `release.yml` runs all nine phases against the signed,
+**It now gates the release.** `release.yml` runs all ten phases against the signed,
 published executable, after signing and before packaging, so what is verified is the
 bytes that ship rather than a rebuild of the same commit. A failure fails the job and
 no release is created. The report is uploaded as a `gui-smoke-evidence` artifact.
