@@ -456,6 +456,52 @@ The review that found them also over-rated four of its own findings, and the rea
 - **Four findings from the same review are open**, the first a silent corruption: a BOM-less UTF-16 file whose every other code unit is a C0 control can be detected as UTF-32 and converted. Output verification cannot catch it, because both sides of the comparison use the same wrong codec. Measured over nineteen realistic file shapes — 41 of 44 detect correctly, and the three that do not are the same degenerate shape. `docs/DEFECT-BACKLOG.md` scores it critical impact, low reach.
 - **No accessibility spot check is recorded for this release.** The checklist's scaling, keyboard-only, and high-contrast checks have no automated substitute, and nothing in the release job stands in for them.
 
+### v3.12.1 — `36983998124ab1caabb2f4fc10ba5bb2a83649b7`, not re-audited
+
+**It was not measured against the four corpora, and none is required.** This release changes neither detection nor conversion policy: what EC converts, refuses and reports for a valid input is what v3.12.0 did. No audited build exists and no assembly hash is quoted.
+
+**The gap the v3.12.0 record opened is untouched.** That release *did* change `ConversionPolicy` without a corpus run, and nothing here closes it. Two records in a row saying "none required" must not be read as the requirement having been met.
+
+The published archives, each downloaded and hashed rather than trusting GitHub's own report of them:
+
+```
+EncodingChecker-3.12.1-framework-dependent.zip
+  d3aab1207e2e95ff32c6523b5ad7aa487f594425c3f5a47ce62a179c0470b512
+EncodingChecker-3.12.1-win-x64-self-contained.zip
+  1b21967de3e130fead173936018b6fb38bc50371fb22404e9f11f5d972b8a4dc
+```
+
+#### What changed in v3.12.1
+
+| | |
+|---|---|
+| An unwritable `-Journal` or `-Report` destination | Was discovered after conversion had rewritten the files, so a user who asked for a journal ended with changed files and no record of the change. Refused before the run now. Exit code deliberately unchanged at 3. |
+| A plan carrying an action no build wrote | Loaded without complaint, reached a mapping whose fallback was `Converted`, and produced exit 0 with a journal asserting work that never happened. Refused at load; the mapping throws. |
+| EC's own plan, journal, report and settings | Truncated their destination and wrote into it, while converted files and recovery sidecars were installed atomically. All four now use the mechanism that already shipped. Closes EC-16. |
+| The source-choice refusal | Was the only fix carried by a unit test instead of a smoke phase. Smoke phase J now drives it against the built application. |
+| The defect backlog | Re-derived from source into a ledger of 61 findings organised by status, with a checker that recomputes every figure in its header. |
+
+#### What this release says about these records
+
+Almost nothing in it was a conversion defect. Two were, both narrow. The rest was
+instruments — a smoke phase that could not be written, a backlog whose counts had
+drifted, a checker written to stop that drift. And **every instrument in this release was
+found broken by being used.**
+
+The backlog's summary had drifted three times, the third while correcting the second. `CX-07` recorded a fix that was never made and should not be, contradicting `docs/CLI.md`, which had said the opposite in the shipped documentation the whole time. The smoke driver could not reach the phase it was needed for, and had been recorded as an open defect rather than fixed. The checker written to end the drift then failed three ways on a stock machine — it named a shell that is not installed, it read `$PSScriptRoot` where Windows PowerShell does not populate it, and it was refused outright by an execution policy — and each of the three was hidden by the way the previous check had been run.
+
+That last one is the sharpest. Every check of the checker ran in a session carrying `PSExecutionPolicyPreference=Bypass` at process scope, which child processes inherit, so the execution policy could not fail however it was invoked. The defect was reachable only by clearing that variable first, which is how it was finally verified — after a user ran the documented command and it did not work.
+
+The rule this file already states about the product applies to the things that check the product: **a claim is worth what the method behind it is worth.** An instrument nobody has seen fail, or has only seen run on the convenient path, is not evidence yet.
+
+#### Known limits specific to this release
+
+- **No corpus measurement backs it**, and none is required. What supports it is 742 unit tests, the ten-phase GUI suite, the detector parity check, and a mutation check on each fix — the change reverted, the intended test required to fail, the file restored byte-identical and confirmed by hash.
+- **Code signing did not run.** The signing secrets are still not configured, so the step was skipped, the archives above are **unsigned**, and the GUI suite drove an *unsigned* published executable. This is the third release to carry the limit unchanged.
+- **The driver fix removes an offscreen filter in one search and keeps it in the other**, deliberately: a process-wide match on a hidden item could belong to a different collapsed combo holding the same encoding name. That asymmetry is documented in the code, and is the kind of thing a future phase could still trip over.
+- **Three backlog findings remain only partly reproducible** and are recorded as such: one needs force-close timing too precise to trigger, one needs a filesystem where `File.Replace` is unsupported, and the historical performance figures were not re-measured.
+- **No accessibility spot check is recorded** for this release. The checklist's scaling, keyboard-only, and high-contrast checks have no automated substitute, and nothing in the release job stands in for them.
+
 ## Known limits
 
 - No detector can recover an author's historical legacy encoding when the same bytes admit multiple plausible readings. EC refuses automatic legacy conversion instead of guessing.
