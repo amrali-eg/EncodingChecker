@@ -354,7 +354,7 @@ internal sealed class EcGuiDriver : IDisposable
         }
 
         AutomationElement? item = WaitFor(
-            () => FindNamedItem(combo, value) ?? FindProcessItem(value),
+            () => FindNamedItem(combo, value) ?? FindVisibleProcessItem(value),
             TimeSpan.FromSeconds(5));
 
         if (item is not null &&
@@ -389,7 +389,7 @@ internal sealed class EcGuiDriver : IDisposable
             element.Current.Name.Equals(value, StringComparison.OrdinalIgnoreCase));
     }
 
-    private AutomationElement? FindProcessItem(string value)
+    private AutomationElement? FindVisibleProcessItem(string value)
     {
         var condition = new AndCondition(
             new PropertyCondition(
@@ -402,6 +402,8 @@ internal sealed class EcGuiDriver : IDisposable
         AutomationElementCollection items = AutomationElement.RootElement.FindAll(
             TreeScope.Descendants, condition);
 
+        // A hidden process-wide match may belong to another collapsed combo that
+        // contains the same encoding name, so only its visible popup is safe to use.
         return items.Cast<AutomationElement>().FirstOrDefault(element =>
             element.Current.Name.Equals(value, StringComparison.OrdinalIgnoreCase) &&
             !element.Current.IsOffscreen);
