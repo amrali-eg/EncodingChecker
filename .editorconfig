@@ -1,0 +1,21 @@
+# .gitattributes settles what git stores; this settles what an editor writes.
+# Git has no concept of encoding, so a byte-order mark is content it preserves
+# rather than normalizes - which is how this repository ended up with both forms.
+
+root = true
+
+[*.cs]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = true
+
+# Windows PowerShell 5.1 treats BOM-less files as the system code page.
+[*.ps1]
+charset = utf-8-bom
+end_of_line = crlf
+insert_final_newline = true
+
+[*.{sh,bash}]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
