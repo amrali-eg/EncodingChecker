@@ -70,10 +70,13 @@ internal sealed class ConversionReportEntry
     internal bool DetectedEncodingHasBom { get; set; }
 
     /// <summary>
-    /// Whether a detected BOM-less UTF-16 source also strictly decodes under the opposite
-    /// byte order. Internal planning state; not in CSV.
+    /// What detection could not establish about a BOM-less Unicode source. Internal
+    /// planning state; not in CSV.
     /// </summary>
-    internal bool HasAmbiguousBomlessUtf16 { get; set; }
+    internal BomlessUnicodeKind BomlessUnicodeDoubt { get; set; }
+
+    /// <summary>Whether that doubt exists at all.</summary>
+    internal bool HasBomlessUnicodeDoubt => BomlessUnicodeDoubt != BomlessUnicodeKind.None;
 
     /// <summary>
     /// The SHA-256 this file must still have when installed, or <see langword="null"/>
@@ -224,6 +227,18 @@ internal static class ConversionReasonCodes
     internal const string ExplicitSourceOnUnprovableBomlessUnicode =
         nameof(ExplicitSourceOnUnprovableBomlessUnicode);
     internal const string AmbiguousBomlessUtf16 = BomlessUnicodeSafety.AmbiguousReasonCode;
+
+    /// <summary>
+    /// A BOM-less UTF-32 source, which detection cannot establish from the bytes.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="AmbiguousBomlessUtf16"/> because the doubt and the remedy
+    /// differ: UTF-16 is a byte order the bytes leave open, while UTF-32 without a BOM
+    /// may not be UTF-32 at all. A script filtering on the UTF-16 code would otherwise
+    /// start matching a condition it was never written for.
+    /// </remarks>
+    internal const string UnprovableBomlessUtf32 =
+        BomlessUnicodeSafety.UnprovableUtf32ReasonCode;
     internal const string StrictValidationFailed = nameof(StrictValidationFailed);
 
     /// <summary>

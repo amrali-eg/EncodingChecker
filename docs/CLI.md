@@ -79,6 +79,11 @@ byte order. If both UTF-16LE and UTF-16BE strictly decode the complete file,
 EC refuses the automatic conversion. Choose `-From utf-16le` or
 `-From utf-16be` if you know the original order.
 
+BOM-less UTF-32 is never converted automatically, and is reported with reason
+code `UnprovableBomlessUtf32`. The bytes cannot establish the codec: UTF-16 text
+with one character per line also decodes as valid UTF-32. Add a byte-order mark,
+or pass `-From utf-32` or `-From utf-32BE`.
+
 `-Apply` uses the decisions and hashes stored in the plan; it does not detect
 the files again. Only `-Journal`, `-Quiet`, and `-MaxParallelism` may accompany
 it. `-WhatIf`, `-Target`, `-From`, `-Backup`, and file-selection options are

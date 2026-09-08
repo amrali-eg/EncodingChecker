@@ -31,8 +31,9 @@ internal static class ConversionPolicy
     /// <param name="sourceWasSpecified">Whether the source encoding was explicitly specified by the user.</param>
     /// <param name="isUnicodeOrAscii">Whether the source encoding is Unicode or ASCII.</param>
     /// <param name="explicitSourceConflictsWithReliableDetection">Whether the explicitly specified source encoding conflicts with reliable detection.</param>
-    /// <param name="automaticBomlessUtf16IsAmbiguous">
-    /// Whether automatic BOM-less UTF-16 detection is valid under both byte orders.
+    /// <param name="automaticBomlessUnicodeDoubt">
+    /// What automatic detection could not establish about a BOM-less Unicode source:
+    /// a UTF-16 byte order the bytes leave open, or UTF-32 they cannot establish at all.
     /// </param>
     /// <returns>The planned action for the file.</returns>
     internal static PlannedAction Decide(
@@ -45,7 +46,7 @@ internal static class ConversionPolicy
         bool sourceWasSpecified,
         bool isUnicodeOrAscii,
         bool explicitSourceConflictsWithReliableDetection,
-        bool automaticBomlessUtf16IsAmbiguous,
+        BomlessUnicodeKind automaticBomlessUnicodeDoubt,
         out SourceInterpretation sourceInterpretation,
         out string? reason)
     {
@@ -82,11 +83,17 @@ internal static class ConversionPolicy
             return PlannedAction.Refuse;
         }
 
-        if (!sourceWasSpecified && automaticBomlessUtf16IsAmbiguous)
+        if (!sourceWasSpecified &&
+            automaticBomlessUnicodeDoubt != BomlessUnicodeKind.None)
         {
             sourceInterpretation = SourceInterpretation.AutomaticUnicodeOrAscii;
-            reason = "BOM-less UTF-16 needs a byte order that the bytes do not prove. "
-                     + "Choose the original source encoding explicitly before converting.";
+
+            reason = automaticBomlessUnicodeDoubt == BomlessUnicodeKind.Utf32NotProvable
+                ? "BOM-less UTF-32 is an estimate the bytes do not establish. Choose the "
+                  + "original source encoding explicitly before converting."
+                : "BOM-less UTF-16 needs a byte order that the bytes do not prove. "
+                  + "Choose the original source encoding explicitly before converting.";
+
             return PlannedAction.Refuse;
         }
 
@@ -134,12 +141,22 @@ internal static class ConversionPolicy
     /// </remarks>
     internal static string? ReasonCodeFor(
         PlannedAction action,
-        SourceInterpretation sourceInterpretation) => (action, sourceInterpretation) switch
+        SourceInterpretation sourceInterpretation,
+        BomlessUnicodeKind bomlessUnicodeDoubt) => (action, sourceInterpretation) switch
     {
         (PlannedAction.Skip, _) => ConversionReasonCodes.UnknownEncoding,
 
+        // Reads the same input Decide read, rather than working the kind out again.
+        // Decide reaches this refusal only from a non-None doubt, so a None here is a
+        // caller that lost it. Defaulting to the UTF-16 code would rebuild the defect
+        // this mapping exists to prevent: a correct refusal carrying a wrong reason,
+        // with nothing to fail.
         (PlannedAction.Refuse, SourceInterpretation.AutomaticUnicodeOrAscii) =>
-            ConversionReasonCodes.AmbiguousBomlessUtf16,
+            BomlessUnicodeSafety.ReasonCodeFor(bomlessUnicodeDoubt)
+            ?? throw new ArgumentOutOfRangeException(
+                nameof(bomlessUnicodeDoubt),
+                bomlessUnicodeDoubt,
+                "An automatic Unicode refusal must carry the doubt that caused it."),
 
         (PlannedAction.Refuse, SourceInterpretation.ExplicitSource) =>
             ConversionReasonCodes.ExplicitSourceConflictsWithDetection,
@@ -161,5 +178,9 @@ internal static class ConversionPolicy
         string.Equals(
             reasonCode,
             ConversionReasonCodes.AmbiguousBomlessUtf16,
+            StringComparison.Ordinal) ||
+        string.Equals(
+            reasonCode,
+            ConversionReasonCodes.UnprovableBomlessUtf32,
             StringComparison.Ordinal);
 }
