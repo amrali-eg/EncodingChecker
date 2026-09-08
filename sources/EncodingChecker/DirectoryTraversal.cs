@@ -349,9 +349,13 @@ internal static class DirectoryTraversal
                         ? "^" + body + "$"
                         : "^(?:.*/)?" + body + "$";
 
+                // Matching runs in time proportional to the input, so a mask carrying
+                // many separated wildcards cannot stall a scan. NonBacktracking replaces
+                // Compiled rather than joining it: the two are mutually exclusive.
                 return new Regex(
                     anchored,
-                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant |
+                    RegexOptions.NonBacktracking);
             })
         ];
     }

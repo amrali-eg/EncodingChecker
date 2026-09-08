@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=62 fixed=50 open=8 not-reproduced=1 withdrawn=1 not-a-defect=1 decision=1 -->
+<!-- backlog-counts total=63 fixed=52 open=7 not-reproduced=1 withdrawn=1 not-a-defect=1 decision=1 -->
 
-**Derived count: 62 findings — 50 fixed, 8 open, 1 not reproduced,
+**Derived count: 63 findings — 52 fixed, 7 open, 1 not reproduced,
 1 withdrawn, 1 not a defect, and 1 design decision.** Recompute and validate
 these figures with:
 
@@ -50,7 +50,6 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 
 | ID | Finding | Status | Impact | Reach | Details |
 |---|---|---|---|---|---|
-| EC-08 | An include pattern can hang a scan indefinitely | Open | Medium | Theoretical | [EC-08](#ec-08) |
 | EC-17 | A text-validation comment contradicts the calculation | Open | Low | Common | [EC-17](#ec-17) |
 | EC-20 | Detection permits concurrent writes and deletes | Open | Low | Rare | [EC-20](#ec-20) |
 | CX-06 | The entropy gate runs before BOM detection | Open | Medium | Theoretical | [CX-06](#cx-06) |
@@ -68,6 +67,8 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | EC-03 | The GUI omitted the source-choice advisory | Fixed | — | — | [EC-03](#ec-03) |
 | EC-04 | `-Plan` could exit successfully after scan failures | Fixed | — | — | [EC-04](#ec-04) |
 | BL-01 | Ambiguous BOM-less UTF-32 can be converted under the wrong byte order | Fixed | — | — | [BL-01](#bl-01) |
+| EC-08 | A constructed include pattern could hang a scan indefinitely | Fixed | — | — | [EC-08](#ec-08) |
+| EC-24 | The GUI smoke gate could select in the wrong combo | Fixed | — | — | [EC-24](#ec-24) |
 | EC-18 | A negative BOM-less UTF-16 ambiguity result is recomputed | Fixed | — | — | [EC-18](#ec-18) |
 | EC-23 | Plan application relies on a null-forgiving path dereference | Fixed | — | — | [EC-23](#ec-23) |
 | BL-27 | Release evidence records no managed-assembly hash | Fixed | — | — | [BL-27](#bl-27) |
@@ -124,27 +125,42 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 
 ### EC-08
 
-**A hostile include mask can monopolize the regex engine.**
-`DirectoryTraversal.CompilePatterns` still translates `*` to `.*`, creates a
-regex with `RegexOptions.Compiled`, and therefore uses
-`Regex.InfiniteMatchTimeout`. On 2026-09-08 a scan with
-twelve separated wildcards against a nonmatching forty-character run of `a`
-did not finish within three seconds and had to be terminated.
+**Fixed by evaluating wildcard masks with .NET's non-backtracking engine.** The
+translation is unchanged — `*` becomes `.*`, `?` becomes `.`, and a
+separator-free mask still matches at any depth — so include and exclude results
+are the same. What changes is that matching runs in time proportional to the
+input rather than retrying an exponential number of alternatives.
+`NonBacktracking` replaces `Compiled`; the two are mutually exclusive.
 
-The trigger requires both inputs to be deliberately hostile: roughly ten or
-more separated wildcards and a filename with roughly twenty-four or more mostly
-consecutive copies of the separating character. Earlier measurements found
-realistic names answered in 0–5 ms, while the forty-`a` case exceeded 20 s.
-The mask comes from the operator, not an untrusted file.
+Was: `CompilePatterns` built a `Compiled` regex, which uses
+`Regex.InfiniteMatchTimeout`. A mask carrying twelve separated wildcards, matched
+against a nonmatching forty-character run of `a`, did not finish within three
+seconds and had to be terminated, while realistic names answered in 0–5 ms. The
+trigger needs both inputs to be deliberately hostile, and the mask comes from the
+operator rather than an untrusted file — which is why reach stayed Theoretical.
+An unbounded runtime is still worth removing for the price of one option.
 
-`RegexOptions.NonBacktracking` removed the blow-up, matched the current engine on
-the tested masks, and cost nothing measurable beside file I/O. It was measured
-and deliberately reverted because of the constructed reach. Three dead ends are
-worth preserving: a matching filename stops at the first success and proves
-nothing; `*` crossing directory separators is deliberate and tested; replacing
-`.*` with `[^/]*` does not prevent backtracking in a separator-free filename.
-`PathAwarePatternTests.PathQualifiedPattern_MatchesOnlyTheIntendedSubtree` pins
-the intended `src/*.cs` directory behavior.
+**It is not free, and the earlier note here that it cost nothing was wrong.**
+Measured over 3,937 files, median of five warm runs: 128 ms with `Compiled`
+against 148 ms with `NonBacktracking` — about 16%, or roughly 5 µs per file, and
+the same figure for a plain `*.txt` mask as for `*a*b*.txt`. That is the price of
+a bounded worst case, recorded so the next reader weighs it instead of
+rediscovering it.
+
+An independent differential comparison of the two engines over 500 generated
+masks against 200 generated paths — 100,000 pairs, including separators and the
+regex-special characters EC escapes — found no case where they disagreed.
+
+`PathAwarePatternTests.WildcardPatternsUseTheNonBacktrackingEngine` asserts the
+option before exercising the hostile input, so restoring the old engine fails in
+9 ms instead of hanging the run. That mutation was performed, and the file
+restored byte-identical by SHA-256.
+
+Three dead ends stay recorded: a matching filename stops at the first success and
+proves nothing; `*` crossing directory separators is deliberate and tested; and
+replacing `.*` with `[^/]*` does not prevent backtracking within a separator-free
+filename. `PathAwarePatternTests.PathQualifiedPattern_MatchesOnlyTheIntendedSubtree`
+pins the intended `src/*.cs` directory behavior.
 
 ### EC-15
 
@@ -716,6 +732,69 @@ inside the visible part of the same dropdown. Both combo-scoped and process-wide
 exact-name searches now follow the same documented rule, and fallback input
 uses the supplied window. Phase J drives the source-choice refusal against the
 built application.
+
+### EC-24
+
+**Fixed by setting the drop-down instead of hunting its popup.** The combo
+supports `ValuePattern` and reports `IsReadOnly` false, so the driver asks the
+control for the value. That opens no popup and reaches no other window, so
+neither mechanism below is available to fail.
+
+Was: the driver expanded the combo and searched for a list item, first under the
+combo and then across the process. How a provider exposes a drop-down's items
+varies with popup state and environment, so the first search could miss. The
+second accepted any visible item in the process carrying a matching name, and
+this application has two encoding combos — `lstConvert` on the main window and
+`lstSourceEncoding` in the review — holding the same names, so it could select
+in the wrong one and leave the combo under test unchanged.
+
+**Found by the release gate failing on bytes that then passed.** The v3.14.0
+release job failed at phase E with `'utf-16BE' was not selected in
+'lstSourceEncoding'`, and a re-run of the same commit passed all ten phases.
+Nothing in that release touched the driver, the review form, or the encoding
+list.
+
+This is [BL-26](#bl-26) arriving a second time. That fix made phase J work and
+left the mechanism in place; the v3.12.1 record said the asymmetry it kept "is
+the kind of thing a future phase could still trip over," and phase E is that
+phase. The keyboard fallback went with the searches: it foregrounded a window
+and typed into whatever held focus, and could not have repaired either cause.
+
+**The unsafe mechanism is proven; the cause of the runner incident is not.** An
+independent review built a harness holding two controls that offer the same item
+name, and reproduced the old process-wide fallback selecting the wrong control
+and leaving the combo under test unchanged — the exact shape of the reported
+failure. That establishes the defect. It does not establish that the release
+runner exposed that state, and no reproduction of the incident itself exists: on
+this machine the popup sits inside the combo's subtree and only one process-wide
+match is visible, so the ambiguity never arises here. This entry closes the
+mechanism, not the incident.
+
+**What the replacement was shown to do.** On the current .NET 10 WinForms
+provider, setting the value selects the matching item rather than only changing
+displayed text — phase E completes end to end, so the choice reaches conversion
+and the output text is preserved. An unknown value is a no-op on this provider,
+which the existing postcondition catches; no membership check is added, since one
+would reinstate the popup dependency this removes. Two mutations — never setting
+the value, and setting a different one — each built cleanly and failed phase E
+with the message the release job produced, and the file restored byte-identical
+by SHA-256.
+
+**A timeout now names the error it retried.** `WaitFor` discarded
+`ElementNotAvailableException`, `InvalidOperationException` and `COMException`
+and then reported only a generic timeout, so a probe that threw on every attempt
+looked exactly like one that simply never became true. It now keeps the last such
+error and `WaitUntil` reports it, so the next failure of this gate is
+diagnosable from its message.
+
+**Recorded, not fixed here.** `ConfigureScan` asks for `utf-8` on `lstConvert`
+while that control is still disabled, and succeeds only because `utf-8` is
+already selected, so the method returns before setting anything: the suite never
+exercises the new path on that combo, and a changed application default would
+fail every phase at setup. Separately, `Current.IsEnabled` was observed stale for
+five seconds on a control that then accepted `Invoke`, and the driver uses
+`IsEnabled` as a readiness signal elsewhere. Neither was reproduced as a
+failure.
 
 ## Decisions and mistakes that must remain visible
 
