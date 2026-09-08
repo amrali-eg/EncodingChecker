@@ -874,6 +874,30 @@ EncodingChecker-3.14.1-win-x64-self-contained.zip
   than fixed: EC-25, the suite never exercises setting the main window's target encoding;
   and EC-26, the driver trusts an enabled flag that was observed stale for five seconds.
 
+#### Reproduced afterwards, on 2026-09-09
+
+**The executable does reproduce byte-for-byte. The record above is left as written,
+because it is what was true when the release was made.**
+
+.NET 10.0.12 was installed on the checking machine shortly after the release, and a clean
+detached checkout of the tag republished to exactly the shipped bytes:
+
+```
+published and driven   698e558f1502d32af0289f4a37b697c41fdd56850cd517a7e86d418b60f1280f
+rebuilt at 10.0.12     698e558f1502d32af0289f4a37b697c41fdd56850cd517a7e86d418b60f1280f
+```
+
+So the v3.13.0 link is unbroken after all: every release since has been rebuilt from its
+tag. What actually happened is smaller and more embarrassing than the record above
+suggests. The check ran against a machine one runtime patch behind, and the right response
+was to install the patch and try again - not to write the gap into the permanent record
+and ship without the evidence.
+
+The observation about pinning stands and is the part worth keeping. Both workflows resolve
+`dotnet-version: "10.0.x"`, so this evidence still depends on the checking machine
+happening to hold the same patch, and nothing reports the moment it does not. The failure
+mode here was a false negative; the same looseness could as easily hide a real one.
+
 ## Known limits
 
 - No detector can recover an author's historical legacy encoding when the same bytes admit multiple plausible readings. EC refuses automatic legacy conversion instead of guessing.
