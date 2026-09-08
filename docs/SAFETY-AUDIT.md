@@ -689,6 +689,101 @@ untouched.
   and shipped without a corpus run; nothing here re-audits it. Its record stands as
   written.
 
+### v3.14.0 — `85b38bf5b5c025c7d299ead1e244a4fc416472ef`, not re-audited
+
+**It was not measured against the four corpora, and none is required.** This release changes
+neither detection nor conversion policy: what EC converts, refuses and reports for any input
+is what v3.13.0 did. What changed is the *shape* of the plan and journal files, so their
+schema versions moved with it and a plan written by v3.13.0 or earlier is refused.
+
+**The gap the v3.12.0 record opened is still open.** That build changed `ConversionPolicy`
+and shipped without a corpus run. Nothing here re-audits it, and three records in a row
+saying "none required" must not be read as the requirement having been met.
+
+#### The shipped build reproduces from the tagged commit
+
+```
+commit      85b38bf5b5c025c7d299ead1e244a4fc416472ef   (annotated tag v3.14.0)
+worktree    clean detached checkout
+platform    runner  Windows 10.0.26100 - .NET 10.0.11
+            local   Windows 10.0.26200 - .NET 10.0.11
+executable  EncodingChecker.exe (framework-dependent, single-file)
+            cbbcb348a891563d142357efcb8e63bcc892c481e849b820d6b7180a7c1f1034
+```
+
+That hash is the same value three times over: the executable the release job published and
+the GUI suite drove, the executable extracted from the downloaded archive, and the executable
+produced by publishing a clean checkout of the tagged commit on a different machine. v3.13.0
+was the first record to link the shipped build to its source by measurement rather than
+assertion; this one repeats it.
+
+The published archives, each downloaded and hashed rather than trusting GitHub's own report
+of them:
+
+```
+EncodingChecker-3.14.0-framework-dependent.zip
+  ca83cbfbcd875721bc0dca35c9b880f6e6fd76887b585a7b0bed5a0849cd5236
+EncodingChecker-3.14.0-win-x64-self-contained.zip
+  4052d0657ce2e900721fb0fab3bdfe3979999f1ffb197b7738cc467f842d9257
+```
+
+#### The release gate failed once, on bytes that then passed
+
+The ten-phase GUI smoke suite **failed on its first run of this tag and passed on a re-run of
+the same commit.** Phase E timed out after 32 seconds with `'utf-16BE' was not selected in
+'lstSourceEncoding'`; on the re-run it passed in 5 seconds, with all ten phases green.
+
+The gate behaved correctly — the failing run published nothing, which is what it is for. What
+it did not do is behave *repeatably*, and a gate that can fail on unchanged input cannot
+distinguish a real regression from noise. That is recorded here rather than filed as a
+transient, because the next phase failure now has to be argued about instead of believed.
+
+The cause is not new, and it was written down before it happened. The v3.12.1 record
+describes the driver's asymmetric item search — a combo-scoped lookup that accepts offscreen
+items, and a process-wide fallback that rejects them — and says plainly that the asymmetry
+"is the kind of thing a future phase could still trip over." Phase E is that phase. It picks
+an encoding that happened to be visible until it was not: whether `utf-16BE` is realized in
+the dropdown's automation tree depends on where the popup renders, which varies with display
+metrics and between runs. When neither search finds it, control falls through to a keyboard
+fallback that does not select it either, and the wait expires.
+
+Nothing in this release touched the driver, the review form, or the encoding list. Phase E
+passed locally on this branch against both an ordinary Release build and the published
+single-file executable, and it passed on the v3.13.0 release run seven hours earlier. The
+release is not held to be at fault; the instrument is.
+
+#### What changed in v3.14.0
+
+| | |
+|---|---|
+| Five serialized guarantee flags | `StrictDecoding`, `StrictEncoding`, `OutputVerification`, `AtomicInstall` and `LegacyRequiresExplicitSource` were hardcoded `true`, written into every plan and journal, read back by nothing, and unable to disagree with the version beside them. Replaced by `SemanticsDescription`. Plan schema 5 to 6, journal 4 to 5; conversion semantics unchanged at 7. Closes EC-15. |
+| A cleared BOM-less file | Only a positive ambiguity result was cached, so a stored false ran the opposite-order decode again on every pass. Now cached as a nullable value, so "no" and "not asked" are distinguishable. Closes EC-18. |
+| Plan application | `plan.ResolvePath(f)!` was safe only because `FindStaleFiles` rejects an out-of-directory plan first. Now an explicit throw naming that invariant. Closes EC-23. |
+| Release evidence | Promised a managed-assembly hash that a single-file publish cannot produce, and printed the `EncodingChecker.dll` path with an empty hash after it. The report now records one when there is one to hash and says there is none when there is not. Closes BL-27 — and this release's own evidence is the first to show the corrected form. |
+| CX-06 | Re-scored Occasional to Theoretical after measurement, and a working fix dropped rather than shipped. Stays open. |
+
+#### Known limits specific to this release
+
+- **The release gate is not repeatable.** As above: one failure and one pass on identical
+  bytes. This is the most important limit recorded here, and it concerns the instrument
+  rather than the product.
+- **No corpus measurement backs this release**, and none is required. What supports it is 755
+  unit tests, the ten-phase GUI suite, the detector parity check, and a mutation check on
+  each of the four new tests — each mutation built cleanly and failed exactly the test aimed
+  at it, with both source files restored byte-identical and confirmed by SHA-256.
+- **Two fixes carry no test, deliberately.** EC-18 and EC-23 change nothing observable, so a
+  test would pin the shape of the code rather than anything EC promises. Recorded so they are
+  not mistaken for oversight.
+- **CX-06 remains open on measurement, not on inspection.** No text file in 3,568 candidates
+  comes within 0.59 of the entropy threshold. It should be reopened on evidence of real text
+  at or above it, not on the mechanism.
+- **Code signing did not run.** The signing secrets are still not configured, so the step was
+  skipped, the archives above are **unsigned**, and the GUI suite drove an unsigned published
+  executable. This is the fifth release to carry the limit unchanged.
+- **No accessibility spot check is recorded** for this release. The checklist's scaling,
+  keyboard-only, and high-contrast checks have no automated substitute, and nothing in the
+  release job stands in for them. This is the fourth release in a row without one.
+
 ## Known limits
 
 - No detector can recover an author's historical legacy encoding when the same bytes admit multiple plausible readings. EC refuses automatic legacy conversion instead of guessing.
