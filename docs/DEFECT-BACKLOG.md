@@ -816,58 +816,52 @@ This fix kept the search-for-an-item design and made it consistent.
 replaced the approach rather than adjusting it again.
 
 ### EC-24
+**Before:** the smoke driver picked an encoding by searching for a list item -
+first under the intended drop-down, then across the whole EC process for any
+visible item with a matching name. Both encoding drop-downs contain names such as
+`utf-16BE`, so that second search could select the item in the wrong control and
+leave the one under test unchanged. `lstConvert` is on the main window,
+`lstSourceEncoding` in the review.
 
-**Fixed by setting the drop-down instead of hunting its popup.** The combo
-supports `ValuePattern` and reports `IsReadOnly` false, so the driver asks the
-control for the value. That opens no popup and reaches no other window, so
-neither mechanism below is available to fail.
-
-Was: the driver expanded the combo and searched for a list item, first under the
-combo and then across the process. How a provider exposes a drop-down's items
-varies with popup state and environment, so the first search could miss. The
-second accepted any visible item in the process carrying a matching name, and
-this application has two encoding combos — `lstConvert` on the main window and
-`lstSourceEncoding` in the review — holding the same names, so it could select
-in the wrong one and leave the combo under test unchanged.
+**Now:** the driver sets the value on the intended drop-down. It opens no list,
+searches no other window, changes no foreground focus and sends no keystrokes, so
+neither the popup-location dependency nor the name collision is reachable. The
+combo supports `ValuePattern` and reports `IsReadOnly` false.
 
 **Found by the release gate failing on bytes that then passed.** The v3.14.0
 release job failed at phase E with `'utf-16BE' was not selected in
-'lstSourceEncoding'`, and a re-run of the same commit passed all ten phases.
-Nothing in that release touched the driver, the review form, or the encoding
-list.
+'lstSourceEncoding'`; a re-run of the same commit passed all ten phases. Nothing
+in that release touched the driver, the review form or the encoding list.
 
-This is [BL-26](#bl-26) arriving a second time. That fix made phase J work and
-left the mechanism in place; the v3.12.1 record said the asymmetry it kept "is
-the kind of thing a future phase could still trip over," and phase E is that
-phase. The keyboard fallback went with the searches: it foregrounded a window
-and typed into whatever held focus, and could not have repaired either cause.
+**The mechanism is proven; the cause of that one run is not.** An independent
+review built a harness with two controls offering the same item name and
+reproduced the old fallback selecting the wrong one - the same observable result.
+That establishes the defect. It does not establish that the release runner was in
+that state, and the incident itself was never reproduced: on this machine the
+popup sits inside the combo's subtree and only one process-wide match is visible,
+so the ambiguity never arises here. This entry closes the mechanism, not the
+incident.
 
-**The unsafe mechanism is proven; the cause of the runner incident is not.** An
-independent review built a harness holding two controls that offer the same item
-name, and reproduced the old process-wide fallback selecting the wrong control
-and leaving the combo under test unchanged — the exact shape of the reported
-failure. That establishes the defect. It does not establish that the release
-runner exposed that state, and no reproduction of the incident itself exists: on
-this machine the popup sits inside the combo's subtree and only one process-wide
-match is visible, so the ambiguity never arises here. This entry closes the
-mechanism, not the incident.
-
-**What the replacement was shown to do.** On the current .NET 10 WinForms
-provider, setting the value selects the matching item rather than only changing
-displayed text — phase E completes end to end, so the choice reaches conversion
-and the output text is preserved. An unknown value is a no-op on this provider,
-which the existing postcondition catches; no membership check is added, since one
-would reinstate the popup dependency this removes. Two mutations — never setting
-the value, and setting a different one — each built cleanly and failed phase E
-with the message the release job produced, and the file restored byte-identical
-by SHA-256.
+**Evidence.** On the current .NET 10 WinForms provider, setting the value selects
+the matching item rather than only changing displayed text: phase E completes end
+to end, so the choice reaches conversion and the output text is preserved. An
+unknown value is a no-op on this provider, which the existing postcondition
+catches - no membership check is added, since one would reinstate the popup
+dependency this removes. Two mutations, never setting the value and setting a
+different one, each built cleanly and failed phase E with the message the release
+job produced, and the file restored byte-identical by SHA-256.
 
 **A timeout now names the error it retried.** `WaitFor` discarded
 `ElementNotAvailableException`, `InvalidOperationException` and `COMException`
-and then reported only a generic timeout, so a probe that threw on every attempt
-looked exactly like one that simply never became true. It now keeps the last such
-error and `WaitUntil` reports it, so the next failure of this gate is
-diagnosable from its message.
+and reported only a generic timeout, so a probe that threw every time looked
+exactly like one that never became true. It keeps the last such error and
+`WaitUntil` reports it.
+
+**Relation to [BL-26](#bl-26).** That fix kept the search-for-an-item design and
+made it consistent. The v3.12.1 record said the asymmetry it kept "is the kind of
+thing a future phase could still trip over," and phase E is that phase. The
+keyboard fallback went with the searches: it foregrounded a window and typed into
+whatever held focus, and could not have repaired either cause.
 
 **Recorded, not fixed here.** `ConfigureScan` asks for `utf-8` on `lstConvert`
 while that control is still disabled, and succeeds only because `utf-8` is
@@ -875,8 +869,7 @@ already selected, so the method returns before setting anything: the suite never
 exercises the new path on that combo, and a changed application default would
 fail every phase at setup. Separately, `Current.IsEnabled` was observed stale for
 five seconds on a control that then accepted `Invoke`, and the driver uses
-`IsEnabled` as a readiness signal elsewhere. Neither was reproduced as a
-failure.
+`IsEnabled` as a readiness signal elsewhere. Neither was reproduced as a failure.
 
 ## Decisions and mistakes that must remain visible
 
