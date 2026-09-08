@@ -186,12 +186,20 @@ would have been a day earlier.
 
 ### EC-17
 
-**The printable-ratio comment says the opposite of the calculation.**
-`TextValidation.cs` increments the total rune count before its category switch.
-Control and private-use scalars do not increment `printable`, so they lower the
-ratio; they are not ignored. The behavior is the intended binary-rejection
-behavior. The comment is shared byte-for-byte with LineEndingNormalizer and
-CorpusTesters, so its correction must be synchronized.
+**A comment describes the text check backwards.** Control and private-use
+characters *lower* the printable-text ratio. The comment beside the calculation
+says they are ignored.
+
+Nothing a user sees is wrong: the binary-rejection behaviour is the intended one.
+What is wrong is what the next person reads, which is why reach is Common.
+
+Evidence: `TextValidation.cs` increments the total rune count before its category
+switch, so those scalars count toward the denominator while never incrementing
+`printable`.
+
+Still open because the fix is not confined to one repository. The comment is
+byte-identical in EncodingChecker, LineEndingNormalizer and CorpusTesters, and
+the parity check requires it to stay that way, so all three must change together.
 
 ### EC-18
 
@@ -208,12 +216,22 @@ No observable behaviour changes, so this carries no test of its own.
 
 ### EC-20
 
-**The detector has a looser sharing mode than the paths that rely on its result.**
-`TextEncoding.DetectFromFile` opens with `FileShare.ReadWrite |
-FileShare.Delete`; validation and source-snapshot paths use `FileShare.Read`.
-Detection can therefore describe bytes while another process changes or deletes
-them. This affects detection and validation output; conversion later takes its
-own bound snapshot before writing.
+**A file can change while EC is working out what encoding it is.** Detection
+opens the file in a mode that lets another program write to it or delete it at
+the same time, so the encoding EC reports can describe bytes that have already
+changed.
+
+No source file is altered by this. Before conversion writes anything it takes its
+own copy of the bytes, bound to a hash. What can go stale is what detection and
+validation *report*.
+
+Evidence: `TextEncoding.DetectFromFile` opens with
+`FileShare.ReadWrite | FileShare.Delete`, while the validation and
+source-snapshot paths use `FileShare.Read`.
+
+Still open because the obvious correction is not obviously right. Tightening
+detection to match would make EC fail on any file another program holds open,
+which includes ordinary log files.
 
 ### EC-23
 
@@ -228,10 +246,15 @@ this shape was left implicit.
 
 ### CX-06
 
-**High entropy can hide an otherwise valid BOM.** The entropy guard returns
-before `UnicodeDetector.DetectFromBuffer` examines the BOM. The result can be an
-unknown or wrong encoding even when the file declares it. This changes what EC
-reports; it is not evidence that conversion writes the file.
+**EC decides a file looks like random data before it looks for a byte-order
+mark.** In principle a file could be reported as unknown, or as the wrong
+encoding, even though its first bytes say what it is.
+
+This changes what EC *reports*. It is not evidence that conversion writes a file
+it should have refused.
+
+Evidence: the entropy guard returns before `UnicodeDetector.DetectFromBuffer`
+examines the mark.
 
 **Re-scored Occasional to Theoretical on 2026-09-08, after measurement.** No
 text reaches the gate. Across all four corpora, 3,620 files are large enough to
@@ -273,13 +296,20 @@ ordinary BOM-less UTF-32 as well; nothing in the bytes separates the two.
 
 ### BL-05
 
-**A second close request can outlive the form while its worker still uses it.**
-`OnFormClosing` deliberately allows a confirmed second close because
-cancellation is cooperative. A worker can subsequently call the synchronous
-confirmation `Invoke`, and completion accesses form controls. Finished files
-have already been installed independently and the in-flight file remains
-protected; the expected symptom is an exception during exit, not lost file
-content. The timing-dependent path was source-confirmed but not reproduced.
+**Force-closing EC mid-conversion can produce an error as it exits.** If the user
+confirms a second close while the run is still stopping, a background task can
+try to use a window that has already gone.
+
+No file content is lost. Files already converted were installed one at a time and
+stay installed, and the file in flight stays protected. The expected symptom is
+an exception while EC closes.
+
+Evidence: `OnFormClosing` deliberately allows a confirmed second close, because
+cancellation is cooperative. A background task can then call the synchronous
+confirmation `Invoke`, and its completion touches controls on the form.
+
+Still open because it was confirmed by reading the current code rather than by
+triggering it; the timing it needs has not been reproduced.
 
 ### BL-18
 
@@ -305,32 +335,50 @@ and checks all five survive.
 
 ### BL-19
 
-**The UTF-16 structure heuristic can claim NUL-heavy ASCII.** The earlier
-document said 2.3% of all bytes; that was wrong. A current 65,536-byte ASCII
-fixture with a NUL every 100 bytes—1.001% overall—was reported as UTF-16BE. The
-detector threshold is 2% in one putative UTF-16 byte channel, approximately 1%
-of all bytes for this shape. Conversion refused with exit 5 and the source hash
-did not change, so the wrong claim currently reaches detection and validation,
-not installation.
+**An ASCII file carrying many NUL bytes can be reported as UTF-16.** A current
+65,536-byte ASCII fixture with a NUL every 100 bytes — 1.001% of all bytes — was
+reported as UTF-16BE.
+
+Conversion then refused it with exit 5 and the source hash did not change. So the
+wrong answer reaches what EC *reports*, not what it writes. This is the one open
+finding where EC answers its own central question incorrectly.
+
+Evidence: the UTF-16 structure heuristic triggers at 2% of bytes within one
+candidate UTF-16 channel, which for this shape is roughly 1% of all bytes. An
+earlier version of this document said 2.3% of all bytes; that figure was wrong.
 
 ### BL-20
 
-**Filesystem aliases are treated as separate selected paths.** Two hard links
-to one UTF-8 file were both converted in a current probe. Both retained exact
-text, and each received its own verified `.bak` and `.ecmeta.json`; the normal
-Windows `File.Replace` path broke their link relationship. This can duplicate
-work and does not preserve hard-link identity. The fallback
-`File.Move(..., overwrite: true)` path could not be forced on this platform, so
-no claim is made about that branch.
+**Two names for one file are converted twice, and stop being the same file.**
+Windows can expose a single file under two hard-link names. EC treats them as two
+separate files and converts each.
+
+Text is preserved either way: in a current probe both names of one UTF-8 file
+were converted, both kept their text exactly, and each received its own verified
+`.bak` and `.ecmeta.json`. What is lost is the link itself — the normal Windows
+`File.Replace` path breaks it, so afterwards the two names refer to different
+files. The work is also done twice.
+
+No claim is made about the `File.Move(..., overwrite: true)` fallback, which
+could not be forced on this platform.
+
+Still open partly as a question rather than a defect: whether EC should preserve
+hard-link identity or treat selected paths independently is a design choice
+nobody has made.
 
 ### BL-21
 
-**Sample detection and complete conversion intentionally use different flush
-semantics.** A UTF-8 file ending in incomplete bytes `E2 82` was reported as
-UTF-8 by `-DetectOnly`, because sample detection does not flush an incomplete
-tail. Conversion flushed the strict decoder, returned `SourceDecodeError` and
-exit 3, and left the source unchanged. The safety path is correct; the detector
-can still bless a complete file that conversion rejects.
+**Detection can accept a cut-off final character that conversion then rejects.**
+A UTF-8 file ending in the incomplete bytes `E2 82` was reported as UTF-8 by
+`-DetectOnly`. Conversion refused the same file, returned `SourceDecodeError`
+and exit 3, and left it unchanged.
+
+The safety path is correct — the file is refused, not converted. The
+inconsistency is that detection had already reported it as fine.
+
+Evidence: detection reads a sample and does not treat an incomplete tail as an
+error. Conversion reaches the real end of the file and flushes the strict
+decoder, which does. The difference is deliberate on both sides.
 
 ## Evidence for the original review findings
 
