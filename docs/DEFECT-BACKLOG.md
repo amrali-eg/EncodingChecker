@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=62 fixed=46 open=12 not-reproduced=1 withdrawn=1 not-a-defect=1 decision=1 -->
+<!-- backlog-counts total=62 fixed=50 open=8 not-reproduced=1 withdrawn=1 not-a-defect=1 decision=1 -->
 
-**Derived count: 62 findings — 46 fixed, 12 open, 1 not reproduced,
+**Derived count: 62 findings — 50 fixed, 8 open, 1 not reproduced,
 1 withdrawn, 1 not a defect, and 1 design decision.** Recompute and validate
 these figures with:
 
@@ -51,17 +51,13 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | ID | Finding | Status | Impact | Reach | Details |
 |---|---|---|---|---|---|
 | EC-08 | An include pattern can hang a scan indefinitely | Open | Medium | Theoretical | [EC-08](#ec-08) |
-| EC-15 | Serialized conversion guarantees are not enforced individually | Open | Low | Common | [EC-15](#ec-15) |
 | EC-17 | A text-validation comment contradicts the calculation | Open | Low | Common | [EC-17](#ec-17) |
-| EC-18 | A negative BOM-less UTF-16 ambiguity result is recomputed | Open | Low | Common | [EC-18](#ec-18) |
 | EC-20 | Detection permits concurrent writes and deletes | Open | Low | Rare | [EC-20](#ec-20) |
-| EC-23 | Plan application relies on a null-forgiving path dereference | Open | Low | Rare | [EC-23](#ec-23) |
-| CX-06 | The entropy gate runs before BOM detection | Open | Medium | Occasional | [CX-06](#cx-06) |
+| CX-06 | The entropy gate runs before BOM detection | Open | Medium | Theoretical | [CX-06](#cx-06) |
 | BL-05 | Force-closing during a run can race UI callbacks | Open | Low | Rare | [BL-05](#bl-05) |
 | BL-19 | NUL-heavy ASCII can be reported as BOM-less UTF-16 | Open | Medium | Rare | [BL-19](#bl-19) |
 | BL-20 | Hard-linked paths are processed independently | Open | Low | Rare | [BL-20](#bl-20) |
 | BL-21 | Detection can accept a truncated trailing sequence that conversion rejects | Open | Low | Rare | [BL-21](#bl-21) |
-| BL-27 | Release evidence records no managed-assembly hash | Open | Low | Common | [BL-27](#bl-27) |
 
 ### Closed and other findings
 
@@ -72,6 +68,10 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | EC-03 | The GUI omitted the source-choice advisory | Fixed | — | — | [EC-03](#ec-03) |
 | EC-04 | `-Plan` could exit successfully after scan failures | Fixed | — | — | [EC-04](#ec-04) |
 | BL-01 | Ambiguous BOM-less UTF-32 can be converted under the wrong byte order | Fixed | — | — | [BL-01](#bl-01) |
+| EC-18 | A negative BOM-less UTF-16 ambiguity result is recomputed | Fixed | — | — | [EC-18](#ec-18) |
+| EC-23 | Plan application relies on a null-forgiving path dereference | Fixed | — | — | [EC-23](#ec-23) |
+| BL-27 | Release evidence records no managed-assembly hash | Fixed | — | — | [BL-27](#bl-27) |
+| EC-15 | Serialized conversion guarantees are not enforced individually | Fixed | — | — | [EC-15](#ec-15) |
 | BL-18 | BOM-less UTF-16 can be detected and converted as UTF-32 | Fixed | — | — | [BL-18](#bl-18) |
 | EC-05 | An unreadable non-conversion plan entry made a plan unusable | Fixed | — | — | [EC-05](#ec-05) |
 | EC-06 | A drive-root base path made every plan unusable | Fixed | — | — | [EC-06](#ec-06) |
@@ -148,12 +148,25 @@ the intended `src/*.cs` directory behavior.
 
 ### EC-15
 
-**The five serialized guarantee flags look enforceable but are descriptive.**
-`ConversionSemantics` writes `StrictDecoding`, `StrictEncoding`,
-`OutputVerification`, `AtomicInstall`, and `LegacyRequiresExplicitSource`.
-`ConversionPlan.Load` enforces `SemanticsVersion` only. EC always executes its
-current strict behavior, so this cannot weaken conversion, but a reader may
-mistake a serialized `true` value for proof that the specific check ran.
+**Fixed as an artifact-clarity simplification, not a conversion-safety defect.**
+The five flags are gone. Plans and journals now carry `SemanticsDescription` -
+the sentence `ConversionSemantics.Describes` already held - beside the version
+number, so a reader gets what the version means instead of five constants.
+`SemanticsVersion` remains the only enforced compatibility value, and a test
+proves the description is never consulted: altering it in a plan file changes
+nothing about whether that plan loads.
+
+Was: `StrictDecoding`, `StrictEncoding`, `OutputVerification`, `AtomicInstall`
+and `LegacyRequiresExplicitSource` were serialized into every plan and journal,
+hardcoded `true`, and read by nothing. They could not disagree with the version,
+so they were a second encoding of it that a reader could mistake for evidence a
+particular check had run. EC always executed its strict behaviour; only the
+artifact implied otherwise.
+
+The artifacts changed shape, so their versions say so: plan schema 5 to 6,
+journal schema 4 to 5. That rejects plans written by v3.13.0 as well as older
+ones - semantics 7 shipped in that release, so this is not the free change it
+would have been a day earlier.
 
 ### EC-17
 
@@ -166,12 +179,16 @@ CorpusTesters, so its correction must be synchronized.
 
 ### EC-18
 
-**Only a positive ambiguity result is cached.** In `ScanEngine`,
-`entry.HasAmbiguousBomlessUtf16 || IsAmbiguousBomlessUtf16(...)` short-circuits
-when the stored value is true. A stored false runs the full check again on each
-pass. Measurement found no meaningful cost because a provable file normally
-fails the opposite-order decode in its first buffer; the issue is redundant
-work and unclear state, not observed slowness.
+**Fixed.** The classification is cached as a nullable value, so null means not
+yet classified and `None` means classified with no doubt found. Both are stored,
+and the file is examined once.
+
+Was: only a positive result was kept, so an already-cleared file ran the full
+opposite-order check again on every pass. Measurement found no meaningful cost,
+because a provable file fails that decode in its first buffer; the defect was
+redundant work and a state that could not distinguish "no" from "not asked".
+
+No observable behaviour changes, so this carries no test of its own.
 
 ### EC-20
 
@@ -184,19 +201,42 @@ own bound snapshot before writing.
 
 ### EC-23
 
-**Plan application still depends on ordering to make a nullable path non-null.**
-At the current source location `Program.CliExecution.cs:90`, the code uses
-`plan.ResolvePath(f)!`. `FindStaleFiles` validates the same paths 29 lines
-earlier, so the dereference is safe under the present flow. EC-06 demonstrates
-why leaving that invariant implicit is fragile.
+**Fixed.** The null-forgiving dereference is now an explicit throw that names the
+invariant it rests on: `FindStaleFiles` rejects a plan whose paths resolve
+outside its directory, and reaching the dereference means that check did not
+run.
+
+Under the present flow nothing changes, which is why there is nothing new to
+assert and no test accompanies it. EC-06 is what happened when an invariant of
+this shape was left implicit.
 
 ### CX-06
 
-**High entropy can hide an otherwise valid BOM.** At current
-`TextEncoding.cs:175`, the entropy guard returns before
-`UnicodeDetector.DetectFromBuffer` examines the BOM at line 182. The result can
-be an unknown or wrong encoding even when the file declares it. This changes
-what EC reports; it is not evidence that conversion writes the file.
+**High entropy can hide an otherwise valid BOM.** The entropy guard returns
+before `UnicodeDetector.DetectFromBuffer` examines the BOM. The result can be an
+unknown or wrong encoding even when the file declares it. This changes what EC
+reports; it is not evidence that conversion writes the file.
+
+**Re-scored Occasional to Theoretical on 2026-09-08, after measurement.** No
+text reaches the gate. Across all four corpora, 3,620 files are large enough to
+be gated (512 bytes) and 47 trip the 7.4-bit threshold — every one of them
+binary: 35 fixtures under `13_Binary/`, plus images and a spreadsheet in
+directories the corpora label `None`. The highest-entropy *text* file among 3,568
+candidates is dense Chinese XML in gb2312 at **6.8133**, a margin of 0.59 below
+the threshold, with UTF-16 Chinese just behind it. Base64 caps at 6.0 by
+construction. Reaching 7.4 needs a near-uniform byte distribution, which prose
+in any encoding does not produce.
+
+**A fix was written and then dropped**, which is the part worth recording. Making
+the guard yield to a byte-order mark works, and costs something measurable:
+`CheckBom` returns a codec from the marker bytes alone, so BOM-prefixed binary
+began detecting as `utf-16` instead of `(Unknown)`, and a scan containing one
+moved from exit 0 to exit 3. Strict validation still caught it and no bytes
+changed, so nothing was corrupted — but that is a measured behaviour change
+bought against a benefit no corpus file demonstrates.
+
+Reopen this on evidence of real text at or above the threshold, not on the
+mechanism, which is not in doubt.
 
 ### BL-01
 
@@ -597,28 +637,25 @@ new backup.
 
 ### BL-27
 
-**The GUI smoke report names a managed-assembly hash it does not contain.**
-`RELEASE-CHECKLIST.md` states that the report carries "the executable and
-managed-assembly hashes", and several records in `SAFETY-AUDIT.md` repeat it.
-Checked against the v3.13.0 release evidence: `gui-smoke-report.json` has no
-`EcManagedAssemblySha256` key at all, and `gui-smoke-report.md` renders an empty
-pair of backticks — while both still print the `EncodingChecker.dll` path as
-though the value followed.
+**Fixed by promising only what the build being driven can show.** The report
+hashes a loose managed assembly when one sits beside the executable, and says
+there is none when it does not, rather than printing a path with an empty hash
+after it. `RELEASE-CHECKLIST.md` and `GUI-SMOKE-TEST.md` describe both cases.
+The executable *is* the artifact, so its hash is the provenance that matters;
+v3.13.0 demonstrated the stronger form by reproducing that hash byte-for-byte
+from the tagged commit.
 
-The cause is that a single-file publish leaves no loose DLL at the path the
-suite looks for. That has held since single-file publishing began, so **v3.12.0
-and v3.12.1 carry the same empty field**, and the claim in their records is
-wrong the same way.
+Was: `gui-smoke-report.json` carried no `EcManagedAssemblySha256` key and the
+Markdown rendered an empty pair of backticks, while both printed the
+`EncodingChecker.dll` path as though a value followed — because a single-file
+publish leaves no loose DLL where the suite looked. That held since single-file
+publishing began, so the v3.12.0 and v3.12.1 evidence carries the same empty
+field.
 
-Impact is low: the executable hash is present and real, and for v3.13.0 the
-published executable was reproduced byte-for-byte from the tagged commit, which
-is a stronger provenance link than the missing field would have provided. Reach
-is common, because it affects every release that ships a single-file build.
-
-The fix is a choice, not an omission to close blindly: either hash the publish
-intermediate `win-x64/EncodingChecker.dll`, or drop the field and the sentences
-that promise it. Recording the executable hash alone would be honest; promising
-two and delivering one is not.
+The alternative, hashing the publish intermediate `win-x64/EncodingChecker.dll`,
+was rejected: it exists only during the build and no user ever receives it, so
+recording it would document a byproduct rather than the release. Nothing about
+conversion was involved either way; this is evidence hygiene.
 
 ### BL-22
 

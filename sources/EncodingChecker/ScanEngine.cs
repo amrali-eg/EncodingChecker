@@ -533,7 +533,8 @@ internal static class ScanEngine
                     // the result stays Unchanged; the row must still say which it is,
                     // and say it with the same code conversion would use.
                     entry.ReasonCode =
-                        BomlessUnicodeSafety.ReasonCodeFor(entry.BomlessUnicodeDoubt);
+                        BomlessUnicodeSafety.ReasonCodeFor(
+                            entry.BomlessUnicodeDoubt ?? BomlessUnicodeKind.None);
                     entry.Diagnostic =
                         BomlessUnicodeSafety.DescribeUnprovableByteOrder(detected!);
                 }
@@ -589,7 +590,8 @@ internal static class ScanEngine
                     // refuses that same file later.
                     entry.Result = ConversionRowResult.Invalid;
                     entry.ReasonCode =
-                        BomlessUnicodeSafety.ReasonCodeFor(entry.BomlessUnicodeDoubt);
+                        BomlessUnicodeSafety.ReasonCodeFor(
+                            entry.BomlessUnicodeDoubt ?? BomlessUnicodeKind.None);
                     entry.Diagnostic =
                         BomlessUnicodeSafety.DescribeUnprovableByteOrder(detected!)
                         + $" The label '{label}' is in the allowed list, but EC cannot"
@@ -837,11 +839,12 @@ internal static class ScanEngine
             ? entry.DetectedEncodingHasBom
             : sourceHasBom;
 
-        BomlessUnicodeKind bomlessUnicodeDoubt = entry.HasBomlessUnicodeDoubt
-            ? entry.BomlessUnicodeDoubt
-            : bomlessCandidate is null
+        // A stored None is an answer, so only null triggers classification.
+        BomlessUnicodeKind bomlessUnicodeDoubt =
+            entry.BomlessUnicodeDoubt
+            ?? (bomlessCandidate is null
                 ? BomlessUnicodeKind.None
-                : ClassifyBomlessUnicode(path, bomlessCandidate, candidateHasBom);
+                : ClassifyBomlessUnicode(path, bomlessCandidate, candidateHasBom));
 
         entry.BomlessUnicodeDoubt = bomlessUnicodeDoubt;
 

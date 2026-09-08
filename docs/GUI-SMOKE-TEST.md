@@ -19,8 +19,10 @@ sources/EncodingChecker.GuiSmoke/bin/Release/net10.0-windows/EncodingChecker.Gui
 
 Exit `0` when every phase passes, `1` when one fails, `2` for a usage, environment, or
 build-compatibility problem. Each run writes `gui-smoke-report.json` and `gui-smoke-report.md` carrying the
-EC version, the executable and managed-assembly SHA-256, the OS and .NET versions, and
-each phase's before and after file hashes.
+EC version, the executable SHA-256, the OS and .NET versions, and each phase's before and
+after file hashes. It also hashes the managed assembly beside the executable when there
+is one, as in an ordinary Release build. A single-file publish has none, and the report
+says so instead of naming a file it could not read.
 
 ## Why this is not an ordinary test
 

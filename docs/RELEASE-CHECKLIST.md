@@ -58,8 +58,11 @@ sources/EncodingChecker.GuiSmoke/bin/Release/net10.0-windows/EncodingChecker.Gui
 ```
 
 Exit 0 is a pass. Each run writes `gui-smoke-report.json` and `gui-smoke-report.md`
-carrying the EC version, the executable and managed-assembly hashes, and every phase's
-before and after file hashes.
+carrying the EC version, the executable hash, and every phase's before and after file
+hashes. Driven against an ordinary Release build it also hashes the managed assembly
+beside the executable; driven against a single-file publish there is none, and it says so.
+Either way the executable is the artifact, and reproducing its hash from the tagged commit
+is what ties a release to its source.
 
 **[What each of the ten phases proves, and what it would catch →](GUI-SMOKE-TEST.md)**
 
@@ -89,9 +92,9 @@ checks the status line *against* the bytes on disk rather than trusting it.
 ### Record
 
 The ten phases record themselves. `gui-smoke-report.md` and `gui-smoke-report.json`
-already carry the EC version, the executable and managed-assembly hashes, the OS and
-.NET versions, and every phase's before and after file hashes — better evidence than a
-transcribed letter, and not subject to a typo. Keep both files with the release.
+already carry the EC version, the executable hash, the OS and .NET versions, and every
+phase's before and after file hashes — better evidence than a transcribed letter, and not
+subject to a typo. Keep both files with the release.
 
 What still needs a person is the spot check above, because nobody has automated a
 judgement about whether text is readable. Fill this in and keep it alongside them.

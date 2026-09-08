@@ -125,14 +125,18 @@ internal sealed record JournalEntry
 /// </remarks>
 internal sealed record ConversionJournal
 {
-    internal const int CurrentJournalVersion = 4;
+    internal const int CurrentJournalVersion = 5;
 
     public int JournalVersion { get; init; } = CurrentJournalVersion;
 
     /// <summary>The conversion behaviour this run used.</summary>
     public int SemanticsVersion { get; init; } = ConversionSemantics.Current;
 
-    public ConversionSemantics Semantics { get; init; } = new();
+    /// <summary>
+    /// What <see cref="SemanticsVersion"/> guarantees, in words, for whoever opens the
+    /// file. Compatibility is decided by the version alone, so this is never read back.
+    /// </summary>
+    public string SemanticsDescription { get; init; } = ConversionSemantics.Describes;
 
     public required string EcVersion { get; init; }
 

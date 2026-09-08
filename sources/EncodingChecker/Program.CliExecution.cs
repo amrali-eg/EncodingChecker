@@ -87,7 +87,11 @@ internal static partial class Program
             .. plan.Files
                 .Select(f => new ConversionReportEntry
                 {
-                    FilePath = plan.ResolvePath(f)!,
+                    FilePath = plan.ResolvePath(f)
+                        ?? throw new InvalidOperationException(
+                            $"'{f.RelativePath}' resolves outside the plan's directory. "
+                            + "FindStaleFiles rejects such a plan before this point, so "
+                            + "reaching here means that check was bypassed."),
                     SourceEncoding = f.SourceEncoding,
                     SourceHasBom = f.SourceHasBom,
                     TargetEncoding = plan.TargetEncoding,
