@@ -336,6 +336,13 @@ internal sealed class EcGuiDriver : IDisposable
         ((ValuePattern)rawValue).SetValue(value);
     }
 
+    /// <summary>Sets a drop-down list to <paramref name="value"/>.</summary>
+    /// <remarks>
+    /// Reaching a drop-down item through the tree depends on how the provider exposes the
+    /// popup, which varies with its state and the environment, and on which of the two
+    /// encoding combos owns a match for the same name. Asking the control for the value
+    /// opens no popup and so depends on neither.
+    /// </remarks>
     private void SelectCombo(
         AutomationElement root,
         string automationId,
@@ -346,67 +353,22 @@ internal sealed class EcGuiDriver : IDisposable
         if (SelectedName(combo).Equals(value, StringComparison.OrdinalIgnoreCase))
             return;
 
-        if (combo.TryGetCurrentPattern(
-                ExpandCollapsePattern.Pattern,
-                out object? rawExpand))
+        if (!combo.TryGetCurrentPattern(ValuePattern.Pattern, out object? rawValue))
+            throw new InvalidOperationException($"'{automationId}' cannot be set by value.");
+
+        var setter = (ValuePattern)rawValue;
+
+        if (setter.Current.IsReadOnly)
         {
-            ((ExpandCollapsePattern)rawExpand).Expand();
+            throw new InvalidOperationException(
+                $"'{automationId}' is read-only, so '{value}' cannot be set.");
         }
 
-        AutomationElement? item = WaitFor(
-            () => FindNamedItem(combo, value) ?? FindVisibleProcessItem(value),
-            TimeSpan.FromSeconds(5));
-
-        if (item is not null &&
-            item.TryGetCurrentPattern(SelectionItemPattern.Pattern, out object? rawSelection))
-        {
-            ((SelectionItemPattern)rawSelection).Select();
-        }
-        else
-        {
-            SetForegroundWindow(root.Current.NativeWindowHandle);
-            combo.SetFocus();
-            System.Windows.Forms.SendKeys.SendWait(value);
-            System.Windows.Forms.SendKeys.SendWait("{ENTER}");
-        }
+        setter.SetValue(value);
 
         WaitUntil(
             () => SelectedName(combo).Equals(value, StringComparison.OrdinalIgnoreCase),
             $"'{value}' was not selected in '{automationId}'.");
-    }
-
-    private AutomationElement? FindNamedItem(
-        AutomationElement root,
-        string value)
-    {
-        AutomationElementCollection items = root.FindAll(
-            TreeScope.Descendants, Condition.TrueCondition);
-
-        // UIA can select WinForms items that sit below the popup viewport and are
-        // therefore reported offscreen.
-        return items.Cast<AutomationElement>().FirstOrDefault(element =>
-            element.Current.ControlType == ControlType.ListItem &&
-            element.Current.Name.Equals(value, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private AutomationElement? FindVisibleProcessItem(string value)
-    {
-        var condition = new AndCondition(
-            new PropertyCondition(
-                AutomationElement.ProcessIdProperty,
-                _process.Id),
-            new PropertyCondition(
-                AutomationElement.ControlTypeProperty,
-                ControlType.ListItem));
-
-        AutomationElementCollection items = AutomationElement.RootElement.FindAll(
-            TreeScope.Descendants, condition);
-
-        // A hidden process-wide match may belong to another collapsed combo that
-        // contains the same encoding name, so only its visible popup is safe to use.
-        return items.Cast<AutomationElement>().FirstOrDefault(element =>
-            element.Current.Name.Equals(value, StringComparison.OrdinalIgnoreCase) &&
-            !element.Current.IsOffscreen);
     }
 
     private static string SelectedName(AutomationElement combo)
@@ -637,9 +599,18 @@ internal sealed class EcGuiDriver : IDisposable
         WaitFor(probe, Timeout) ?? throw new TimeoutException(timeoutMessage);
 
     private static T? WaitFor<T>(Func<T?> probe, TimeSpan timeout)
+        where T : class =>
+        WaitFor(probe, timeout, out _);
+
+    /// <param name="lastError">
+    /// The last error retried before giving up. A probe that threw every time is the
+    /// likeliest reason a wait expired, and it is what a bare timeout cannot report.
+    /// </param>
+    private static T? WaitFor<T>(Func<T?> probe, TimeSpan timeout, out Exception? lastError)
         where T : class
     {
         Stopwatch timer = Stopwatch.StartNew();
+        lastError = null;
 
         while (timer.Elapsed < timeout)
         {
@@ -649,15 +620,20 @@ internal sealed class EcGuiDriver : IDisposable
 
                 if (value is not null)
                     return value;
+
+                lastError = null;
             }
-            catch (ElementNotAvailableException)
+            catch (ElementNotAvailableException ex)
             {
+                lastError = ex;
             }
-            catch (InvalidOperationException)
+            catch (InvalidOperationException ex)
             {
+                lastError = ex;
             }
-            catch (COMException)
+            catch (COMException ex)
             {
+                lastError = ex;
             }
 
             Thread.Sleep(50);
@@ -670,10 +646,19 @@ internal sealed class EcGuiDriver : IDisposable
     {
         if (WaitFor(
                 () => predicate() ? new object() : null,
-                Timeout) is null)
+                Timeout,
+                out Exception? lastError) is not null)
         {
-            throw new TimeoutException(timeoutMessage);
+            return;
         }
+
+        if (lastError is null)
+            throw new TimeoutException(timeoutMessage);
+
+        throw new TimeoutException(
+            $"{timeoutMessage} Last retried automation error: "
+            + $"{lastError.GetType().Name}: {lastError.Message}",
+            lastError);
     }
 
     private static void ClickAt(int x, int y)
@@ -696,10 +681,6 @@ internal sealed class EcGuiDriver : IDisposable
 
     private const uint MouseLeftDown = 0x0002;
     private const uint MouseLeftUp = 0x0004;
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetForegroundWindow(int hWnd);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
