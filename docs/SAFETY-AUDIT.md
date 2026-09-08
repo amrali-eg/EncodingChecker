@@ -784,6 +784,96 @@ release is not held to be at fault; the instrument is.
   keyboard-only, and high-contrast checks have no automated substitute, and nothing in the
   release job stands in for them. This is the fourth release in a row without one.
 
+### v3.14.1 — `6257d046ac74244518f11c817eb59dd49384efc9`, not re-audited
+
+**It was not measured against the four corpora, and none is required.** This release
+changes neither detection nor conversion policy. In the shipped project exactly one file
+changed behaviour since v3.14.0 — `DirectoryTraversal.cs`, where EC-08 replaced the
+backtracking regular-expression engine. Every other file under `sources/EncodingChecker/`
+changed by one byte: the byte-order mark the source-encoding pass removed.
+
+**The v3.12.0 gap is still open.** That build changed `ConversionPolicy` and shipped
+without a corpus run. Nothing here re-audits it, and four records in a row saying "none
+required" must not be read as the requirement having been met.
+
+#### The shipped build was not reproduced independently
+
+```
+commit      6257d046ac74244518f11c817eb59dd49384efc9   (annotated tag v3.14.1)
+worktree    clean detached checkout
+runner      Windows 10.0.26100 - .NET 10.0.12
+local       Windows 10.0.26200 - .NET 10.0.11
+executable  EncodingChecker.exe (framework-dependent, single-file)
+  published and driven   698e558f1502d32af0289f4a37b697c41fdd56850cd517a7e86d418b60f1280f
+  rebuilt locally        e1d4e596635d3d07017eca3aa34fe7fef03776bbbb58c747007322734272d92a
+```
+
+**This is the first release since v3.12.1 whose executable could not be rebuilt from its
+tag.** v3.13.0 and v3.14.0 both matched byte-for-byte, and both records said so. The cause
+is known and benign: the release runner used .NET 10.0.12 while the machine checking it
+has 10.0.11, and a framework-dependent single-file executable embeds the apphost of the
+runtime it was built with. A new patch runtime shipped between the two releases.
+
+What *is* established is the chain inside the release job. The executable the GUI smoke
+suite drove and the executable inside the published archive are the same bytes:
+
+```
+gui-smoke-report.md  Executable SHA-256  698e558f...1280f
+archive              EncodingChecker.exe 698e558f...1280f
+```
+
+**The reproduction check is weaker than it looked, and this release is how that was
+found.** Both workflows resolve `dotnet-version: "10.0.x"`, which floats to whatever patch
+GitHub has installed. The evidence therefore holds only while the checking machine happens
+to match, and nothing detects the moment it stops. Pinning an exact patch in the workflows,
+or recording the runtime version alongside the hash and reproducing with that version,
+would make the claim durable. Neither is done.
+
+The published archives, each downloaded and hashed rather than trusting GitHub's own report
+of them:
+
+```
+EncodingChecker-3.14.1-framework-dependent.zip
+  9536d17c87753f891b007380238ad5a841a99ae794065671233f66343e103907
+EncodingChecker-3.14.1-win-x64-self-contained.zip
+  912eaa491d010de56d447d6a2bf8ee76035f53a8ae8c177566a6677d18f40185
+```
+
+#### What changed in v3.14.1
+
+| | |
+|---|---|
+| A constructed include pattern | `CompilePatterns` built a `Compiled` regex, which carries `Regex.InfiniteMatchTimeout`. Twelve separated wildcards against a nonmatching forty-character run did not finish within three seconds. `NonBacktracking` replaces `Compiled`; the same case answers in 0.427 ms. Include and exclude results are unchanged across 100,000 differential pairs, at a measured cost of about 16%. Closes EC-08. |
+| The release gate | Could select an encoding from the wrong drop-down, because it searched the whole process for any visible item with a matching name and two combos hold the same names. It now sets the value directly. Test machinery only. Closes EC-24. |
+| Where that gate runs | Every pull request and push, not only at tag time. `build`, `gui-smoke` and `parity` are now required checks. |
+| Source encoding | Settled on UTF-8 without a byte-order mark, CRLF, with an `.editorconfig` recording it. 41 files changed by three bytes each. No compiled behaviour changed. |
+| The documentation | The defect ledger reorganised and rewritten for a reader; four untrue claims in the release documents corrected, including that the shipped executable is signed. |
+
+#### Known limits specific to this release
+
+- **The executable was not reproduced from its tag**, as above. The reason is a runtime
+  patch difference rather than a defect, but the link this project has been building since
+  v3.13.0 is absent for this release.
+- **The reproduction check itself is unpinned.** `10.0.x` floats in both workflows. This
+  release is the first time that mattered, and it will matter again.
+- **No corpus measurement backs this release**, and none is required. What supports it is
+  756 unit tests, the ten-phase GUI suite against both an ordinary build and the published
+  executable, the detector parity check, a mutation check on the regex fix — reverting it
+  fails the new test in 9 ms on the engine assertion rather than by hanging — and a release
+  rehearsal run against this exact tree before it was tagged.
+- **Only the framework-dependent executable is driven by the GUI suite.** The self-contained
+  executable is packaged and shipped without the suite ever opening it. Recorded in
+  `RELEASE-CHECKLIST.md`; not addressed here.
+- **Code signing did not run.** The secrets are still not configured, so the step was
+  skipped, the archives are **unsigned**, and the suite drove an unsigned executable. Fifth
+  release to carry this limit unchanged.
+- **No accessibility spot check was performed.** The checklist's scaling, keyboard-only and
+  high-contrast checks have no automated substitute, and nothing in the release job stands
+  in for them. Fifth release without one.
+- **Two open findings concern the smoke suite itself**, recorded during this cycle rather
+  than fixed: EC-25, the suite never exercises setting the main window's target encoding;
+  and EC-26, the driver trusts an enabled flag that was observed stale for five seconds.
+
 ## Known limits
 
 - No detector can recover an author's historical legacy encoding when the same bytes admit multiple plausible readings. EC refuses automatic legacy conversion instead of guessing.
