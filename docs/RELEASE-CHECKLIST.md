@@ -30,8 +30,9 @@ and add the ones no workflow can answer.
       no pull request here.
 - [ ] Ambiguous BOM-less UTF-16 is refused without changing bytes or creating a backup.
 - [ ] Structurally provable BOM-less UTF-16 still converts correctly.
-- [ ] BOM-less UTF-32 is refused in every mode, with `UnprovableBomlessUtf32`, and
-      converts when given a BOM or an explicit source.
+- [ ] BOM-less UTF-32 is never converted automatically; it is refused with
+      `UnprovableBomlessUtf32`. It converts when a BOM confirms the encoding, or when
+      the user selects the source encoding explicitly.
 - [ ] Explicit source selection still receives strict decoding and output verification.
 - [ ] A stale reviewed plan leaves every selected source unchanged.
 - [ ] Backup and recovery-sidecar hashes match the source bytes used for conversion.

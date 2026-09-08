@@ -49,7 +49,7 @@ because nothing ran the sequence.
 | Phase | Proves | Would have caught |
 |---|---|---|
 | **A** | Opening the review and cancelling writes nothing, with backups enabled: no bytes change, no `.bak`, no `.ecmeta.json`. | A review that writes before you confirm. |
-| **B** | Unicode and ASCII are handled with no source choice offered, and both keep their text exactly. The Unicode file's recovery record names `Detected` and the right code page. | A safe batch demanding a source choice, or a conversion that alters text. |
+| **B** | Unicode and ASCII convert with no source choice offered, both keep their text exactly, and **both** get a verified recovery record naming `Detected` and the right code page — ASCII included, whose bytes do not change. | A safe batch demanding a source choice, a conversion that alters text, or a conversion that skips the restore point when the bytes happen to match. |
 | **C** | A chosen legacy source applies **only** to the ticked files; an unticked file keeps its bytes and gets no backup. The record names `Explicit` and the chosen code page. | A source choice leaking to files it was not ticked for. |
 | **D** | BOM-less UTF-16 whose byte order cannot be proven is refused, is offered a source choice, and cancelling leaves the folder untouched. | Automatic conversion of a file whose byte order is a coin flip. |
 | **E** | Naming `utf-16BE` explicitly converts the same file exactly, with a backup and a recovery record. | A refusal that cannot be answered, or an answered one that loses text. |
@@ -149,10 +149,10 @@ the pull request that introduced it rather than at tag time with a release waiti
 That costs about two minutes of runner time per pull request, which is the price of
 not diagnosing this class of defect mid-release.
 
-The two runs answer different questions and both are kept. The pull-request run asks
-whether this change broke the window; the release run asks whether the artifact about
-to be published works. Only the release job can ask the second one, because only it
-produces a signed, single-file executable.
+The two runs answer different questions, and both upload a report. The pull-request run
+asks whether this change broke the window; the release run asks whether the artifact
+about to be published works. Only the release job can ask the second one, because only it
+produces a published single-file executable.
 
 Evidence is uploaded from the pull-request run whether it passes or fails. A passing
 run is the sample that shows an intermittent phase has stopped being intermittent —

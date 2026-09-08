@@ -23,11 +23,12 @@ jobs:
       - name: Test
         run: dotnet test sources\EncodingChecker.sln --configuration Release --no-build
 
-  # The unit suite covers everything reachable without a window. This covers the
-  # GUI's sequence, which has already shipped a defect while every component in it
-  # was correct and tested. The release job runs the same suite against the signed,
-  # published executable; running it here too means a regression is found on the
-  # pull request that introduced it rather than at tag time, with a release waiting.
+  # The unit suite covers conversion policy, plan binding and orchestration, none of
+  # which needs a window. This covers the GUI's sequence, which has already shipped a
+  # defect while every component in it was correct and tested. The release job runs the
+  # same suite against the published executable; running it here too means a regression
+  # is found on the pull request that introduced it rather than at tag time, with a
+  # release waiting.
   #
   # It is a separate job so the check has its own name: a red "gui-smoke" says which
   # suite failed without opening the log, which matters for a gate whose failures

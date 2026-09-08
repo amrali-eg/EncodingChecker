@@ -200,6 +200,14 @@ internal sealed class SmokeSuite
             before["unicode.txt"],
             sourceMode: "Detected",
             sourceCodePage: 1200);
+
+        // ASCII to UTF-8 leaves the bytes identical, but it is still planned as a
+        // conversion, so it must leave the same recovery evidence behind.
+        AssertRecovery(
+            Path.Combine(directory, "plain.txt"),
+            before["plain.txt"],
+            sourceMode: "Detected",
+            sourceCodePage: 20127);
     }
 
     private void PhaseC(PhaseContext phase)

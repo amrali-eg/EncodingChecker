@@ -140,12 +140,16 @@ jobs:
             Remove-Item $certPath -Force -ErrorAction SilentlyContinue
           }
 
-      # Drives the signed, published executable rather than a build of the same
-      # commit, so what is verified is the bytes that ship. A failure here fails
-      # the job, and no release is created.
+      # Drives the published framework-dependent executable rather than a build of
+      # the same commit, so what is verified is a file that ships. A failure here
+      # fails the job, and no release is created.
       #
-      # It is placed after signing because signing rewrites the file: verifying
-      # the unsigned one would leave the shipped binary undriven.
+      # Placed after the signing step because signing rewrites the file: verifying
+      # the unsigned one would leave the shipped binary undriven. Signing is
+      # conditional on the certificate secrets, so when they are absent this drives
+      # an unsigned file.
+      #
+      # The self-contained executable is packaged without being driven.
       - name: Drive the GUI smoke suite
         shell: pwsh
         run: |
@@ -190,8 +194,15 @@ jobs:
         if: github.event_name != 'push'
         shell: pwsh
         run: |
+          $signing = if ($env:CODE_SIGNING_CERT -and $env:CODE_SIGNING_CERT_PASSWORD) {
+            "signed"
+          } else {
+            "not signed, because the certificate secrets are not configured"
+          }
+
           $summary = "REHEARSAL for version ${{ steps.version.outputs.version }} - " +
-                     "built, tested, signed, GUI-checked and packaged. No release was created."
+                     "built, tested, GUI-checked and packaged; executables $signing. " +
+                     "No release was created."
           $summary
           "## Release rehearsal" >> $env:GITHUB_STEP_SUMMARY
           "" >> $env:GITHUB_STEP_SUMMARY
