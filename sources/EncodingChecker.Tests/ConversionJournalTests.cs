@@ -292,8 +292,7 @@ public sealed class ConversionJournalTests : IDisposable
 
         Assert.Equal(ConversionJournal.CurrentJournalVersion, journal.JournalVersion);
         Assert.Equal(ConversionSemantics.Current, journal.SemanticsVersion);
-        Assert.True(journal.Semantics.StrictDecoding);
-        Assert.True(journal.Semantics.LegacyRequiresExplicitSource);
+        Assert.Equal(ConversionSemantics.Describes, journal.SemanticsDescription);
         Assert.Equal("CommandLine", journal.Surface);
         Assert.Equal("utf-8", journal.TargetEncoding);
         Assert.False(journal.TargetHasBom);

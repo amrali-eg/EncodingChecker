@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=62 fixed=46 open=12 not-reproduced=1 withdrawn=1 not-a-defect=1 decision=1 -->
+<!-- backlog-counts total=62 fixed=47 open=11 not-reproduced=1 withdrawn=1 not-a-defect=1 decision=1 -->
 
-**Derived count: 62 findings — 46 fixed, 12 open, 1 not reproduced,
+**Derived count: 62 findings — 47 fixed, 11 open, 1 not reproduced,
 1 withdrawn, 1 not a defect, and 1 design decision.** Recompute and validate
 these figures with:
 
@@ -51,7 +51,6 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | ID | Finding | Status | Impact | Reach | Details |
 |---|---|---|---|---|---|
 | EC-08 | An include pattern can hang a scan indefinitely | Open | Medium | Theoretical | [EC-08](#ec-08) |
-| EC-15 | Serialized conversion guarantees are not enforced individually | Open | Low | Common | [EC-15](#ec-15) |
 | EC-17 | A text-validation comment contradicts the calculation | Open | Low | Common | [EC-17](#ec-17) |
 | EC-18 | A negative BOM-less UTF-16 ambiguity result is recomputed | Open | Low | Common | [EC-18](#ec-18) |
 | EC-20 | Detection permits concurrent writes and deletes | Open | Low | Rare | [EC-20](#ec-20) |
@@ -72,6 +71,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | EC-03 | The GUI omitted the source-choice advisory | Fixed | — | — | [EC-03](#ec-03) |
 | EC-04 | `-Plan` could exit successfully after scan failures | Fixed | — | — | [EC-04](#ec-04) |
 | BL-01 | Ambiguous BOM-less UTF-32 can be converted under the wrong byte order | Fixed | — | — | [BL-01](#bl-01) |
+| EC-15 | Serialized conversion guarantees are not enforced individually | Fixed | — | — | [EC-15](#ec-15) |
 | BL-18 | BOM-less UTF-16 can be detected and converted as UTF-32 | Fixed | — | — | [BL-18](#bl-18) |
 | EC-05 | An unreadable non-conversion plan entry made a plan unusable | Fixed | — | — | [EC-05](#ec-05) |
 | EC-06 | A drive-root base path made every plan unusable | Fixed | — | — | [EC-06](#ec-06) |
@@ -148,12 +148,25 @@ the intended `src/*.cs` directory behavior.
 
 ### EC-15
 
-**The five serialized guarantee flags look enforceable but are descriptive.**
-`ConversionSemantics` writes `StrictDecoding`, `StrictEncoding`,
-`OutputVerification`, `AtomicInstall`, and `LegacyRequiresExplicitSource`.
-`ConversionPlan.Load` enforces `SemanticsVersion` only. EC always executes its
-current strict behavior, so this cannot weaken conversion, but a reader may
-mistake a serialized `true` value for proof that the specific check ran.
+**Fixed as an artifact-clarity simplification, not a conversion-safety defect.**
+The five flags are gone. Plans and journals now carry `SemanticsDescription` -
+the sentence `ConversionSemantics.Describes` already held - beside the version
+number, so a reader gets what the version means instead of five constants.
+`SemanticsVersion` remains the only enforced compatibility value, and a test
+proves the description is never consulted: altering it in a plan file changes
+nothing about whether that plan loads.
+
+Was: `StrictDecoding`, `StrictEncoding`, `OutputVerification`, `AtomicInstall`
+and `LegacyRequiresExplicitSource` were serialized into every plan and journal,
+hardcoded `true`, and read by nothing. They could not disagree with the version,
+so they were a second encoding of it that a reader could mistake for evidence a
+particular check had run. EC always executed its strict behaviour; only the
+artifact implied otherwise.
+
+The artifacts changed shape, so their versions say so: plan schema 5 to 6,
+journal schema 4 to 5. That rejects plans written by v3.13.0 as well as older
+ones - semantics 7 shipped in that release, so this is not the free change it
+would have been a day earlier.
 
 ### EC-17
 

@@ -542,11 +542,7 @@ public sealed class ConversionPlanTests : IDisposable
         Assert.Equal(Path.GetFullPath(_root), plan.BaseDirectory);
         Assert.NotEmpty(plan.EcVersion);
 
-        Assert.True(plan.Semantics.StrictDecoding);
-        Assert.True(plan.Semantics.StrictEncoding);
-        Assert.True(plan.Semantics.OutputVerification);
-        Assert.True(plan.Semantics.AtomicInstall);
-        Assert.True(plan.Semantics.LegacyRequiresExplicitSource);
+        Assert.Equal(ConversionSemantics.Describes, plan.SemanticsDescription);
 
         PlannedFile file = Assert.Single(plan.Files);
         Assert.Equal("shift_jis", file.DetectedEncoding);

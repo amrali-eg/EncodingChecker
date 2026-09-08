@@ -32,7 +32,9 @@ internal enum PlannedAction
 /// </summary>
 /// <remarks>
 /// Recorded in every plan so an approved plan cannot later be applied under different
-/// conversion or classification behaviour.
+/// conversion or classification behaviour. <see cref="Current"/> is the only value
+/// <see cref="ConversionPlan.Load"/> enforces; <see cref="Describes"/> accompanies it
+/// for readers and decides nothing.
 /// </remarks>
 internal sealed record ConversionSemantics
 {
@@ -44,24 +46,6 @@ internal sealed record ConversionSemantics
     /// <summary>The guarantees of <see cref="Current"/> shown to the reader.</summary>
     internal const string Describes =
         "source-bound detection, strict codecs, verified output, atomic install, explicit source required for legacy text, proven BOM-less UTF-16 byte order, BOM or explicit source required for UTF-32, a reviewed refusal is binding";
-
-    /// <summary>Malformed input is rejected rather than replaced.</summary>
-    public bool StrictDecoding { get; init; } = true;
-
-    /// <summary>Unrepresentable content is rejected rather than substituted.</summary>
-    public bool StrictEncoding { get; init; } = true;
-
-    /// <summary>Output is re-decoded and compared before installation.</summary>
-    public bool OutputVerification { get; init; } = true;
-
-    /// <summary>The source is never rewritten in place.</summary>
-    public bool AtomicInstall { get; init; } = true;
-
-    /// <summary>
-    /// Automatically detected legacy text requires a user-selected source codec;
-    /// Unicode and ASCII are converted automatically.
-    /// </summary>
-    public bool LegacyRequiresExplicitSource { get; init; } = true;
 }
 
 /// <summary>One file's entry in a conversion plan.</summary>
@@ -142,7 +126,7 @@ internal sealed record ApprovedDecision(
 internal sealed record ConversionPlan
 {
     /// <summary>The plan file schema version.</summary>
-    internal const int CurrentPlanVersion = 5;
+    internal const int CurrentPlanVersion = 6;
 
     public int PlanVersion { get; init; } = CurrentPlanVersion;
 
@@ -153,8 +137,11 @@ internal sealed record ConversionPlan
 
     public required string EcVersion { get; init; }
 
-    /// <summary>The guarantees recorded for the reader.</summary>
-    public ConversionSemantics Semantics { get; init; } = new();
+    /// <summary>
+    /// What <see cref="SemanticsVersion"/> guarantees, in words, for whoever opens the
+    /// file. Compatibility is decided by the version alone, so this is never read back.
+    /// </summary>
+    public string SemanticsDescription { get; init; } = ConversionSemantics.Describes;
 
     /// <summary>The directory containing all planned relative paths.</summary>
     public required string BaseDirectory { get; init; }
