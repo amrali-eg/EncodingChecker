@@ -502,6 +502,136 @@ The rule this file already states about the product applies to the things that c
 - **Three backlog findings remain only partly reproducible** and are recorded as such: one needs force-close timing too precise to trigger, one needs a filesystem where `File.Replace` is unsupported, and the historical performance figures were not re-measured.
 - **No accessibility spot check is recorded** for this release. The checklist's scaling, keyboard-only, and high-contrast checks have no automated substitute, and nothing in the release job stands in for them.
 
+### v3.13.0 audited build
+
+The first release since v3.11.0 measured against the four corpora, and the first that had
+to be: it changes conversion policy, so the exemption v3.11.2, v3.12.0 and v3.12.1 claimed
+does not apply. Audited from a clean detached checkout of the commit it is tagged at.
+
+```
+commit    08858a68b31cbe769d476e605b2573c4a048a79b   (annotated tag v3.13.0)
+worktree  clean
+platform  .NET 10.0.400 - Windows 11 10.0.26200
+assembly  EncodingChecker.dll
+          b5761523da3af57072f735be93f369c2c3a6445cb25106d3328d219c4329869f
+run       v3130tag, compared against rel3110 in audit/reports/v3130tag-vs-rel3110
+```
+
+**No file changed outcome.** All four metrics are unchanged from v3.11.0, with zero
+implementation defects, zero strict-decode throws and zero backup-integrity mismatches per
+corpus.
+
+| | v3.11.0 | v3.13.0 |
+|---|---|---|
+| Detection accuracy | 4640/4646 (99.87%) | 4639/4645 (99.87%) |
+| Strict decoding | 4694/4694 (100.00%) | 4693/4693 (100.00%) |
+| Codec conformance | 4591/4694 (97.81%) | 4590/4693 (97.81%) |
+| Text preservation | 4520/4623 (97.77%) | 4519/4622 (97.77%) |
+
+`compare.py` reports `regressed=1`, and it is not one. A UTF-8 fixture present when
+v3.11.0 was audited is **absent from the corpus copy on disk**, so it joins as `(absent)`
+rather than as a changed outcome. The local UnicodeTestSuite holds 1,366 files where the
+published v3.0 holds 1,367. Every file present in both reached the same outcome.
+
+`check_audit_integrity.py` was run **with `CORPUS_ROOT` set** — the failure the v3.11.0
+record describes, where coverage and independent-hash checks are skipped and the run still
+prints that all invariants hold. Coverage 3166 / 478 / 67 / 1366, ground truth
+729 / 47 / 41 / 35, independent hashes 150 / 150 / 64 / 150: 514 files decoded and
+compared from scratch, outside the audit's own code path. All invariants hold across
+5,077 rows.
+
+**The source corpora were not modified.** Verified after the run by re-hashing all 5,077
+source files against the inventory captured before it: zero modified, zero missing.
+
+#### The audited build and the shipped build
+
+This release links the two by measurement rather than by assertion, which no earlier record
+does.
+
+The published single-file executable was **reproduced byte-for-byte** from the same clean
+checkout, on a different machine from the one that built it:
+
+```
+shipped by the release workflow  76f68a876b3385a711fe967b2243ade80109bb204d9d851f885912727e2760cc
+rebuilt locally from 08858a6     76f68a876b3385a711fe967b2243ade80109bb204d9d851f885912727e2760cc
+```
+
+The distinction that remains, and that every audited-build record here shares: **the audit
+measures the plain Release build, not the published one.** The harness invokes
+`bin/Release/net10.0-windows/EncodingChecker.exe`, while the release ships a `win-x64`
+single-file publish whose bundled managed assembly is
+`ba66a3438883963caaa083400ee10e0aa4599074dedb22e6978503c9a7f3f1b4`. Same commit, same SDK,
+different packaging. The reproduced executable hash is what ties the audited source to the
+shipped artifact; the assembly hash above identifies what the corpora were actually run
+against.
+
+#### What this audit cannot establish
+
+**It does not exercise the change this release makes.** The harness runs with a forced
+reference, supplying `-From` for every file, and v3.13.0 refuses BOM-less UTF-32 only when
+detection is *automatic*. `UnprovableBomlessUtf32` appears **zero times across 5,077
+files**.
+
+That belongs in the same breath as the clean result. A green audit on the first release in
+this line to change conversion policy reads as confirmation of the change, and it is not.
+It confirms that nothing else broke. What the change does rests on the unit and end-to-end
+tests, which drive the automatic path directly.
+
+The audit does measure the way out: 847 files carrying the BOM-less-doubt advisory were
+converted with an explicit source and **all 847 preserved their text exactly**. The escape
+hatch this release directs users to is measured at scale; the refusal that sends them there
+is not.
+
+**Detection is unchanged, and was checked rather than assumed.** Both detection testers
+produced reports byte-identical to the committed ones — 1,358 UnicodeTestSuite files and
+3,137 chardet files. Their headline accuracy is scored through an "also valid as"
+equivalence, so those percentages are used here only as a before-and-after identity check,
+never as ground truth.
+
+#### The GUI smoke evidence records no managed-assembly hash
+
+`RELEASE-CHECKLIST.md` states that the report carries "the executable and managed-assembly
+hashes", and several records above repeat it. The executable hash is real. The managed one
+is **absent**: `gui-smoke-report.json` has no `EcManagedAssemblySha256` key, and the
+Markdown renders an empty pair of backticks, while both still name the
+`EncodingChecker.dll` path as though the value were there.
+
+It is absent because a single-file publish leaves no loose DLL at that path. That has been
+true since single-file publishing began, so **v3.12.0 and v3.12.1 carry the same empty
+field** and the claim in their records is wrong in the same way. Filed rather than fixed
+here; this release changes no release tooling.
+
+#### What changed in v3.13.0
+
+| | |
+|---|---|
+| A BOM-less UTF-16 file that also decodes as UTF-32 | Was converted, rewriting U+0041 U+000A as U+A0041 with exit 0. Output verification could not notice: both sides of its comparison used the same wrong codec. Refused now. |
+| BOM-less UTF-32 valid under both byte orders | Detection preferred little-endian without saying so. Refused now. |
+| Ordinary BOM-less UTF-32 | Refused as well. Nothing in the bytes separates it from the first row, so no test admits one and rejects the other. A BOM or `-From` still converts it. |
+| Conversion semantics | 6 to 7. Plans written by v3.12.1 or earlier are refused rather than applied. |
+
+Widening the guard that protects BOM-less UTF-16 would not have closed the first row: those
+bytes are invalid under the opposite UTF-32 order, so an opposite-order test passes them
+through. What the bytes fail to establish is the codec, not merely its byte order.
+
+No scalar classification changed. Rejecting unassigned or private-use scalars would have
+been the smaller-looking fix and would have broken icon fonts, which put private-use
+characters in ordinary text files. `TextValidation.cs` and `UnicodeDetector.cs` are
+untouched.
+
+#### Known limits specific to this release
+
+- **The audit cannot reach the changed path**, as described above.
+- **Code signing did not run.** The signing secrets are still not configured, so the
+  archives are unsigned and the GUI suite drove an unsigned executable. Fourth release
+  running.
+- **The GUI evidence carries no managed-assembly hash**, as described above.
+- **The corpus copy is one file short** of the published UnicodeTestSuite v3.0.
+- **No accessibility spot check** is recorded for this release.
+- **The v3.12.0 gap is not closed by this release.** That build changed `ConversionPolicy`
+  and shipped without a corpus run; nothing here re-audits it. Its record stands as
+  written.
+
 ## Known limits
 
 - No detector can recover an author's historical legacy encoding when the same bytes admit multiple plausible readings. EC refuses automatic legacy conversion instead of guessing.
