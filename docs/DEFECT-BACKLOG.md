@@ -164,20 +164,24 @@ pins the intended `src/*.cs` directory behavior.
 
 ### EC-15
 
-**Fixed as an artifact-clarity simplification, not a conversion-safety defect.**
-The five flags are gone. Plans and journals now carry `SemanticsDescription` -
-the sentence `ConversionSemantics.Describes` already held - beside the version
-number, so a reader gets what the version means instead of five constants.
-`SemanticsVersion` remains the only enforced compatibility value, and a test
-proves the description is never consulted: altering it in a plan file changes
-nothing about whether that plan loads.
+**Before:** plans and journals carried five safety flags that were always `true`.
+EC never read them when applying a plan, so they proved nothing about whether any
+individual check had run - but a reader could easily take a serialized `true` as
+proof that one had.
 
-Was: `StrictDecoding`, `StrictEncoding`, `OutputVerification`, `AtomicInstall`
-and `LegacyRequiresExplicitSource` were serialized into every plan and journal,
-hardcoded `true`, and read by nothing. They could not disagree with the version,
-so they were a second encoding of it that a reader could mistake for evidence a
-particular check had run. EC always executed its strict behaviour; only the
-artifact implied otherwise.
+**Now:** the files carry one safety-rules version and a sentence describing it.
+EC checks the version; the sentence exists only to tell a reader what the version
+means.
+
+This was a clarity fix, not a conversion-safety fix. EC always executed its strict
+behaviour; only the artifact implied the flags were the reason.
+
+Evidence: `StrictDecoding`, `StrictEncoding`, `OutputVerification`,
+`AtomicInstall` and `LegacyRequiresExplicitSource` were replaced by
+`SemanticsDescription`, the sentence `ConversionSemantics.Describes` already
+held. `SemanticsVersion` remains the only enforced compatibility value, and a
+test confirms the description is never consulted: altering it inside a plan file
+changes nothing about whether that plan loads.
 
 The artifacts changed shape, so their versions say so: plan schema 5 to 6,
 journal schema 4 to 5. That rejects plans written by v3.13.0 as well as older
@@ -203,16 +207,18 @@ the parity check requires it to stay that way, so all three must change together
 
 ### EC-18
 
-**Fixed.** The classification is cached as a nullable value, so null means not
-yet classified and `None` means classified with no doubt found. Both are stored,
-and the file is examined once.
+**Before:** EC remembered only when it *had* found a BOM-less UTF-16 ambiguity.
+When it found none, that answer was forgotten, and the full check could run again
+on the next pass.
 
-Was: only a positive result was kept, so an already-cleared file ran the full
-opposite-order check again on every pass. Measurement found no meaningful cost,
-because a provable file fails that decode in its first buffer; the defect was
-redundant work and a state that could not distinguish "no" from "not asked".
+**Now:** both answers are remembered, so each file is examined once. The stored
+value is nullable: null means not yet classified, and `None` means classified
+with no doubt found.
 
-No observable behaviour changes, so this carries no test of its own.
+Nothing a user sees changes, which is why this carries no test of its own. It was
+not a speed problem either: measurement found no meaningful cost, because a
+provable file fails the opposite-order decode inside its first buffer. The defect
+was redundant work and a state that could not tell "no" from "not asked".
 
 ### EC-20
 
@@ -235,14 +241,18 @@ which includes ordinary log files.
 
 ### EC-23
 
-**Fixed.** The null-forgiving dereference is now an explicit throw that names the
-invariant it rests on: `FindStaleFiles` rejects a plan whose paths resolve
-outside its directory, and reaching the dereference means that check did not
-run.
+**Before:** applying a plan assumed an earlier check had already produced a valid
+file path. The assumption held, but nothing said so - and had later code bypassed
+that check, the failure would have surfaced as an unexplained null reference.
 
-Under the present flow nothing changes, which is why there is nothing new to
-assert and no test accompanies it. EC-06 is what happened when an invariant of
-this shape was left implicit.
+**Now:** EC stops with an explicit error naming the check that must have run.
+
+Under the present flow nothing changes, which is why nothing new is asserted and
+no test accompanies it. EC-06 is what happened the last time an invariant of this
+shape was left implicit.
+
+Evidence: `FindStaleFiles` rejects a plan whose paths resolve outside its
+directory; reaching the dereference means that check did not run.
 
 ### CX-06
 
@@ -655,12 +665,17 @@ consumer to re-derive information the producer already had.
 
 ### BL-13
 
-**The policy owns refusal reason codes.** `ApplyConversion` formerly repeated
-the condition already reduced to `SourceInterpretation`. The copies were
-textually identical, but nothing tied them together; a future refusal could
-fall through the caller's bolt-on guard to `LegacySourceRequired`.
-`ConversionPolicy.ReasonCodeFor` now owns the mapping. Tests cover all 256
-reachable input combinations and require every refusal to carry a reason.
+**Before:** EC decided whether to refuse in one place and worked out the reason to
+report in another. The two were textually identical but nothing held them
+together, so they could drift - and a future refusal could fall through the
+caller's separate follow-up check and be reported as `LegacySourceRequired`.
+
+**Now:** `ConversionPolicy.ReasonCodeFor` produces both the decision and its
+reason.
+
+Evidence: `ApplyConversion` formerly repeated the condition already reduced to
+`SourceInterpretation`. Tests now cover all 256 reachable input combinations and
+require every refusal to carry a reason.
 
 ### BL-14
 
@@ -733,31 +748,46 @@ write.
 
 ### BL-23
 
-**Undefined plan enums are rejected before a source is touched.**
-`System.Text.Json` accepts any number for an enum. An action value of 99 formerly
-fell through the result mapper as `Converted`: apply exited 0, reported one
-conversion, and journaled action 99 even though the source hash was unchanged.
-Plan loading now validates both `Action` and `SourceInterpretation`, while the
-result mapper exhaustively names known actions and throws for anything else.
+**Before:** a damaged or hand-edited plan could carry an action value no build
+ever wrote, and EC reported it as a conversion. An action of 99 exited 0, said
+"1 converted", and wrote a journal recording action 99 - while the source hash
+was unchanged. The journal asserted work that never happened.
+
+**Now:** EC rejects an unknown action or source interpretation before touching any
+source file.
+
+Evidence: `System.Text.Json` accepts any number for an enum, and the result
+mapper's fallback arm was `Converted`. Plan loading now validates both `Action`
+and `SourceInterpretation`, and the mapper names every known action and throws
+for anything else.
 
 ### BL-24
 
-**All durable EC artifacts use replacement writes.** Converted files and
-recovery sidecars already used temporary files and replacement; plans, journals,
-reports, and settings truncated their live destinations. A failed plan write
-could destroy the reviewed plan immediately before use. `AtomicArtifactFile`
-now handles all four. The sidecar retains its stronger dedicated writer and
-read-back verification. This same refactor addressed EC-16.
+**Before:** plans, journals, reports and settings were written by erasing the
+existing file first. If the write then failed, the previous record was gone - and
+for a plan, that meant destroying the reviewed plan immediately before it was to
+be applied.
+
+**Now:** EC writes a complete temporary file beside the destination and replaces
+the old one only after that write succeeds. Converted files and recovery sidecars
+already worked this way; all four saved-file types now use the same mechanism,
+`AtomicArtifactFile`.
+
+The recovery sidecar keeps its own writer, which also reads back and verifies what
+it wrote - more than the shared one does, and not worth reducing. The same change
+closed EC-16.
 
 ### BL-25
 
-**EC and LineEndingNormalizer make the same safety argument with different
-transient machinery.** Both use SHA-256 for source bytes and backup evidence.
-EC also uses SHA-256 for content digests and persists them as
-`SourceTextSha256` and `OutputTextSha256`; LEN uses XxHash3 for a private
-normalized-content digest that is discarded. EC compares hexadecimal digest
-strings with `string.Equals(..., OrdinalIgnoreCase)`; LEN compares digest bytes
-with `CryptographicOperations.FixedTimeEquals`.
+**EC and LineEndingNormalizer both verify that conversion preserved the content,
+using different internal methods.** No defect was found; this records a deliberate
+difference so a future maintainer does not mistake it for one.
+
+Both use SHA-256 for source bytes and backup evidence. EC also uses SHA-256 for
+content digests and saves them as `SourceTextSha256` and `OutputTextSha256`; LEN
+uses XxHash3 for a private normalized-content digest that it discards. EC compares
+hexadecimal digest strings with `string.Equals(..., OrdinalIgnoreCase)`; LEN
+compares digest bytes with `CryptographicOperations.FixedTimeEquals`.
 
 | Evidence | EC | LEN |
 |---|---|---|
@@ -780,6 +810,10 @@ inside the visible part of the same dropdown. Both combo-scoped and process-wide
 exact-name searches now follow the same documented rule, and fallback input
 uses the supplied window. Phase J drives the source-choice refusal against the
 built application.
+
+This fix kept the search-for-an-item design and made it consistent.
+[EC-24](#ec-24) later found that searching for items at all was unreliable, and
+replaced the approach rather than adjusting it again.
 
 ### EC-24
 
