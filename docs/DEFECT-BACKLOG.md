@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=61 fixed=46 open=11 not-reproduced=1 withdrawn=1 not-a-defect=1 decision=1 -->
+<!-- backlog-counts total=62 fixed=46 open=12 not-reproduced=1 withdrawn=1 not-a-defect=1 decision=1 -->
 
-**Derived count: 61 findings — 46 fixed, 11 open, 1 not reproduced,
+**Derived count: 62 findings — 46 fixed, 12 open, 1 not reproduced,
 1 withdrawn, 1 not a defect, and 1 design decision.** Recompute and validate
 these figures with:
 
@@ -61,6 +61,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | BL-19 | NUL-heavy ASCII can be reported as BOM-less UTF-16 | Open | Medium | Rare | [BL-19](#bl-19) |
 | BL-20 | Hard-linked paths are processed independently | Open | Low | Rare | [BL-20](#bl-20) |
 | BL-21 | Detection can accept a truncated trailing sequence that conversion rejects | Open | Low | Rare | [BL-21](#bl-21) |
+| BL-27 | Release evidence records no managed-assembly hash | Open | Low | Common | [BL-27](#bl-27) |
 
 ### Closed and other findings
 
@@ -593,6 +594,31 @@ proposal was rejected after it broke four existing tests and would have blocked
 an ordinary “wrong target, convert again” workflow until the user manually
 deleted recovery files. CX-02 instead ensures stale metadata cannot describe a
 new backup.
+
+### BL-27
+
+**The GUI smoke report names a managed-assembly hash it does not contain.**
+`RELEASE-CHECKLIST.md` states that the report carries "the executable and
+managed-assembly hashes", and several records in `SAFETY-AUDIT.md` repeat it.
+Checked against the v3.13.0 release evidence: `gui-smoke-report.json` has no
+`EcManagedAssemblySha256` key at all, and `gui-smoke-report.md` renders an empty
+pair of backticks — while both still print the `EncodingChecker.dll` path as
+though the value followed.
+
+The cause is that a single-file publish leaves no loose DLL at the path the
+suite looks for. That has held since single-file publishing began, so **v3.12.0
+and v3.12.1 carry the same empty field**, and the claim in their records is
+wrong the same way.
+
+Impact is low: the executable hash is present and real, and for v3.13.0 the
+published executable was reproduced byte-for-byte from the tagged commit, which
+is a stronger provenance link than the missing field would have provided. Reach
+is common, because it affects every release that ships a single-file build.
+
+The fix is a choice, not an omission to close blindly: either hash the publish
+intermediate `win-x64/EncodingChecker.dll`, or drop the field and the sentences
+that promise it. Recording the executable hash alone would be honest; promising
+two and delivering one is not.
 
 ### BL-22
 
