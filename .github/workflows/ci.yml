@@ -22,3 +22,57 @@ jobs:
 
       - name: Test
         run: dotnet test sources\EncodingChecker.sln --configuration Release --no-build
+
+  # The unit suite covers everything reachable without a window. This covers the
+  # GUI's sequence, which has already shipped a defect while every component in it
+  # was correct and tested. The release job runs the same suite against the signed,
+  # published executable; running it here too means a regression is found on the
+  # pull request that introduced it rather than at tag time, with a release waiting.
+  #
+  # It is a separate job so the check has its own name: a red "gui-smoke" says which
+  # suite failed without opening the log, which matters for a gate whose failures
+  # have been ambiguous before.
+  gui-smoke:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build
+        run: dotnet build sources\EncodingChecker.sln --configuration Release
+
+      # Drives the ordinary Release build. The published single-file executable is
+      # what the release job drives, and only that job can produce one.
+      #
+      # Two prerequisites are refused with exit 2 rather than reported as a pass:
+      # an interactive Windows desktop, which a hosted windows-latest runner has,
+      # and a build carrying the review dialog's automation ids.
+      - name: Drive the GUI smoke suite
+        shell: pwsh
+        run: |
+          $suite = "sources\EncodingChecker.GuiSmoke\bin\Release\net10.0-windows\EncodingChecker.GuiSmoke.exe"
+
+          & $suite --output "$env:RUNNER_TEMP\gui-smoke"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "GUI smoke suite failed with exit code $LASTEXITCODE."
+          }
+
+      # Kept on success as well as failure: the report carries each phase's before
+      # and after file hashes, and a run that passed is the sample that shows
+      # whether an intermittent phase has stopped being intermittent.
+      #
+      # Missing evidence only warns here. When the suite cannot start it has already
+      # failed the step above, and erroring again would bury that message.
+      - name: Keep the GUI smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-smoke-evidence
+          path: ${{ runner.temp }}/gui-smoke
+          if-no-files-found: warn
+          retention-days: 14
