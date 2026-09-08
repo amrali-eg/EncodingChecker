@@ -11,7 +11,7 @@ For each file EC is allowed to convert:
 1. Scans the source and decides whether automatic conversion is permitted.
 2. For a reviewed plan, verifies that every approved source hash still matches.
 3. Rejects malformed input, unsafe source choices, repeated leading BOMs, and
-   ambiguous BOM-less UTF-16 before writing output.
+   ambiguous BOM-less UTF-16 and all BOM-less UTF-32 before writing output.
 4. If backups are enabled, creates `<file>.bak` before conversion begins.
 5. Strictly decodes the source and strictly encodes the target into a sibling
    temporary file.
@@ -50,6 +50,20 @@ code `AmbiguousBomlessUtf16` and leaves the source unchanged.
 This is intentionally conservative: most ordinary BOM-less UTF-16 files are
 expected to be refused. It costs a second full read, which is deliberate because
 rewriting a file must not rest on a sample-based byte-order guess.
+
+### BOM-less UTF-32
+
+EC never converts it automatically. It reports `Refused` with reason code
+`UnprovableBomlessUtf32` and leaves the source unchanged.
+
+The doubt is larger than a byte order. UTF-16 text with one character per line
+puts a C0 control in every second code unit, so each four-byte group is an
+in-range unassigned scalar and the whole file decodes as valid UTF-32 — while
+the *opposite* UTF-32 order rejects it, so the test that protects UTF-16 would
+pass it through. Separately, genuine UTF-32 can be valid under both orders.
+
+The cost is that ordinary BOM-less UTF-32 is refused too. Nothing in the bytes
+separates it from the UTF-16 file above. Add a BOM, or name the source.
 
 Choose `-From utf-16le` or `-From utf-16be` if you know the source order. That
 chooses the source interpretation only; it does not bypass any other safeguard.

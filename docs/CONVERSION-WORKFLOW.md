@@ -37,6 +37,14 @@ If both orders work, the file is reported as `Refused` with reason code
 `AmbiguousBomlessUtf16`; no preview says it would convert, and no backup, sidecar, or output
 file is created. Choose the source encoding explicitly if you know it.
 
+### BOM-less UTF-32
+
+Refused outright, with reason code `UnprovableBomlessUtf32`. Without a marker EC cannot
+establish that the file is UTF-32 at all: UTF-16 text with one character per line decodes
+as valid UTF-32 and would be rewritten as different text. Ordinary BOM-less UTF-32 is
+refused for the same reason, because nothing in the bytes tells the two apart. Add a BOM,
+or name the source.
+
 ## What EC does
 
 ```mermaid

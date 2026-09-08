@@ -601,6 +601,29 @@ public sealed class ConversionPlanTests : IDisposable
     }
 
     [Fact]
+    public void APlanFromAnEarlierSemanticsVersionIsRefused()
+    {
+        // The direction that matters when semantics advance rather than a plan being
+        // tampered with: a plan approved under the previous version. Refusing BOM-less
+        // UTF-32 took semantics from 6 to 7, so a plan written by the release before it
+        // can list a file this build will not convert. Accepting it would apply approval
+        // given for one behaviour to another.
+        string path = Write("jp.txt", "こんにちは世界。テキスト", "shift_jis");
+        byte[] original = File.ReadAllBytes(path);
+
+        Assert.Equal(0, Plan());
+        Rewrite(fields =>
+            fields["SemanticsVersion"] =
+                JsonSerializer.SerializeToElement(ConversionSemantics.Current - 1));
+
+        Assert.Equal(1, Run("-Apply", PlanPath));
+        Assert.Equal(original, File.ReadAllBytes(path));
+
+        Assert.Null(ConversionPlan.Load(PlanPath, out string? error));
+        Assert.Contains("different conversion behaviour", error);
+    }
+
+    [Fact]
     public void APlanAppliedFromACopyStillConvertsTheTreeItWasApprovedFor()
     {
         // A plan carrying absolute paths that is copied alongside its tree still names

@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=61 fixed=44 open=13 not-reproduced=1 withdrawn=1 not-a-defect=1 decision=1 -->
+<!-- backlog-counts total=61 fixed=46 open=11 not-reproduced=1 withdrawn=1 not-a-defect=1 decision=1 -->
 
-**Derived count: 61 findings — 44 fixed, 13 open, 1 not reproduced,
+**Derived count: 61 findings — 46 fixed, 11 open, 1 not reproduced,
 1 withdrawn, 1 not a defect, and 1 design decision.** Recompute and validate
 these figures with:
 
@@ -57,9 +57,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | EC-20 | Detection permits concurrent writes and deletes | Open | Low | Rare | [EC-20](#ec-20) |
 | EC-23 | Plan application relies on a null-forgiving path dereference | Open | Low | Rare | [EC-23](#ec-23) |
 | CX-06 | The entropy gate runs before BOM detection | Open | Medium | Occasional | [CX-06](#cx-06) |
-| BL-01 | Ambiguous BOM-less UTF-32 can be converted under the wrong byte order | Open | Critical | Theoretical | [BL-01](#bl-01) |
 | BL-05 | Force-closing during a run can race UI callbacks | Open | Low | Rare | [BL-05](#bl-05) |
-| BL-18 | BOM-less UTF-16 can be detected and converted as UTF-32 | Open | Critical | Rare | [BL-18](#bl-18) |
 | BL-19 | NUL-heavy ASCII can be reported as BOM-less UTF-16 | Open | Medium | Rare | [BL-19](#bl-19) |
 | BL-20 | Hard-linked paths are processed independently | Open | Low | Rare | [BL-20](#bl-20) |
 | BL-21 | Detection can accept a truncated trailing sequence that conversion rejects | Open | Low | Rare | [BL-21](#bl-21) |
@@ -72,6 +70,8 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | EC-02 | Read-only validation disagreed with the BOM-less Unicode safety policy | Fixed | — | — | [EC-02](#ec-02) |
 | EC-03 | The GUI omitted the source-choice advisory | Fixed | — | — | [EC-03](#ec-03) |
 | EC-04 | `-Plan` could exit successfully after scan failures | Fixed | — | — | [EC-04](#ec-04) |
+| BL-01 | Ambiguous BOM-less UTF-32 can be converted under the wrong byte order | Fixed | — | — | [BL-01](#bl-01) |
+| BL-18 | BOM-less UTF-16 can be detected and converted as UTF-32 | Fixed | — | — | [BL-18](#bl-18) |
 | EC-05 | An unreadable non-conversion plan entry made a plan unusable | Fixed | — | — | [EC-05](#ec-05) |
 | EC-06 | A drive-root base path made every plan unusable | Fixed | — | — | [EC-06](#ec-06) |
 | EC-07 | A refusal advised the same ambiguous encoding it rejected | Fixed | — | — | [EC-07](#ec-07) |
@@ -199,12 +199,20 @@ what EC reports; it is not evidence that conversion writes the file.
 
 ### BL-01
 
-**BOM-less UTF-32 byte order can be guessed and then treated as proven.** The
-ambiguity guard covers code pages 1200 and 1201, not 12000 and 12001. A current
-end-to-end fixture containing UTF-32BE `00 00 01 00` units was detected as
-little-endian UTF-32 and converted from U+0100 to U+10000 with exit 0. Reaching
-the case requires every scalar to have the special byte shape, so ordinary text
-is unlikely to do it; its consequence is nevertheless silent text change.
+**Fixed.** BOM-less UTF-32 is no longer converted automatically in any mode; it
+is refused with reason code `UnprovableBomlessUtf32`, and `-DetectOnly` and
+`-Validate` report the same code. `ConversionSemantics` moved from 6 to 7,
+because a plan approved under the previous behaviour may list files this build
+refuses.
+
+Was: the ambiguity guard covered code pages 1200 and 1201, not 12000 and 12001.
+A fixture of UTF-32BE `00 00 01 00` units was detected as little-endian and
+converted from U+0100 to U+10000 with exit 0.
+
+Widening the opposite-order test would not have been enough on its own — see
+[BL-18](#bl-18), whose bytes are *invalid* under the opposite UTF-32 order. Both
+are closed by refusing BOM-less UTF-32 outright, at the cost of refusing
+ordinary BOM-less UTF-32 as well; nothing in the bytes separates the two.
 
 ### BL-05
 
@@ -218,15 +226,25 @@ content. The timing-dependent path was source-confirmed but not reproduced.
 
 ### BL-18
 
-**A degenerate BOM-less UTF-16 stream can look like UTF-32.** A current fixture
-containing UTF-16LE `00 01 0A 00` units was detected as BOM-less UTF-32 and
-rewritten to different Unicode with exit 0. Output verification cannot expose a
-wrong source interpretation because both sides use that same interpretation.
+**Fixed** by the same rule as [BL-01](#bl-01): BOM-less UTF-32 is refused
+rather than converted, so a UTF-16 file that happens to decode as UTF-32 is left
+alone instead of rewritten as different text.
 
-The original measurement used nineteen realistic shapes: 41 of 44 detections
-were right, and all three misses had the same constructed shape—one character
-per line, with every other UTF-16 code unit a C0 control. The reach is low; the
-impact when reached is silent text change.
+Was: a BOM-less UTF-16 file with one character per LF-terminated line puts a C0
+control in every second code unit, so each four-byte group is an in-range
+unassigned scalar and the file decodes as valid UTF-32. Converting it wrote
+different text, and output verification could not notice, because both sides of
+its comparison used the same wrong codec.
+
+This is the case an opposite-order test cannot catch: those bytes are *invalid*
+as UTF-32BE, so the check that protects BOM-less UTF-16 returns false. What the
+bytes fail to establish is the codec, not merely its byte order — which is why
+the fix refuses on the absence of a BOM rather than on ambiguity.
+
+No scalar classification changed. Private-use characters are what icon fonts put
+in ordinary text files, so rejecting unassigned or private-use scalars would have
+broken real sources; a test converts U+E000, U+F8FF, U+E0B0, U+F00C and U+F0000
+and checks all five survive.
 
 ### BL-19
 

@@ -530,8 +530,10 @@ internal static class ScanEngine
                 else if (entry.HasBomlessUnicodeDoubt)
                 {
                     // Detection found an estimate, not a reading. Nothing failed, so
-                    // the result stays Unchanged; the row must still say which it is.
-                    entry.ReasonCode = ConversionReasonCodes.AmbiguousBomlessUtf16;
+                    // the result stays Unchanged; the row must still say which it is,
+                    // and say it with the same code conversion would use.
+                    entry.ReasonCode =
+                        BomlessUnicodeSafety.ReasonCodeFor(entry.BomlessUnicodeDoubt);
                     entry.Diagnostic =
                         BomlessUnicodeSafety.DescribeUnprovableByteOrder(detected!);
                 }
@@ -586,7 +588,8 @@ internal static class ScanEngine
                     // file would assert an identity EC cannot establish, and conversion
                     // refuses that same file later.
                     entry.Result = ConversionRowResult.Invalid;
-                    entry.ReasonCode = ConversionReasonCodes.AmbiguousBomlessUtf16;
+                    entry.ReasonCode =
+                        BomlessUnicodeSafety.ReasonCodeFor(entry.BomlessUnicodeDoubt);
                     entry.Diagnostic =
                         BomlessUnicodeSafety.DescribeUnprovableByteOrder(detected!)
                         + $" The label '{label}' is in the allowed list, but EC cannot"

@@ -26,11 +26,15 @@ that a destructive conversion should proceed.
 - BOM-less UTF-16 is converted automatically only when the complete file is
   invalid under the opposite byte order. Otherwise EC reports
   `AmbiguousBomlessUtf16` and leaves it unchanged.
+- BOM-less UTF-32 is never converted automatically. EC reports
+  `UnprovableBomlessUtf32` and leaves it unchanged. An opposite-order test
+  cannot rescue it: UTF-16 text with one character per line decodes as valid
+  UTF-32, so what the bytes fail to establish is the codec, not just its order.
 - Detected legacy text requires an explicit source choice before EC rewrites it.
 - Unknown input is skipped and left unchanged.
 
 Use `-From <encoding>` or the GUI source selector when you know a legacy or
-BOM-less UTF-16 source. This selects how EC reads the bytes; it does not turn
+BOM-less Unicode source. This selects how EC reads the bytes; it does not turn
 off strict decoding, output verification, backup verification, or safe install.
 
 ## Supported text
