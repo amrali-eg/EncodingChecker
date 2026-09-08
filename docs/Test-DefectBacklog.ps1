@@ -1,4 +1,17 @@
-﻿[CmdletBinding()]
+﻿# Run as:
+#   powershell -NoProfile -ExecutionPolicy Bypass -File docs/Test-DefectBacklog.ps1
+#
+# `powershell` rather than `pwsh`: Windows PowerShell is on every Windows machine
+# and pwsh may not be installed. This file is ASCII-only and carries a BOM, so
+# both shells read it identically whatever the system code page is. It shipped
+# once as BOM-less UTF-8 containing em-dashes, which Windows PowerShell read in
+# the system code page, and it would not parse.
+#
+# `-ExecutionPolicy Bypass`: this repository ships no signed scripts, and a stock
+# machine refuses to run unsigned ones. It applies to that one process and
+# changes nothing on the machine.
+
+[CmdletBinding()]
 param(
     [string] $Path
 )
@@ -81,7 +94,7 @@ $rows = foreach ($line in [regex]::Split($ledger, '\r?\n')) {
         Finding = $cells[1]
         Status  = $cells[2]
         Impact  = $cells[3]
-        Reach   = $cells[4]
+        Likelihood = $cells[4]
         Details = $cells[5]
     }
 }
@@ -96,7 +109,7 @@ $knownStatuses = @(
     'Open',
     'Not reproduced',
     'Withdrawn',
-    'Not a defect',
+    'Intentional behavior',
     'Decision'
 )
 
@@ -110,8 +123,9 @@ foreach ($row in $rows) {
     }
 
     if ($row.Status -eq 'Open' -and
-        ($row.Impact -in @('', '-', $EmDash) -or $row.Reach -in @('', '-', $EmDash))) {
-        $errors.Add("$($row.Id) is open but lacks impact or reach.")
+        ($row.Impact -in @('', '-', $EmDash) -or
+         $row.Likelihood -in @('', '-', $EmDash))) {
+        $errors.Add("$($row.Id) is open but lacks impact or likelihood.")
     }
 
     $expectedLink = "[$($row.Id)](#$($row.Id.ToLowerInvariant()))"
@@ -133,7 +147,7 @@ $actual = @{
     open             = @($rows | Where-Object Status -eq 'Open').Count
     'not-reproduced' = @($rows | Where-Object Status -eq 'Not reproduced').Count
     withdrawn        = @($rows | Where-Object Status -eq 'Withdrawn').Count
-    'not-a-defect'   = @($rows | Where-Object Status -eq 'Not a defect').Count
+    'intentional-behavior' = @($rows | Where-Object Status -eq 'Intentional behavior').Count
     decision         = @($rows | Where-Object Status -eq 'Decision').Count
 }
 
@@ -157,7 +171,8 @@ foreach ($key in $actual.Keys) {
 
 $summary = "**Derived count: $($actual.total) findings $EmDash $($actual.fixed) fixed, " +
     "$($actual.open) open, $($actual['not-reproduced']) not reproduced, " +
-    "$($actual.withdrawn) withdrawn, $($actual['not-a-defect']) not a defect, " +
+    "$($actual.withdrawn) withdrawn, " +
+    "$($actual['intentional-behavior']) intentional behavior, " +
     "and $($actual.decision) design decision.**"
 $normalizedContent = [regex]::Replace($content, '\s+', ' ')
 

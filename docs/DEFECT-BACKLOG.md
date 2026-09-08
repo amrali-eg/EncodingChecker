@@ -4,39 +4,39 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=63 fixed=52 open=7 not-reproduced=1 withdrawn=1 not-a-defect=1 decision=1 -->
+<!-- backlog-counts total=63 fixed=52 open=7 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 63 findings — 52 fixed, 7 open, 1 not reproduced,
-1 withdrawn, 1 not a defect, and 1 design decision.** Recompute and validate
-these figures with:
+**Derived count: 63 findings — 52 fixed, 7 open, 1 not reproduced, 1 withdrawn,
+1 intentional behavior, and 1 design decision.** Recompute and check these
+figures with:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File docs/Test-DefectBacklog.ps1
 ```
 
-`powershell` rather than `pwsh` because it is present on every Windows machine; the script
-is ASCII-only and needs no BOM, so either shell runs it. `-ExecutionPolicy Bypass` because
-this repository ships no signed scripts and a stock machine refuses to run them at all. It
-applies to that one process and changes nothing on the machine.
+The checker reads the tables below, verifies that IDs are unique and statuses
+known, requires both impact and likelihood for every open finding, and confirms
+each row links to its own detail heading. Why that exact command, rather than any
+other, is explained at the top of the script.
 
-The checker reads the canonical tables below, verifies unique IDs and known
-statuses, and requires both impact and reach for every open finding.
+## What the statuses mean
 
-## Status and scoring rules
+- **Fixed** - the problem has been corrected, and a current source location,
+  regression test or current-build probe shows the correction in place.
+- **Open** - the problem is still possible: the behaviour remains reachable, or
+  a source path to it remains.
+- **Not reproduced** - a current attempt did not trigger it. That is weaker than
+  proof that it cannot happen.
+- **Withdrawn** - later evidence showed the original report was wrong.
+- **Intentional behavior** - the implementation matches a deliberate contract.
+- **Decision** - two defensible approaches exist and a maintainer may reconsider
+  the choice. It is not a product correction.
 
-- **Fixed** means the responsible code is gone and a current source location,
-  regression test, or current-build probe demonstrates the replacement.
-- **Open** means the behavior remains reachable or a source path to it remains.
-- **Not reproduced** means a current attempt did not trigger the proposed
-  behavior; that is weaker than proof that it cannot occur.
-- **Withdrawn** means the proposed defect was disproved.
-- **Not a defect** means the implementation matches an intentional contract.
-- **Decision** records a deliberate design difference that needs a choice, not
-  a product correction.
-
-Impact asks what a user loses if a finding occurs. Reach asks how readily the
-preconditions occur. They are kept separate because a severe but constructed
-case and a harmless common case require different decisions.
+Two scores are kept apart. **Impact** asks what a user loses if the finding
+occurs. **Likelihood** asks how readily its preconditions arise - not how often
+it is seen in the wild, which nobody here has measured. A severe but constructed
+case and a harmless everyday one need different decisions, and one number cannot
+carry both.
 
 ## Canonical ledger
 
@@ -48,7 +48,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 
 ### Open findings
 
-| ID | Finding | Status | Impact | Reach | Details |
+| ID | Finding | Status | Impact | Likelihood | Details |
 |---|---|---|---|---|---|
 | EC-17 | A text-validation comment contradicts the calculation | Open | Low | Common | [EC-17](#ec-17) |
 | EC-20 | Detection permits concurrent writes and deletes | Open | Low | Rare | [EC-20](#ec-20) |
@@ -58,70 +58,70 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | BL-20 | Hard-linked paths are processed independently | Open | Low | Rare | [BL-20](#bl-20) |
 | BL-21 | Detection can accept a truncated trailing sequence that conversion rejects | Open | Low | Rare | [BL-21](#bl-21) |
 
-### Closed and other findings
+### Fixed and resolved findings
 
-| ID | Finding | Status | Impact | Reach | Details |
+| ID | Finding | Status | Impact | Likelihood | Details |
 |---|---|---|---|---|---|
-| EC-01 | Applying a plan could convert a file the plan refused | Fixed | — | — | [EC-01](#ec-01) |
-| EC-02 | Read-only validation disagreed with the BOM-less Unicode safety policy | Fixed | — | — | [EC-02](#ec-02) |
+| EC-01 | A saved plan could convert a file it had marked Refused | Fixed | — | — | [EC-01](#ec-01) |
+| EC-02 | Validation could approve a file that conversion would refuse | Fixed | — | — | [EC-02](#ec-02) |
 | EC-03 | The GUI omitted the source-choice advisory | Fixed | — | — | [EC-03](#ec-03) |
 | EC-04 | `-Plan` could exit successfully after scan failures | Fixed | — | — | [EC-04](#ec-04) |
-| BL-01 | Ambiguous BOM-less UTF-32 can be converted under the wrong byte order | Fixed | — | — | [BL-01](#bl-01) |
+| BL-01 | Ambiguous BOM-less UTF-32 could be converted under the wrong byte order | Fixed | — | — | [BL-01](#bl-01) |
 | EC-08 | A constructed include pattern could hang a scan indefinitely | Fixed | — | — | [EC-08](#ec-08) |
 | EC-24 | The GUI smoke gate could select in the wrong combo | Fixed | — | — | [EC-24](#ec-24) |
-| EC-18 | A negative BOM-less UTF-16 ambiguity result is recomputed | Fixed | — | — | [EC-18](#ec-18) |
-| EC-23 | Plan application relies on a null-forgiving path dereference | Fixed | — | — | [EC-23](#ec-23) |
-| BL-27 | Release evidence records no managed-assembly hash | Fixed | — | — | [BL-27](#bl-27) |
-| EC-15 | Serialized conversion guarantees are not enforced individually | Fixed | — | — | [EC-15](#ec-15) |
-| BL-18 | BOM-less UTF-16 can be detected and converted as UTF-32 | Fixed | — | — | [BL-18](#bl-18) |
-| EC-05 | An unreadable non-conversion plan entry made a plan unusable | Fixed | — | — | [EC-05](#ec-05) |
-| EC-06 | A drive-root base path made every plan unusable | Fixed | — | — | [EC-06](#ec-06) |
+| EC-18 | EC repeated a BOM-less UTF-16 safety check unnecessarily | Fixed | — | — | [EC-18](#ec-18) |
+| EC-23 | Plan application assumed a required path existed instead of checking it | Fixed | — | — | [EC-23](#ec-23) |
+| BL-27 | GUI smoke reports could show an empty or misleading build hash | Fixed | — | — | [BL-27](#bl-27) |
+| EC-15 | Plans and journals showed fixed safety flags as if they recorded checks | Fixed | — | — | [EC-15](#ec-15) |
+| BL-18 | BOM-less UTF-16 could be detected and converted as UTF-32 | Fixed | — | — | [BL-18](#bl-18) |
+| EC-05 | An unreadable skipped or refused entry blocked the whole plan | Fixed | — | — | [EC-05](#ec-05) |
+| EC-06 | Plans rooted at a drive letter could not be applied | Fixed | — | — | [EC-06](#ec-06) |
 | EC-07 | A refusal advised the same ambiguous encoding it rejected | Fixed | — | — | [EC-07](#ec-07) |
 | EC-09 | Excluded EC artifacts were uncounted | Fixed | — | — | [EC-09](#ec-09) |
 | EC-10 | A scan failure was journaled as a policy refusal | Fixed | — | — | [EC-10](#ec-10) |
 | EC-11 | Plan application leaked a Ctrl+C handler | Fixed | — | — | [EC-11](#ec-11) |
 | EC-12 | The GUI counted skipped files as unchanged | Fixed | — | — | [EC-12](#ec-12) |
 | EC-13 | A mixed-source plan could report one source encoding for the run | Fixed | — | — | [EC-13](#ec-13) |
-| EC-14 | The output-text hash copied the source-text hash | Fixed | — | — | [EC-14](#ec-14) |
-| EC-16 | Settings were written by truncating the live file | Fixed | — | — | [EC-16](#ec-16) |
+| EC-14 | The journal recorded the source text hash as the output text hash | Fixed | — | — | [EC-14](#ec-14) |
+| EC-16 | An interrupted settings save could erase the previous settings | Fixed | — | — | [EC-16](#ec-16) |
 | EC-19 | Double-BOM handling depended on the encoding instance | Not reproduced | — | — | [EC-19](#ec-19) |
 | EC-21 | Save dialogs were not disposed | Fixed | — | — | [EC-21](#ec-21) |
-| EC-22 | Plan and metadata readers used different JSON options from writers | Fixed | — | — | [EC-22](#ec-22) |
+| EC-22 | EC read some JSON files differently from how it wrote them | Fixed | — | — | [EC-22](#ec-22) |
 | CX-01 | Empty option values were silently treated as absent | Fixed | — | — | [CX-01](#cx-01) |
 | CX-02 | A failed second conversion could destroy the first recovery record | Fixed | — | — | [CX-02](#cx-02) |
-| CX-03 | Applying a plan followed a root replaced by a junction | Fixed | — | — | [CX-03](#cx-03) |
-| CX-05 | The journal could not represent uncertainty after installation | Fixed | — | — | [CX-05](#cx-05) |
-| CX-07 | Old plans, journals, and reports should be excluded from scans | Not a defect | — | — | [CX-07](#cx-07) |
+| CX-03 | A saved plan could follow a folder path redirected after approval | Fixed | — | — | [CX-03](#cx-03) |
+| CX-05 | The journal could not describe an uncertain result after replacement | Fixed | — | — | [CX-05](#cx-05) |
+| CX-07 | Old plans, journals, and reports should be excluded from scans | Intentional behavior | — | — | [CX-07](#cx-07) |
 | CX-08 | Documentation and validation disagreed about `-DetectOnly` conflicts | Fixed | — | — | [CX-08](#cx-08) |
 | CX-09 | Cancelling after writes produced no journal | Fixed | — | — | [CX-09](#cx-09) |
 | CX-10 | Plan summaries said detection was bypassed when it ran | Fixed | — | — | [CX-10](#cx-10) |
 | CX-11 | GUI startup could fail before settings error handling began | Fixed | — | — | [CX-11](#cx-11) |
 | CX-12 | Saved window positions ignored the current monitor layout | Fixed | — | — | [CX-12](#cx-12) |
-| CX-13 | Detector parity was not a pull-request or release gate | Fixed | — | — | [CX-13](#cx-13) |
+| CX-13 | CI did not verify that EC, LEN and CorpusTesters shared the detector | Fixed | — | — | [CX-13](#cx-13) |
 | BL-02 | CSV cells need formula neutralization | Withdrawn | — | — | [BL-02](#bl-02) |
 | BL-03 | Conversion parallelism was capped at four | Fixed | — | — | [BL-03](#bl-03) |
-| BL-04 | A ticked source choice could be discarded without explanation | Fixed | — | — | [BL-04](#bl-04) |
-| BL-06 | Target identity was compared by label rather than codec | Fixed | — | — | [BL-06](#bl-06) |
+| BL-04 | The GUI could silently ignore a selected source encoding | Fixed | — | — | [BL-04](#bl-04) |
+| BL-06 | Encoding aliases could cause unnecessary rewrites | Fixed | — | — | [BL-06](#bl-06) |
 | BL-07 | A whole-file unchanged claim came from a 64 KiB sample | Fixed | — | — | [BL-07](#bl-07) |
 | BL-08 | Preview could approve a source that conversion could not decode | Fixed | — | — | [BL-08](#bl-08) |
 | BL-09 | One unexpected file exception could stop the whole run | Fixed | — | — | [BL-09](#bl-09) |
 | BL-10 | An unreadable folder was invisible to machine output | Fixed | — | — | [BL-10](#bl-10) |
 | BL-11 | Folders skipped by name were uncounted | Fixed | — | — | [BL-11](#bl-11) |
 | BL-12 | Some validation failures had no reason code | Fixed | — | — | [BL-12](#bl-12) |
-| BL-13 | Refusal reasons were re-derived after the policy decision | Fixed | — | — | [BL-13](#bl-13) |
+| BL-13 | Different code paths could give different reasons for one refusal | Fixed | — | — | [BL-13](#bl-13) |
 | BL-14 | Decode failures could report a negative chunk offset | Fixed | — | — | [BL-14](#bl-14) |
 | BL-15 | Console output ignored the console's encoding | Fixed | — | — | [BL-15](#bl-15) |
 | BL-16 | Help and CLI documentation stated an old parallelism default | Fixed | — | — | [BL-16](#bl-16) |
 | BL-17 | The lifetime of `<file>.bak` was undocumented | Fixed | — | — | [BL-17](#bl-17) |
-| BL-22 | An unwritable report or journal path was discovered after conversion | Fixed | — | — | [BL-22](#bl-22) |
-| BL-23 | An undefined plan action was reported as a conversion | Fixed | — | — | [BL-23](#bl-23) |
-| BL-24 | Plans, journals, reports, and settings used truncate-in-place writes | Fixed | — | — | [BL-24](#bl-24) |
-| BL-25 | EC and LEN use different transient content-hash machinery | Decision | — | — | [BL-25](#bl-25) |
-| BL-26 | The GUI smoke driver rejected an exact offscreen combo item | Fixed | — | — | [BL-26](#bl-26) |
+| BL-22 | An unwritable report or journal path was found only after files changed | Fixed | — | — | [BL-22](#bl-22) |
+| BL-23 | A damaged plan could report an unknown action as Converted | Fixed | — | — | [BL-23](#bl-23) |
+| BL-24 | An interrupted write could erase a plan, journal, report or settings file | Fixed | — | — | [BL-24](#bl-24) |
+| BL-25 | EC and LEN use different internal methods to verify converted text | Decision | — | — | [BL-25](#bl-25) |
+| BL-26 | The GUI smoke test could reject an encoding below the visible list | Fixed | — | — | [BL-26](#bl-26) |
 
 <!-- backlog-ledger:end -->
 
-## Open-finding evidence
+## Details for open findings
 
 ### EC-08
 
@@ -380,7 +380,7 @@ Evidence: detection reads a sample and does not treat an incomplete tail as an
 error. Conversion reaches the real end of the file and flushes the strict
 decoder, which does. The difference is deliberate on both sides.
 
-## Evidence for the original review findings
+## Details for findings from the original review
 
 ### EC-01
 
@@ -555,7 +555,7 @@ tests for removed, left-side, and secondary displays.
 workflow runs on pull requests, and the release workflow declares it as a job
 dependency.
 
-## Evidence for later findings
+## Details for findings found later
 
 ### BL-02
 
