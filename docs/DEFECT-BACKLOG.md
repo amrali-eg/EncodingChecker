@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=63 fixed=51 open=8 not-reproduced=1 withdrawn=1 not-a-defect=1 decision=1 -->
+<!-- backlog-counts total=63 fixed=52 open=7 not-reproduced=1 withdrawn=1 not-a-defect=1 decision=1 -->
 
-**Derived count: 63 findings — 51 fixed, 8 open, 1 not reproduced,
+**Derived count: 63 findings — 52 fixed, 7 open, 1 not reproduced,
 1 withdrawn, 1 not a defect, and 1 design decision.** Recompute and validate
 these figures with:
 
@@ -50,7 +50,6 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 
 | ID | Finding | Status | Impact | Reach | Details |
 |---|---|---|---|---|---|
-| EC-08 | An include pattern can hang a scan indefinitely | Open | Medium | Theoretical | [EC-08](#ec-08) |
 | EC-17 | A text-validation comment contradicts the calculation | Open | Low | Common | [EC-17](#ec-17) |
 | EC-20 | Detection permits concurrent writes and deletes | Open | Low | Rare | [EC-20](#ec-20) |
 | CX-06 | The entropy gate runs before BOM detection | Open | Medium | Theoretical | [CX-06](#cx-06) |
@@ -68,6 +67,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | EC-03 | The GUI omitted the source-choice advisory | Fixed | — | — | [EC-03](#ec-03) |
 | EC-04 | `-Plan` could exit successfully after scan failures | Fixed | — | — | [EC-04](#ec-04) |
 | BL-01 | Ambiguous BOM-less UTF-32 can be converted under the wrong byte order | Fixed | — | — | [BL-01](#bl-01) |
+| EC-08 | A constructed include pattern could hang a scan indefinitely | Fixed | — | — | [EC-08](#ec-08) |
 | EC-24 | The GUI smoke gate could select in the wrong combo | Fixed | — | — | [EC-24](#ec-24) |
 | EC-18 | A negative BOM-less UTF-16 ambiguity result is recomputed | Fixed | — | — | [EC-18](#ec-18) |
 | EC-23 | Plan application relies on a null-forgiving path dereference | Fixed | — | — | [EC-23](#ec-23) |
@@ -125,27 +125,42 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 
 ### EC-08
 
-**A hostile include mask can monopolize the regex engine.**
-`DirectoryTraversal.CompilePatterns` still translates `*` to `.*`, creates a
-regex with `RegexOptions.Compiled`, and therefore uses
-`Regex.InfiniteMatchTimeout`. On 2026-09-08 a scan with
-twelve separated wildcards against a nonmatching forty-character run of `a`
-did not finish within three seconds and had to be terminated.
+**Fixed by evaluating wildcard masks with .NET's non-backtracking engine.** The
+translation is unchanged — `*` becomes `.*`, `?` becomes `.`, and a
+separator-free mask still matches at any depth — so include and exclude results
+are the same. What changes is that matching runs in time proportional to the
+input rather than retrying an exponential number of alternatives.
+`NonBacktracking` replaces `Compiled`; the two are mutually exclusive.
 
-The trigger requires both inputs to be deliberately hostile: roughly ten or
-more separated wildcards and a filename with roughly twenty-four or more mostly
-consecutive copies of the separating character. Earlier measurements found
-realistic names answered in 0–5 ms, while the forty-`a` case exceeded 20 s.
-The mask comes from the operator, not an untrusted file.
+Was: `CompilePatterns` built a `Compiled` regex, which uses
+`Regex.InfiniteMatchTimeout`. A mask carrying twelve separated wildcards, matched
+against a nonmatching forty-character run of `a`, did not finish within three
+seconds and had to be terminated, while realistic names answered in 0–5 ms. The
+trigger needs both inputs to be deliberately hostile, and the mask comes from the
+operator rather than an untrusted file — which is why reach stayed Theoretical.
+An unbounded runtime is still worth removing for the price of one option.
 
-`RegexOptions.NonBacktracking` removed the blow-up, matched the current engine on
-the tested masks, and cost nothing measurable beside file I/O. It was measured
-and deliberately reverted because of the constructed reach. Three dead ends are
-worth preserving: a matching filename stops at the first success and proves
-nothing; `*` crossing directory separators is deliberate and tested; replacing
-`.*` with `[^/]*` does not prevent backtracking in a separator-free filename.
-`PathAwarePatternTests.PathQualifiedPattern_MatchesOnlyTheIntendedSubtree` pins
-the intended `src/*.cs` directory behavior.
+**It is not free, and the earlier note here that it cost nothing was wrong.**
+Measured over 3,937 files, median of five warm runs: 128 ms with `Compiled`
+against 148 ms with `NonBacktracking` — about 16%, or roughly 5 µs per file, and
+the same figure for a plain `*.txt` mask as for `*a*b*.txt`. That is the price of
+a bounded worst case, recorded so the next reader weighs it instead of
+rediscovering it.
+
+An independent differential comparison of the two engines over 500 generated
+masks against 200 generated paths — 100,000 pairs, including separators and the
+regex-special characters EC escapes — found no case where they disagreed.
+
+`PathAwarePatternTests.WildcardPatternsUseTheNonBacktrackingEngine` asserts the
+option before exercising the hostile input, so restoring the old engine fails in
+9 ms instead of hanging the run. That mutation was performed, and the file
+restored byte-identical by SHA-256.
+
+Three dead ends stay recorded: a matching filename stops at the first success and
+proves nothing; `*` crossing directory separators is deliberate and tested; and
+replacing `.*` with `[^/]*` does not prevent backtracking within a separator-free
+filename. `PathAwarePatternTests.PathQualifiedPattern_MatchesOnlyTheIntendedSubtree`
+pins the intended `src/*.cs` directory behavior.
 
 ### EC-15
 
