@@ -1,4 +1,4 @@
-﻿namespace EncodingChecker;
+namespace EncodingChecker;
 
 partial class MainForm
 {
