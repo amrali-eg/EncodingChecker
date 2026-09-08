@@ -1,7 +1,10 @@
 # Release checklist
 
-Automated coverage is the first gate and is enforced by CI. What follows is what CI
-cannot answer.
+Automated coverage is the first gate and is enforced by CI. Three checks are required
+before anything merges to master: `build` (compile and unit tests), `gui-smoke` (the ten
+phases below, against an ordinary Release build), and `parity` (the shared detector
+sources still match across all three repositories). What follows is what CI cannot
+answer.
 
 ## Source and version
 
@@ -66,11 +69,15 @@ is what ties a release to its source.
 
 **[What each of the ten phases proves, and what it would catch →](GUI-SMOKE-TEST.md)**
 
-**The release workflow runs this for you, and a failure stops the release.** It drives
-the signed, published executable — the bytes that ship, not a rebuild of the same
-commit — after signing and before packaging, and uploads the report as a
-`gui-smoke-evidence` artifact. Run it locally while developing; before tagging, you no
-longer have to remember to.
+**Two workflows run this for you.** `ci.yml` runs all ten phases on every pull request
+and push to master, against an ordinary Release build, as a required `gui-smoke` check.
+`release.yml` runs them again against the signed, published executable — the bytes that
+ship, not a rebuild of the same commit — after signing and before packaging, and uploads
+the report as a `gui-smoke-evidence` artifact. A failure there stops the release.
+
+So a regression should be caught on the pull request. The release run remains the only
+one that drives the artifact users receive. Run it locally while developing if you like;
+neither gate depends on your remembering to.
 
 Two prerequisites, each refused with exit 2 rather than reported as a pass: an
 interactive Windows desktop, which a hosted `windows-latest` runner provides, and a

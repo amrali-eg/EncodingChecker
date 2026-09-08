@@ -128,6 +128,18 @@ published executable, after signing and before packaging, so what is verified is
 bytes that ship rather than a rebuild of the same commit. A failure fails the job and
 no release is created. The report is uploaded as a `gui-smoke-evidence` artifact.
 
-It does not run on every push. A GUI regression is caught at release time, which is
-late for a contributor and early enough for a user — moving it earlier is a separate
-decision about what every pull request should pay for.
+**It also gates every pull request.** `ci.yml` runs the same ten phases against an
+ordinary Release build, as its own `gui-smoke` check, so a GUI regression is found on
+the pull request that introduced it rather than at tag time with a release waiting.
+That costs about two minutes of runner time per pull request, which is the price of
+not diagnosing this class of defect mid-release.
+
+The two runs answer different questions and both are kept. The pull-request run asks
+whether this change broke the window; the release run asks whether the artifact about
+to be published works. Only the release job can ask the second one, because only it
+produces a signed, single-file executable.
+
+Evidence is uploaded from the pull-request run whether it passes or fails. A passing
+run is the sample that shows an intermittent phase has stopped being intermittent —
+which is the open question EC-24 records, since the failure that prompted the fix was
+never reproduced.
