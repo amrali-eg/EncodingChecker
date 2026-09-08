@@ -38,11 +38,6 @@ For a release changing detection or conversion policy:
 
 - [ ] Run the four-corpus audit from a clean committed build.
 - [ ] Record the exact commit, assembly hash, audit configuration, and limitations.
-- [ ] Run the independent-oracle sentinel set, if this release calls for one.
-      **Nothing in this repository defines that term or that set.** It appears here and
-      nowhere else, and the instruction pointed back at this checklist, so as written the
-      item cannot be actioned. Left in place rather than deleted, because the person who
-      added it meant something; it needs writing down or removing deliberately.
 
 ## The GUI smoke test
 
