@@ -9,6 +9,45 @@ Release build), and `parity` (the shared detector sources still match across all
 repositories). The items below repeat the ones worth confirming by eye at release time,
 and add the ones no workflow can answer.
 
+## The sequence
+
+The gates below say what to check. This says in what order, and which steps cannot be
+swapped. Each numbered step is expanded by a section further down.
+
+1. **Merge everything the release will contain.** Nothing half-landed.
+2. **Decide the version from what actually changed in the shipped project**, not from how
+   much work went in:
+   `git diff v<previous>..master -- sources/EncodingChecker/`
+   Test projects, the smoke driver, workflows and documentation do not reach a user. A
+   release can be large in commits and still be a patch.
+3. **Bump and write the notes in one commit** - `AssemblyInfo.cs`, the README heading, and
+   `docs/RELEASE-NOTES-v<version>.md`.
+4. **Run the local gates.** Release build with no warnings, the unit suite, the ten GUI
+   smoke phases, `Test-DefectBacklog.ps1`, and confirm `--version` and the built-in help
+   both report the new number.
+5. **Rehearse.** Run `release.yml` by `workflow_dispatch` against the bump branch. It
+   builds, tests, publishes, signs if the secrets exist, and drives the GUI suite against
+   the published executable - then stops, because creating the release requires a tag
+   *push*. This is the only way to exercise the real release path before committing to a
+   tag, and it costs one dispatch.
+6. **Push the branch, open the pull request, merge it once the three checks are green.**
+7. **Tag from a clean tree.** An annotated tag, `v<version>` exactly, pushed to origin.
+   Pushing the tag is what publishes; there is no undo that leaves no trace.
+8. **Let the release workflow run** and confirm what it produced: the release exists, is
+   not a draft, and carries both archives.
+9. **Gather the evidence yourself.** Download both archives and hash them locally rather
+   than trusting the reported digests, and reproduce the published executable by
+   publishing a clean checkout of the tag. A matching hash ties the release to its source
+   by measurement instead of assertion.
+10. **Edit the release body.**
+11. **Write the `SAFETY-AUDIT.md` record - after the tag, never before.** Committing it
+    changes the assembly through the PDB checksum, so a hash quoted in a record that is
+    part of the same commit describes a build that no longer exists.
+12. **Open and merge the audit-record pull request.**
+
+Steps 7 and 11 are the two that cannot move. Everything before 7 can be repeated freely;
+nothing after it can be taken back quietly.
+
 ## Source and version
 
 - [ ] Working tree is clean.
