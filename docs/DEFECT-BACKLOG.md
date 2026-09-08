@@ -56,7 +56,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | EC-18 | A negative BOM-less UTF-16 ambiguity result is recomputed | Open | Low | Common | [EC-18](#ec-18) |
 | EC-20 | Detection permits concurrent writes and deletes | Open | Low | Rare | [EC-20](#ec-20) |
 | EC-23 | Plan application relies on a null-forgiving path dereference | Open | Low | Rare | [EC-23](#ec-23) |
-| CX-06 | The entropy gate runs before BOM detection | Open | Medium | Occasional | [CX-06](#cx-06) |
+| CX-06 | The entropy gate runs before BOM detection | Open | Medium | Theoretical | [CX-06](#cx-06) |
 | BL-05 | Force-closing during a run can race UI callbacks | Open | Low | Rare | [BL-05](#bl-05) |
 | BL-19 | NUL-heavy ASCII can be reported as BOM-less UTF-16 | Open | Medium | Rare | [BL-19](#bl-19) |
 | BL-20 | Hard-linked paths are processed independently | Open | Low | Rare | [BL-20](#bl-20) |
@@ -192,11 +192,31 @@ why leaving that invariant implicit is fragile.
 
 ### CX-06
 
-**High entropy can hide an otherwise valid BOM.** At current
-`TextEncoding.cs:175`, the entropy guard returns before
-`UnicodeDetector.DetectFromBuffer` examines the BOM at line 182. The result can
-be an unknown or wrong encoding even when the file declares it. This changes
-what EC reports; it is not evidence that conversion writes the file.
+**High entropy can hide an otherwise valid BOM.** The entropy guard returns
+before `UnicodeDetector.DetectFromBuffer` examines the BOM. The result can be an
+unknown or wrong encoding even when the file declares it. This changes what EC
+reports; it is not evidence that conversion writes the file.
+
+**Re-scored Occasional to Theoretical on 2026-09-08, after measurement.** No
+text reaches the gate. Across all four corpora, 3,620 files are large enough to
+be gated (512 bytes) and 47 trip the 7.4-bit threshold — every one of them
+binary: 35 fixtures under `13_Binary/`, plus images and a spreadsheet in
+directories the corpora label `None`. The highest-entropy *text* file among 3,568
+candidates is dense Chinese XML in gb2312 at **6.8133**, a margin of 0.59 below
+the threshold, with UTF-16 Chinese just behind it. Base64 caps at 6.0 by
+construction. Reaching 7.4 needs a near-uniform byte distribution, which prose
+in any encoding does not produce.
+
+**A fix was written and then dropped**, which is the part worth recording. Making
+the guard yield to a byte-order mark works, and costs something measurable:
+`CheckBom` returns a codec from the marker bytes alone, so BOM-prefixed binary
+began detecting as `utf-16` instead of `(Unknown)`, and a scan containing one
+moved from exit 0 to exit 3. Strict validation still caught it and no bytes
+changed, so nothing was corrupted — but that is a measured behaviour change
+bought against a benefit no corpus file demonstrates.
+
+Reopen this on evidence of real text at or above the threshold, not on the
+mechanism, which is not in doubt.
 
 ### BL-01
 
