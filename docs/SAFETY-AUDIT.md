@@ -456,6 +456,62 @@ The review that found them also over-rated four of its own findings, and the rea
 - **Four findings from the same review are open**, the first a silent corruption: a BOM-less UTF-16 file whose every other code unit is a C0 control can be detected as UTF-32 and converted. Output verification cannot catch it, because both sides of the comparison use the same wrong codec. Measured over nineteen realistic file shapes — 41 of 44 detect correctly, and the three that do not are the same degenerate shape. `docs/DEFECT-BACKLOG.md` scores it critical impact, low reach.
 - **No accessibility spot check is recorded for this release.** The checklist's scaling, keyboard-only, and high-contrast checks have no automated substitute, and nothing in the release job stands in for them.
 
+#### Audited afterwards, on 2026-09-08
+
+**The statement above stands: v3.12.0 shipped without a corpus run.** Users downloaded
+artifacts that no such evidence supported. That is not edited away here, and the heading is
+unchanged, because the release page links to it and because it is what happened.
+
+What has changed is that the run has since been made, against the commit this release was
+tagged at:
+
+```
+commit    2878a8ef8ab66e5a6b143822ff93c0268c24bcb8   (annotated tag v3.12.0)
+worktree  clean
+platform  .NET 10.0.400 - Windows 11 10.0.26200
+assembly  EncodingChecker.dll
+          619d384057823932483f5d55be73ae037ecc1bc750fe722b76ee52e243693094
+run       v3120retro, compared against rel3110 in audit/reports/v3120retro-vs-rel3110
+```
+
+**No file changed outcome.** All four metrics are identical to v3.11.0 and to the v3.13.0
+run, with zero implementation defects, zero strict-decode throws and zero backup-integrity
+mismatches per corpus.
+
+| | v3.11.0 | v3.12.0 (retro) |
+|---|---|---|
+| Detection accuracy | 4640/4646 (99.87%) | 4639/4645 (99.87%) |
+| Strict decoding | 4694/4694 (100.00%) | 4693/4693 (100.00%) |
+| Codec conformance | 4591/4694 (97.81%) | 4590/4693 (97.81%) |
+| Text preservation | 4520/4623 (97.77%) | 4519/4622 (97.77%) |
+
+`compare.py` reports `regressed=1`, and it is not one: a UTF-8 fixture present when v3.11.0
+was audited is absent from the corpus copy on disk, so it joins as `(absent)`.
+`check_audit_integrity.py` was run with `CORPUS_ROOT` set and all invariants hold across
+5,077 rows. Source corpora re-hashed afterwards by the same method used for v3.13.0.
+
+**This covers the artifact that shipped, not only the source.** The published single-file
+executable was reproduced byte-for-byte from the tagged commit:
+
+```
+shipped by the v3.12.0 release  f0bf528d2345ea2dccbeb6cdefa8c0c8ceaf73b0c541b843436c61405344d1e5
+rebuilt locally from 2878a8e    f0bf528d2345ea2dccbeb6cdefa8c0c8ceaf73b0c541b843436c61405344d1e5
+```
+
+So this is evidence about what users downloaded, not merely about a commit that resembles
+it. The audit itself measures the plain Release build rather than the published one, as
+every audited-build record here does; the reproduced hash is what ties the two together.
+
+**It does not retire the caution this record was written with.** The harness supplies an
+explicit source for every file, so it cannot reach anything that depends on automatic
+detection choosing wrongly. A clean result means the conversions it performed preserved
+text; it is not a statement that every decision path in v3.12.0 was exercised.
+
+**Why it was run at all.** v3.13.0 required a corpus run, which made v3.12.0 the only
+release in this line whose conversion-policy change had shipped with no evidence behind it.
+Running it late is worth more than leaving the gap, and less than running it on time. Both
+halves of that belong in the record.
+
 ### v3.12.1 — `36983998124ab1caabb2f4fc10ba5bb2a83649b7`, not re-audited
 
 **It was not measured against the four corpora, and none is required.** This release changes neither detection nor conversion policy: what EC converts, refuses and reports for a valid input is what v3.12.0 did. No audited build exists and no assembly hash is quoted.
