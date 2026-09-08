@@ -18,17 +18,19 @@ sources/EncodingChecker.GuiSmoke/bin/Release/net10.0-windows/EncodingChecker.Gui
 ```
 
 Exit `0` when every phase passes, `1` when one fails, `2` for a usage, environment, or
-build-compatibility problem. Each run writes `gui-smoke-report.json` and `gui-smoke-report.md` carrying the
-EC version, the executable SHA-256, the OS and .NET versions, and each phase's before and
-after file hashes. It also hashes the managed assembly beside the executable when there
-is one, as in an ordinary Release build. A single-file publish has none, and the report
-says so instead of naming a file it could not read.
+build-compatibility problem. Each run writes `gui-smoke-report.json` and
+`gui-smoke-report.md`, carrying the EC version, the executable SHA-256, the OS and .NET
+versions, and each phase's before and after file hashes. It also hashes the managed
+assembly beside the executable when there is one, as in an ordinary Release build. A
+single-file publish has none, and the report says so instead of naming a file it could
+not read.
 
 ## Why this is not an ordinary test
 
-Everything reachable without a window is covered by the unit suite. What is left is
-Windows Forms itself: designer layout, background-worker marshalling, and the review
-dialog under a real message pump.
+Everything reachable without a window is covered by the unit suite. What is left is the
+window itself: whether the controls land where the designer put them, whether progress
+from a background thread reaches the screen safely, and whether the review dialog behaves
+when a person is actually clicking it.
 
 The obvious way to automate that — hosting the forms inside a test process — would mean
 reshaping the application to be drivable, trading a safety property for a test. This
@@ -43,7 +45,7 @@ because nothing ran the sequence.
 
 ## The phases
 
-| | Proves | Would have caught |
+| Phase | Proves | Would have caught |
 |---|---|---|
 | **A** | Opening the review and cancelling writes nothing, with backups enabled: no bytes change, no `.bak`, no `.ecmeta.json`. | A review that writes before you confirm. |
 | **B** | Unicode and ASCII convert with no source choice offered, text preserved exactly, and a recovery record naming `Detected` and the right code page. | A safe batch demanding a source choice, or a conversion that alters text. |
@@ -110,9 +112,9 @@ direction, about the wrong component.
 
 ## Requirements
 
-An interactive Windows desktop. UI Automation cannot drive a window that no session
-owns, so the runner refuses to start with exit `2` rather than reporting a pass it did
-not earn.
+An interactive Windows desktop - a real logged-in session with a screen. The automation
+layer cannot click a window that nobody is looking at, so with no desktop the runner
+refuses to start with exit `2` rather than reporting a pass it did not earn.
 
 A GitHub-hosted `windows-latest` runner **does** provide one. Measured, not assumed:
 `Environment.UserInteractive` is `True` under the `runneradmin` account, and phase A
@@ -123,7 +125,9 @@ exits `0`, because every phase in an empty set passes. The evidence the run uplo
 is what settles it: one phase recorded, `A`, with five files hashed before and five
 after. Read the artifact, not the tick.
 
-**It now gates the release.** `release.yml` runs all ten phases against the signed,
+## Where it runs
+
+**It gates the release.** `release.yml` runs all ten phases against the signed,
 published executable, after signing and before packaging, so what is verified is the
 bytes that ship rather than a rebuild of the same commit. A failure fails the job and
 no release is created. The report is uploaded as a `gui-smoke-evidence` artifact.

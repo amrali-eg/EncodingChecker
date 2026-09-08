@@ -17,10 +17,14 @@ answer.
 
 - [ ] Release build succeeds with no warnings.
 - [ ] `dotnet test sources/EncodingChecker.Tests/EncodingChecker.Tests.csproj -c Release` — all green.
-- [ ] The scheduled **Shared Unicode detector parity** workflow is green. It compares
-      the shared detector source in EncodingChecker, LineEndingNormalizer, and
-      CorpusTesters after normalizing namespace, a redundant `using System` import,
-      and line-ending differences.
+- [ ] The **Shared Unicode detector parity** check is green. It compares the shared
+      detector source in EncodingChecker, LineEndingNormalizer and CorpusTesters,
+      ignoring the differences that are meant to differ: the namespace, a `using System`
+      line only EncodingChecker needs, byte-order marks, line endings, and runs of blank
+      lines. Anything else that differs is a real divergence. It runs on every pull
+      request and push, weekly on a schedule, and again inside the release job - the
+      schedule matters because a change in either of the other two repositories produces
+      no pull request here.
 - [ ] Ambiguous BOM-less UTF-16 is refused without changing bytes or creating a backup.
 - [ ] Structurally provable BOM-less UTF-16 still converts correctly.
 - [ ] BOM-less UTF-32 is refused in every mode, with `UnprovableBomlessUtf32`, and
@@ -34,15 +38,21 @@ For a release changing detection or conversion policy:
 
 - [ ] Run the four-corpus audit from a clean committed build.
 - [ ] Record the exact commit, assembly hash, audit configuration, and limitations.
-- [ ] Run the independent-oracle sentinel set when the release checklist requires it.
+- [ ] Run the independent-oracle sentinel set, if this release calls for one.
+      **Nothing in this repository defines that term or that set.** It appears here and
+      nowhere else, and the instruction pointed back at this checklist, so as written the
+      item cannot be actioned. Left in place rather than deleted, because the person who
+      added it meant something; it needs writing down or removing deliberately.
 
 ## The GUI smoke test
 
 **Why it is a gate of its own.** EC's conversion policy, plan binding, and orchestration
-sequence are covered by the unit suite. What is left is Windows Forms itself — designer
-layout, background-worker marshalling, and the dialog's behaviour under a real message
-pump. The suite reaches those by driving the shipped executable through the
-accessibility layer, so no part of the application is reshaped to make it drivable.
+sequence are covered by the unit suite. What is left is the window itself — whether the
+controls land where the designer put them, whether progress from a background thread
+reaches the screen safely, and whether the review dialog behaves when a person is
+clicking it. The suite reaches those by driving the shipped executable through the same
+accessibility layer a screen reader uses, so no part of the application is reshaped to
+make it testable.
 
 **Why it is not optional.** EC has already shipped a defect of exactly this shape: every
 component was correct and tested while the GUI's *sequence* converted files the CLI
