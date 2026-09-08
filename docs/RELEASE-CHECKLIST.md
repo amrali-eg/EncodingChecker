@@ -1,7 +1,13 @@
 # Release checklist
 
-Automated coverage is the first gate and is enforced by CI. What follows is what CI
-cannot answer.
+This file records every gate a release passes, automated and manual, so that one list
+can be worked through end to end.
+
+Three checks are required before anything merges to master, and CI enforces them:
+`build` (compile and unit tests), `gui-smoke` (the ten phases below, against an ordinary
+Release build), and `parity` (the shared detector sources still match across all three
+repositories). The items below repeat the ones worth confirming by eye at release time,
+and add the ones no workflow can answer.
 
 ## Source and version
 
@@ -14,14 +20,19 @@ cannot answer.
 
 - [ ] Release build succeeds with no warnings.
 - [ ] `dotnet test sources/EncodingChecker.Tests/EncodingChecker.Tests.csproj -c Release` — all green.
-- [ ] The scheduled **Shared Unicode detector parity** workflow is green. It compares
-      the shared detector source in EncodingChecker, LineEndingNormalizer, and
-      CorpusTesters after normalizing namespace, a redundant `using System` import,
-      and line-ending differences.
+- [ ] The **Shared Unicode detector parity** check is green. It compares the shared
+      detector source in EncodingChecker, LineEndingNormalizer and CorpusTesters,
+      ignoring the differences that are meant to differ: the namespace, a `using System`
+      line only EncodingChecker needs, byte-order marks, line endings, and runs of blank
+      lines. Anything else that differs is a real divergence. It runs on every pull
+      request and push, weekly on a schedule, and again inside the release job - the
+      schedule matters because a change in either of the other two repositories produces
+      no pull request here.
 - [ ] Ambiguous BOM-less UTF-16 is refused without changing bytes or creating a backup.
 - [ ] Structurally provable BOM-less UTF-16 still converts correctly.
-- [ ] BOM-less UTF-32 is refused in every mode, with `UnprovableBomlessUtf32`, and
-      converts when given a BOM or an explicit source.
+- [ ] BOM-less UTF-32 is never converted automatically; it is refused with
+      `UnprovableBomlessUtf32`. It converts when a BOM confirms the encoding, or when
+      the user selects the source encoding explicitly.
 - [ ] Explicit source selection still receives strict decoding and output verification.
 - [ ] A stale reviewed plan leaves every selected source unchanged.
 - [ ] Backup and recovery-sidecar hashes match the source bytes used for conversion.
@@ -31,15 +42,16 @@ For a release changing detection or conversion policy:
 
 - [ ] Run the four-corpus audit from a clean committed build.
 - [ ] Record the exact commit, assembly hash, audit configuration, and limitations.
-- [ ] Run the independent-oracle sentinel set when the release checklist requires it.
 
 ## The GUI smoke test
 
 **Why it is a gate of its own.** EC's conversion policy, plan binding, and orchestration
-sequence are covered by the unit suite. What is left is Windows Forms itself — designer
-layout, background-worker marshalling, and the dialog's behaviour under a real message
-pump. The suite reaches those by driving the shipped executable through the
-accessibility layer, so no part of the application is reshaped to make it drivable.
+sequence are covered by the unit suite. What is left is the window itself — whether the
+controls land where the designer put them, whether progress from a background thread
+reaches the screen safely, and whether the review dialog behaves when a person is
+clicking it. The suite reaches those by driving the shipped executable through the same
+accessibility layer a screen reader uses, so no part of the application is reshaped to
+make it testable.
 
 **Why it is not optional.** EC has already shipped a defect of exactly this shape: every
 component was correct and tested while the GUI's *sequence* converted files the CLI
@@ -66,11 +78,22 @@ is what ties a release to its source.
 
 **[What each of the ten phases proves, and what it would catch →](GUI-SMOKE-TEST.md)**
 
-**The release workflow runs this for you, and a failure stops the release.** It drives
-the signed, published executable — the bytes that ship, not a rebuild of the same
-commit — after signing and before packaging, and uploads the report as a
-`gui-smoke-evidence` artifact. Run it locally while developing; before tagging, you no
-longer have to remember to.
+**Two workflows run this for you.** `ci.yml` runs all ten phases on every pull request
+and push to master, against an ordinary Release build, as a required `gui-smoke` check.
+`release.yml` runs them again against the published framework-dependent executable —
+a file that ships, not a rebuild of the same commit — after the signing step and before
+packaging, and uploads the report as a `gui-smoke-evidence` artifact. A failure there
+stops the release.
+
+Be precise about what that second run covers. Signing is conditional on the certificate
+secrets: when they are absent the step is skipped and the suite drives an **unsigned**
+file. And only the framework-dependent executable is driven; the self-contained build is
+packaged and shipped without being driven. Widening the run to both is a decision nobody
+has taken.
+
+So a regression should be caught on the pull request. The release run remains the only
+one that drives a file users receive. Run it locally while developing if you like;
+neither gate depends on your remembering to.
 
 Two prerequisites, each refused with exit 2 rather than reported as a pass: an
 interactive Windows desktop, which a hosted `windows-latest` runner provides, and a
@@ -94,7 +117,11 @@ checks the status line *against* the bytes on disk rather than trusting it.
 The ten phases record themselves. `gui-smoke-report.md` and `gui-smoke-report.json`
 already carry the EC version, the executable hash, the OS and .NET versions, and every
 phase's before and after file hashes — better evidence than a transcribed letter, and not
-subject to a typo. Keep both files with the release.
+subject to a typo.
+
+They are uploaded as a workflow artifact and expire on GitHub's retention schedule. If a
+release needs them permanently, attach both files to the GitHub release; nothing does
+that automatically today.
 
 What still needs a person is the spot check above, because nobody has automated a
 judgement about whether text is readable. Fill this in and keep it alongside them.

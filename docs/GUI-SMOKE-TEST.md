@@ -2,8 +2,9 @@
 
 Ten phases that drive a built `EncodingChecker.exe` through Windows UI Automation
 and check the bytes it leaves behind. Every phase creates its own disposable folder,
-performs a real sequence in the real window, and then verifies files — never status
-messages.
+performs a real sequence in the real window, and then verifies files. Where a phase does
+read what the window says, it checks that wording against the bytes on disk rather than
+taking it on trust.
 
 ```powershell
 dotnet build sources/EncodingChecker.sln -c Release
@@ -18,17 +19,19 @@ sources/EncodingChecker.GuiSmoke/bin/Release/net10.0-windows/EncodingChecker.Gui
 ```
 
 Exit `0` when every phase passes, `1` when one fails, `2` for a usage, environment, or
-build-compatibility problem. Each run writes `gui-smoke-report.json` and `gui-smoke-report.md` carrying the
-EC version, the executable SHA-256, the OS and .NET versions, and each phase's before and
-after file hashes. It also hashes the managed assembly beside the executable when there
-is one, as in an ordinary Release build. A single-file publish has none, and the report
-says so instead of naming a file it could not read.
+build-compatibility problem. Each run writes `gui-smoke-report.json` and
+`gui-smoke-report.md`, carrying the EC version, the executable SHA-256, the OS and .NET
+versions, and each phase's before and after file hashes. It also hashes the managed
+assembly beside the executable when there is one, as in an ordinary Release build. A
+single-file publish has none, and the report says so instead of naming a file it could
+not read.
 
 ## Why this is not an ordinary test
 
-Everything reachable without a window is covered by the unit suite. What is left is
-Windows Forms itself: designer layout, background-worker marshalling, and the review
-dialog under a real message pump.
+Conversion policy, plan binding and orchestration are covered by the unit suite, which
+needs no window. What is left is the window itself: whether the controls land where the
+designer put them, whether progress from a background thread reaches the screen safely,
+and whether the review dialog behaves when a person is actually clicking it.
 
 The obvious way to automate that — hosting the forms inside a test process — would mean
 reshaping the application to be drivable, trading a safety property for a test. This
@@ -43,10 +46,10 @@ because nothing ran the sequence.
 
 ## The phases
 
-| | Proves | Would have caught |
+| Phase | Proves | Would have caught |
 |---|---|---|
 | **A** | Opening the review and cancelling writes nothing, with backups enabled: no bytes change, no `.bak`, no `.ecmeta.json`. | A review that writes before you confirm. |
-| **B** | Unicode and ASCII convert with no source choice offered, text preserved exactly, and a recovery record naming `Detected` and the right code page. | A safe batch demanding a source choice, or a conversion that alters text. |
+| **B** | Unicode and ASCII convert with no source choice offered, both keep their text exactly, and **both** get a verified recovery record naming `Detected` and the right code page — ASCII included, whose bytes do not change. | A safe batch demanding a source choice, a conversion that alters text, or a conversion that skips the restore point when the bytes happen to match. |
 | **C** | A chosen legacy source applies **only** to the ticked files; an unticked file keeps its bytes and gets no backup. The record names `Explicit` and the chosen code page. | A source choice leaking to files it was not ticked for. |
 | **D** | BOM-less UTF-16 whose byte order cannot be proven is refused, is offered a source choice, and cancelling leaves the folder untouched. | Automatic conversion of a file whose byte order is a coin flip. |
 | **E** | Naming `utf-16BE` explicitly converts the same file exactly, with a backup and a recovery record. | A refusal that cannot be answered, or an answered one that loses text. |
@@ -110,24 +113,48 @@ direction, about the wrong component.
 
 ## Requirements
 
-An interactive Windows desktop. UI Automation cannot drive a window that no session
-owns, so the runner refuses to start with exit `2` rather than reporting a pass it did
-not earn.
+An interactive Windows desktop - a real logged-in session with a screen. The automation
+layer cannot click a window that nobody is looking at, so with no desktop the runner
+refuses to start with exit `2` rather than reporting a pass it did not earn.
 
 A GitHub-hosted `windows-latest` runner **does** provide one. Measured, not assumed:
 `Environment.UserInteractive` is `True` under the `runneradmin` account, and phase A
 opened the review, cancelled it, and verified the bytes on disk.
 
-The exit code alone would not have shown that. A `--phase` matching nothing also
-exits `0`, because every phase in an empty set passes. The evidence the run uploaded
-is what settles it: one phase recorded, `A`, with five files hashed before and five
-after. Read the artifact, not the tick.
+The exit code alone would not have shown that, because a green tick says only that
+nothing failed. The evidence the run uploaded is what settles it: one phase recorded,
+`A`, with five files hashed before and five after. Read the artifact, not the tick.
 
-**It now gates the release.** `release.yml` runs all ten phases against the signed,
-published executable, after signing and before packaging, so what is verified is the
-bytes that ship rather than a rebuild of the same commit. A failure fails the job and
-no release is created. The report is uploaded as a `gui-smoke-evidence` artifact.
+## Where it runs
 
-It does not run on every push. A GUI regression is caught at release time, which is
-late for a contributor and early enough for a user — moving it earlier is a separate
-decision about what every pull request should pay for.
+**It gates the release.** `release.yml` runs all ten phases against the published
+framework-dependent executable, `publish\win-x64\EncodingChecker.exe`, so what is
+verified is a file that ships rather than a rebuild of the same commit. A failure fails
+the job and no release is created.
+
+Two limits are worth knowing rather than assuming. The run happens **after** the signing
+step, so it drives the signed bytes when signing runs - but signing is conditional on the
+certificate secrets being configured, and when they are not it is skipped and the suite
+drives an unsigned file. And the **self-contained** executable under
+`win-x64-selfcontained` is packaged and shipped without being driven at all; only the
+framework-dependent one is.
+
+The report is uploaded as a `gui-smoke-evidence` workflow artifact, which expires on
+GitHub's retention schedule. It is not attached to the release, so it is not permanent
+evidence unless someone attaches it.
+
+**It also gates every pull request.** `ci.yml` runs the same ten phases against an
+ordinary Release build, as its own `gui-smoke` check, so a GUI regression is found on
+the pull request that introduced it rather than at tag time with a release waiting.
+That costs about two minutes of runner time per pull request, which is the price of
+not diagnosing this class of defect mid-release.
+
+The two runs answer different questions, and both upload a report. The pull-request run
+asks whether this change broke the window; the release run asks whether the artifact
+about to be published works. Only the release job can ask the second one, because only it
+produces a published single-file executable.
+
+Evidence is uploaded from the pull-request run whether it passes or fails. A passing
+run is the sample that shows an intermittent phase has stopped being intermittent —
+which is the open question EC-24 records, since the failure that prompted the fix was
+never reproduced.
