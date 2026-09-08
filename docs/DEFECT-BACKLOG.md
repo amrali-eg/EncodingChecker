@@ -50,13 +50,13 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 
 | ID | Finding | Status | Impact | Likelihood | Details |
 |---|---|---|---|---|---|
-| EC-17 | A text-validation comment contradicts the calculation | Open | Low | Common | [EC-17](#ec-17) |
-| EC-20 | Detection permits concurrent writes and deletes | Open | Low | Rare | [EC-20](#ec-20) |
-| CX-06 | The entropy gate runs before BOM detection | Open | Medium | Theoretical | [CX-06](#cx-06) |
-| BL-05 | Force-closing during a run can race UI callbacks | Open | Low | Rare | [BL-05](#bl-05) |
-| BL-19 | NUL-heavy ASCII can be reported as BOM-less UTF-16 | Open | Medium | Rare | [BL-19](#bl-19) |
-| BL-20 | Hard-linked paths are processed independently | Open | Low | Rare | [BL-20](#bl-20) |
-| BL-21 | Detection can accept a truncated trailing sequence that conversion rejects | Open | Low | Rare | [BL-21](#bl-21) |
+| EC-17 | A comment describes the text check backwards | Open | Low | Common | [EC-17](#ec-17) |
+| EC-20 | A file can change while EC is detecting its encoding | Open | Low | Rare | [EC-20](#ec-20) |
+| CX-06 | EC checks for random-looking data before checking for a BOM | Open | Medium | Theoretical | [CX-06](#cx-06) |
+| BL-05 | Force-closing during a conversion can produce an error on exit | Open | Low | Rare | [BL-05](#bl-05) |
+| BL-19 | ASCII with many NUL bytes can be reported as UTF-16 | Open | Medium | Rare | [BL-19](#bl-19) |
+| BL-20 | Two hard-link names for one file are converted separately | Open | Low | Rare | [BL-20](#bl-20) |
+| BL-21 | Detection can accept a cut-off final character that conversion rejects | Open | Low | Rare | [BL-21](#bl-21) |
 
 ### Fixed and resolved findings
 
@@ -121,171 +121,10 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 
 <!-- backlog-ledger:end -->
 
-## Details for open findings
+## Finding details
 
-### EC-08
-
-**Fixed by evaluating wildcard masks with .NET's non-backtracking engine.** The
-translation is unchanged — `*` becomes `.*`, `?` becomes `.`, and a
-separator-free mask still matches at any depth — so include and exclude results
-are the same. What changes is that matching runs in time proportional to the
-input rather than retrying an exponential number of alternatives.
-`NonBacktracking` replaces `Compiled`; the two are mutually exclusive.
-
-Was: `CompilePatterns` built a `Compiled` regex, which uses
-`Regex.InfiniteMatchTimeout`. A mask carrying twelve separated wildcards, matched
-against a nonmatching forty-character run of `a`, did not finish within three
-seconds and had to be terminated, while realistic names answered in 0–5 ms. The
-trigger needs both inputs to be deliberately hostile, and the mask comes from the
-operator rather than an untrusted file — which is why reach stayed Theoretical.
-An unbounded runtime is still worth removing for the price of one option.
-
-**It is not free, and the earlier note here that it cost nothing was wrong.**
-Measured over 3,937 files, median of five warm runs: 128 ms with `Compiled`
-against 148 ms with `NonBacktracking` — about 16%, or roughly 5 µs per file, and
-the same figure for a plain `*.txt` mask as for `*a*b*.txt`. That is the price of
-a bounded worst case, recorded so the next reader weighs it instead of
-rediscovering it.
-
-An independent differential comparison of the two engines over 500 generated
-masks against 200 generated paths — 100,000 pairs, including separators and the
-regex-special characters EC escapes — found no case where they disagreed.
-
-`PathAwarePatternTests.WildcardPatternsUseTheNonBacktrackingEngine` asserts the
-option before exercising the hostile input, so restoring the old engine fails in
-9 ms instead of hanging the run. That mutation was performed, and the file
-restored byte-identical by SHA-256.
-
-Three dead ends stay recorded: a matching filename stops at the first success and
-proves nothing; `*` crossing directory separators is deliberate and tested; and
-replacing `.*` with `[^/]*` does not prevent backtracking within a separator-free
-filename. `PathAwarePatternTests.PathQualifiedPattern_MatchesOnlyTheIntendedSubtree`
-pins the intended `src/*.cs` directory behavior.
-
-### EC-15
-
-**Before:** plans and journals carried five safety flags that were always `true`.
-EC never read them when applying a plan, so they proved nothing about whether any
-individual check had run - but a reader could easily take a serialized `true` as
-proof that one had.
-
-**Now:** the files carry one safety-rules version and a sentence describing it.
-EC checks the version; the sentence exists only to tell a reader what the version
-means.
-
-This was a clarity fix, not a conversion-safety fix. EC always executed its strict
-behaviour; only the artifact implied the flags were the reason.
-
-Evidence: `StrictDecoding`, `StrictEncoding`, `OutputVerification`,
-`AtomicInstall` and `LegacyRequiresExplicitSource` were replaced by
-`SemanticsDescription`, the sentence `ConversionSemantics.Describes` already
-held. `SemanticsVersion` remains the only enforced compatibility value, and a
-test confirms the description is never consulted: altering it inside a plan file
-changes nothing about whether that plan loads.
-
-The artifacts changed shape, so their versions say so: plan schema 5 to 6,
-journal schema 4 to 5. That rejects plans written by v3.13.0 as well as older
-ones - semantics 7 shipped in that release, so this is not the free change it
-would have been a day earlier.
-
-### EC-17
-
-**A comment describes the text check backwards.** Control and private-use
-characters *lower* the printable-text ratio. The comment beside the calculation
-says they are ignored.
-
-Nothing a user sees is wrong: the binary-rejection behaviour is the intended one.
-What is wrong is what the next person reads, which is why reach is Common.
-
-Evidence: `TextValidation.cs` increments the total rune count before its category
-switch, so those scalars count toward the denominator while never incrementing
-`printable`.
-
-Still open because the fix is not confined to one repository. The comment is
-byte-identical in EncodingChecker, LineEndingNormalizer and CorpusTesters, and
-the parity check requires it to stay that way, so all three must change together.
-
-### EC-18
-
-**Before:** EC remembered only when it *had* found a BOM-less UTF-16 ambiguity.
-When it found none, that answer was forgotten, and the full check could run again
-on the next pass.
-
-**Now:** both answers are remembered, so each file is examined once. The stored
-value is nullable: null means not yet classified, and `None` means classified
-with no doubt found.
-
-Nothing a user sees changes, which is why this carries no test of its own. It was
-not a speed problem either: measurement found no meaningful cost, because a
-provable file fails the opposite-order decode inside its first buffer. The defect
-was redundant work and a state that could not tell "no" from "not asked".
-
-### EC-20
-
-**A file can change while EC is working out what encoding it is.** Detection
-opens the file in a mode that lets another program write to it or delete it at
-the same time, so the encoding EC reports can describe bytes that have already
-changed.
-
-No source file is altered by this. Before conversion writes anything it takes its
-own copy of the bytes, bound to a hash. What can go stale is what detection and
-validation *report*.
-
-Evidence: `TextEncoding.DetectFromFile` opens with
-`FileShare.ReadWrite | FileShare.Delete`, while the validation and
-source-snapshot paths use `FileShare.Read`.
-
-Still open because the obvious correction is not obviously right. Tightening
-detection to match would make EC fail on any file another program holds open,
-which includes ordinary log files.
-
-### EC-23
-
-**Before:** applying a plan assumed an earlier check had already produced a valid
-file path. The assumption held, but nothing said so - and had later code bypassed
-that check, the failure would have surfaced as an unexplained null reference.
-
-**Now:** EC stops with an explicit error naming the check that must have run.
-
-Under the present flow nothing changes, which is why nothing new is asserted and
-no test accompanies it. EC-06 is what happened the last time an invariant of this
-shape was left implicit.
-
-Evidence: `FindStaleFiles` rejects a plan whose paths resolve outside its
-directory; reaching the dereference means that check did not run.
-
-### CX-06
-
-**EC decides a file looks like random data before it looks for a byte-order
-mark.** In principle a file could be reported as unknown, or as the wrong
-encoding, even though its first bytes say what it is.
-
-This changes what EC *reports*. It is not evidence that conversion writes a file
-it should have refused.
-
-Evidence: the entropy guard returns before `UnicodeDetector.DetectFromBuffer`
-examines the mark.
-
-**Re-scored Occasional to Theoretical on 2026-09-08, after measurement.** No
-text reaches the gate. Across all four corpora, 3,620 files are large enough to
-be gated (512 bytes) and 47 trip the 7.4-bit threshold — every one of them
-binary: 35 fixtures under `13_Binary/`, plus images and a spreadsheet in
-directories the corpora label `None`. The highest-entropy *text* file among 3,568
-candidates is dense Chinese XML in gb2312 at **6.8133**, a margin of 0.59 below
-the threshold, with UTF-16 Chinese just behind it. Base64 caps at 6.0 by
-construction. Reaching 7.4 needs a near-uniform byte distribution, which prose
-in any encoding does not produce.
-
-**A fix was written and then dropped**, which is the part worth recording. Making
-the guard yield to a byte-order mark works, and costs something measurable:
-`CheckBom` returns a codec from the marker bytes alone, so BOM-prefixed binary
-began detecting as `utf-16` instead of `(Unknown)`, and a scan containing one
-moved from exit 0 to exit 3. Strict validation still caught it and no bytes
-changed, so nothing was corrupted — but that is a measured behaviour change
-bought against a benefit no corpus file demonstrates.
-
-Reopen this on evidence of real text at or above the threshold, not on the
-mechanism, which is not in doubt.
+One entry per finding, ordered by ID. The status is not repeated here - the
+ledger above is the only place that assigns it, so these cannot disagree with it.
 
 ### BL-01
 
@@ -303,269 +142,6 @@ Widening the opposite-order test would not have been enough on its own — see
 [BL-18](#bl-18), whose bytes are *invalid* under the opposite UTF-32 order. Both
 are closed by refusing BOM-less UTF-32 outright, at the cost of refusing
 ordinary BOM-less UTF-32 as well; nothing in the bytes separates the two.
-
-### BL-05
-
-**Force-closing EC mid-conversion can produce an error as it exits.** If the user
-confirms a second close while the run is still stopping, a background task can
-try to use a window that has already gone.
-
-No file content is lost. Files already converted were installed one at a time and
-stay installed, and the file in flight stays protected. The expected symptom is
-an exception while EC closes.
-
-Evidence: `OnFormClosing` deliberately allows a confirmed second close, because
-cancellation is cooperative. A background task can then call the synchronous
-confirmation `Invoke`, and its completion touches controls on the form.
-
-Still open because it was confirmed by reading the current code rather than by
-triggering it; the timing it needs has not been reproduced.
-
-### BL-18
-
-**Fixed** by the same rule as [BL-01](#bl-01): BOM-less UTF-32 is refused
-rather than converted, so a UTF-16 file that happens to decode as UTF-32 is left
-alone instead of rewritten as different text.
-
-Was: a BOM-less UTF-16 file with one character per LF-terminated line puts a C0
-control in every second code unit, so each four-byte group is an in-range
-unassigned scalar and the file decodes as valid UTF-32. Converting it wrote
-different text, and output verification could not notice, because both sides of
-its comparison used the same wrong codec.
-
-This is the case an opposite-order test cannot catch: those bytes are *invalid*
-as UTF-32BE, so the check that protects BOM-less UTF-16 returns false. What the
-bytes fail to establish is the codec, not merely its byte order — which is why
-the fix refuses on the absence of a BOM rather than on ambiguity.
-
-No scalar classification changed. Private-use characters are what icon fonts put
-in ordinary text files, so rejecting unassigned or private-use scalars would have
-broken real sources; a test converts U+E000, U+F8FF, U+E0B0, U+F00C and U+F0000
-and checks all five survive.
-
-### BL-19
-
-**An ASCII file carrying many NUL bytes can be reported as UTF-16.** A current
-65,536-byte ASCII fixture with a NUL every 100 bytes — 1.001% of all bytes — was
-reported as UTF-16BE.
-
-Conversion then refused it with exit 5 and the source hash did not change. So the
-wrong answer reaches what EC *reports*, not what it writes. This is the one open
-finding where EC answers its own central question incorrectly.
-
-Evidence: the UTF-16 structure heuristic triggers at 2% of bytes within one
-candidate UTF-16 channel, which for this shape is roughly 1% of all bytes. An
-earlier version of this document said 2.3% of all bytes; that figure was wrong.
-
-### BL-20
-
-**Two names for one file are converted twice, and stop being the same file.**
-Windows can expose a single file under two hard-link names. EC treats them as two
-separate files and converts each.
-
-Text is preserved either way: in a current probe both names of one UTF-8 file
-were converted, both kept their text exactly, and each received its own verified
-`.bak` and `.ecmeta.json`. What is lost is the link itself — the normal Windows
-`File.Replace` path breaks it, so afterwards the two names refer to different
-files. The work is also done twice.
-
-No claim is made about the `File.Move(..., overwrite: true)` fallback, which
-could not be forced on this platform.
-
-Still open partly as a question rather than a defect: whether EC should preserve
-hard-link identity or treat selected paths independently is a design choice
-nobody has made.
-
-### BL-21
-
-**Detection can accept a cut-off final character that conversion then rejects.**
-A UTF-8 file ending in the incomplete bytes `E2 82` was reported as UTF-8 by
-`-DetectOnly`. Conversion refused the same file, returned `SourceDecodeError`
-and exit 3, and left it unchanged.
-
-The safety path is correct — the file is refused, not converted. The
-inconsistency is that detection had already reported it as fine.
-
-Evidence: detection reads a sample and does not treat an incomplete tail as an
-error. Conversion reaches the real end of the file and flushes the strict
-decoder, which does. The difference is deliberate on both sides.
-
-## Details for findings from the original review
-
-### EC-01
-
-**A reviewed refusal is binding.** `PlannedFile.HasReliableUnicodeDetection`
-carries the policy input that was formerly lost at the plan boundary.
-`AppliedPlanFidelityTests.ThePlanCarriesTheDetectionReliabilityTheVetoDependsOn`
-pins it.
-
-### EC-02
-
-**Read-only modes use the conversion safety decision.**
-`ReadOnlyModeAmbiguityTests` proves that an unprovable BOM-less Unicode source is
-not reported valid when conversion would refuse it.
-
-### EC-03
-
-**The v3.10.1 advisory reaches the real window.** GUI smoke phase H asserts on
-the rendered source-choice text rather than only on an internal decision.
-
-### EC-04
-
-**Plan failures control the exit code.** The plan branch returns processing
-failure before considering `-FailOnChanges`; `PlanPreflightReportingTests`
-covers the ordering.
-
-### EC-05
-
-**Only scheduled conversions require a source hash.** Plan loading no longer
-makes an unreadable skipped or refused entry render the whole plan unusable.
-
-### EC-06
-
-**Drive roots resolve without manufacturing `C:\\`.**
-`ConversionPlan.ResolvePath` now uses a root-aware containment check, with
-theories for `C:\`, nested paths, and outside paths.
-
-This defect was found before v3.11.0, recorded as confirmed, reported as closed,
-and shipped broken in both **v3.11.0 and v3.11.1**. It was rediscovered during an
-unrelated review. This history is why status is now derived from a checkable
-ledger rather than a summary.
-
-### EC-07
-
-**The refusal gives two actionable choices.**
-`BomlessUnicodeSafety.DescribeRefusal` offers both UTF-16 byte orders instead of
-recommending the unproved estimate.
-
-### EC-09
-
-**Selected EC artifacts are counted.** `.bak`, `.ecmeta.json`, and temporary
-conversion files update `TraversalCounters.FilesExcludedAsEcArtifact`, pinned by
-`ArtifactExclusionCoverageTests`.
-
-### EC-10
-
-**A failed snapshot is an error, not a policy decision.** Journal outcome tests
-pin `ScanFailed` to `Error` rather than `Refused`.
-
-### EC-11
-
-**Both console cancellation subscriptions have bounded lifetimes.** Each Ctrl+C
-handler is removed in `finally`, so it cannot retain a disposed token source.
-
-### EC-12
-
-**Skipped and unchanged are separate GUI counts.** The tally is pinned by
-`SkippedFilesAreNotCountedAsUnchanged`.
-
-### EC-13
-
-**Mixed batches describe source choice per file.** `DescribeSourceChoice` no
-longer presents one run-wide explicit encoding when several were used.
-
-### EC-14
-
-**Source and output text hashes come from separate reads.** The conversion
-record accepts the output digest produced by verification and rejects a missing
-one; `RecordedProvenanceTests` compares the installed output independently.
-
-### EC-16
-
-**Settings use the same atomic artifact writer as other records.** An
-interruption before replacement leaves the previous preferences intact. This
-was closed incidentally by the v3.12.1 artifact-writer refactor, not by a
-settings-specific change.
-
-### EC-19
-
-**The proposed encoding-instance gap did not reach conversion.** Conversion
-re-resolves the codec name through `Encoding.GetEncoding`, whose UTF-8 instance
-has the expected preamble. A current file beginning with two UTF-8 BOMs was
-refused with `MultipleLeadingByteOrderMarks` and exit 5 through both automatic
-detection and `-From utf-8`.
-
-### EC-21
-
-**All three save dialogs have deterministic disposal.** Each construction site
-uses `using var`.
-
-### EC-22
-
-**Each JSON store shares its reader and writer options.** Plan and recovery
-metadata no longer serialize and deserialize through mismatched option objects.
-
-### CX-01
-
-**A present option must carry a usable value.** Empty values for all value-taking
-flags are rejected with exit 1; `BlankOptionValueSafetyTests` verifies that
-nothing changes.
-
-### CX-02
-
-**A stale sidecar cannot survive backup replacement.**
-`RemoveBeforeBackupReplacement` removes the old record before replacing the
-backup, including a read-only record.
-
-### CX-03
-
-**Applied plans re-check every path component.**
-`HasReparsePointInPath` rejects a root or descendant replaced by a junction;
-applied-plan integrity tests cover the final component and outside-root cases.
-
-### CX-05
-
-**The journal can say what is and is not known after installation.**
-`ConvertedWithWarning` distinguishes a completed install with a later warning;
-`InstallationUnknown` represents a failure after the replacement outcome can no
-longer be proved.
-
-### CX-07
-
-**Old JSON and CSV artifacts are intentionally ordinary input.** The earlier
-ledger claimed they were excluded and even described a correction that was
-never made. `docs/CLI.md` deliberately says old plans, journals, and reports are
-scanned because a user may wish to convert them. A current `old-plan.json` probe
-was detected as ASCII. Only backups, sidecars, temporary files, and the current
-command's output paths are excluded.
-
-This false correction was discovered by re-deriving the row from source rather
-than trusting its own note.
-
-### CX-08
-
-**CLI mode conflicts are executable documentation.**
-`DocumentedOptionContractTests` pins the rejected combinations around
-`-DetectOnly`, validation, conversion, plan, and apply.
-
-### CX-09
-
-**An interrupted GUI write run still produces a journal.** Unit coverage and
-GUI smoke phase I reconcile completed and unattempted entries.
-
-### CX-10
-
-**An explicit choice does not erase detection history.** Plan summaries now say
-“chosen by you; detection still ran and is recorded,” with provenance tests.
-
-### CX-11
-
-**Settings-path creation is inside startup error handling.** A failure no longer
-escapes before the guarded settings load begins.
-
-### CX-12
-
-**Window restoration checks the monitors that exist now.**
-`WindowPosition.IsReachable` requires a useful title-bar intersection, with
-tests for removed, left-side, and secondary displays.
-
-### CX-13
-
-**Detector parity is enforced before integration and release.** The parity
-workflow runs on pull requests, and the release workflow declares it as a job
-dependency.
-
-## Details for findings found later
 
 ### BL-02
 
@@ -596,6 +172,23 @@ Before this correction, choosing an encoding after the review's directory had
 changed could close the dialog and report “Conversion cancelled. No files were
 modified,” although the user had not cancelled. EC-06 made every row hit that
 path when the review root was a drive root.
+
+### BL-05
+
+**Force-closing EC mid-conversion can produce an error as it exits.** If the user
+confirms a second close while the run is still stopping, a background task can
+try to use a window that has already gone.
+
+No file content is lost. Files already converted were installed one at a time and
+stay installed, and the file in flight stays protected. The expected symptom is
+an exception while EC closes.
+
+Evidence: `OnFormClosing` deliberately allows a confirmed second close, because
+cancellation is cooperative. A background task can then call the synchronous
+confirmation `Invoke`, and its completion touches controls on the form.
+
+Still open because it was confirmed by reading the current code rather than by
+triggering it; the timing it needs has not been reproduced.
 
 ### BL-06
 
@@ -714,27 +307,74 @@ an ordinary “wrong target, convert again” workflow until the user manually
 deleted recovery files. CX-02 instead ensures stale metadata cannot describe a
 new backup.
 
-### BL-27
+### BL-18
 
-**Fixed by promising only what the build being driven can show.** The report
-hashes a loose managed assembly when one sits beside the executable, and says
-there is none when it does not, rather than printing a path with an empty hash
-after it. `RELEASE-CHECKLIST.md` and `GUI-SMOKE-TEST.md` describe both cases.
-The executable *is* the artifact, so its hash is the provenance that matters;
-v3.13.0 demonstrated the stronger form by reproducing that hash byte-for-byte
-from the tagged commit.
+**Fixed** by the same rule as [BL-01](#bl-01): BOM-less UTF-32 is refused
+rather than converted, so a UTF-16 file that happens to decode as UTF-32 is left
+alone instead of rewritten as different text.
 
-Was: `gui-smoke-report.json` carried no `EcManagedAssemblySha256` key and the
-Markdown rendered an empty pair of backticks, while both printed the
-`EncodingChecker.dll` path as though a value followed — because a single-file
-publish leaves no loose DLL where the suite looked. That held since single-file
-publishing began, so the v3.12.0 and v3.12.1 evidence carries the same empty
-field.
+Was: a BOM-less UTF-16 file with one character per LF-terminated line puts a C0
+control in every second code unit, so each four-byte group is an in-range
+unassigned scalar and the file decodes as valid UTF-32. Converting it wrote
+different text, and output verification could not notice, because both sides of
+its comparison used the same wrong codec.
 
-The alternative, hashing the publish intermediate `win-x64/EncodingChecker.dll`,
-was rejected: it exists only during the build and no user ever receives it, so
-recording it would document a byproduct rather than the release. Nothing about
-conversion was involved either way; this is evidence hygiene.
+This is the case an opposite-order test cannot catch: those bytes are *invalid*
+as UTF-32BE, so the check that protects BOM-less UTF-16 returns false. What the
+bytes fail to establish is the codec, not merely its byte order — which is why
+the fix refuses on the absence of a BOM rather than on ambiguity.
+
+No scalar classification changed. Private-use characters are what icon fonts put
+in ordinary text files, so rejecting unassigned or private-use scalars would have
+broken real sources; a test converts U+E000, U+F8FF, U+E0B0, U+F00C and U+F0000
+and checks all five survive.
+
+### BL-19
+
+**An ASCII file carrying many NUL bytes can be reported as UTF-16.** A current
+65,536-byte ASCII fixture with a NUL every 100 bytes — 1.001% of all bytes — was
+reported as UTF-16BE.
+
+Conversion then refused it with exit 5 and the source hash did not change. So the
+wrong answer reaches what EC *reports*, not what it writes. This is the one open
+finding where EC answers its own central question incorrectly.
+
+Evidence: the UTF-16 structure heuristic triggers at 2% of bytes within one
+candidate UTF-16 channel, which for this shape is roughly 1% of all bytes. An
+earlier version of this document said 2.3% of all bytes; that figure was wrong.
+
+### BL-20
+
+**Two names for one file are converted twice, and stop being the same file.**
+Windows can expose a single file under two hard-link names. EC treats them as two
+separate files and converts each.
+
+Text is preserved either way: in a current probe both names of one UTF-8 file
+were converted, both kept their text exactly, and each received its own verified
+`.bak` and `.ecmeta.json`. What is lost is the link itself — the normal Windows
+`File.Replace` path breaks it, so afterwards the two names refer to different
+files. The work is also done twice.
+
+No claim is made about the `File.Move(..., overwrite: true)` fallback, which
+could not be forced on this platform.
+
+Still open partly as a question rather than a defect: whether EC should preserve
+hard-link identity or treat selected paths independently is a design choice
+nobody has made.
+
+### BL-21
+
+**Detection can accept a cut-off final character that conversion then rejects.**
+A UTF-8 file ending in the incomplete bytes `E2 82` was reported as UTF-8 by
+`-DetectOnly`. Conversion refused the same file, returned `SourceDecodeError`
+and exit 3, and left it unchanged.
+
+The safety path is correct — the file is refused, not converted. The
+inconsistency is that detection had already reported it as fine.
+
+Evidence: detection reads a sample and does not treat an incomplete tail as an
+error. Conversion reaches the real end of the file and flushes the strict
+decoder, which does. The difference is deliberate on both sides.
 
 ### BL-22
 
@@ -814,6 +454,365 @@ built application.
 This fix kept the search-for-an-item design and made it consistent.
 [EC-24](#ec-24) later found that searching for items at all was unreliable, and
 replaced the approach rather than adjusting it again.
+
+### BL-27
+
+**Fixed by promising only what the build being driven can show.** The report
+hashes a loose managed assembly when one sits beside the executable, and says
+there is none when it does not, rather than printing a path with an empty hash
+after it. `RELEASE-CHECKLIST.md` and `GUI-SMOKE-TEST.md` describe both cases.
+The executable *is* the artifact, so its hash is the provenance that matters;
+v3.13.0 demonstrated the stronger form by reproducing that hash byte-for-byte
+from the tagged commit.
+
+Was: `gui-smoke-report.json` carried no `EcManagedAssemblySha256` key and the
+Markdown rendered an empty pair of backticks, while both printed the
+`EncodingChecker.dll` path as though a value followed — because a single-file
+publish leaves no loose DLL where the suite looked. That held since single-file
+publishing began, so the v3.12.0 and v3.12.1 evidence carries the same empty
+field.
+
+The alternative, hashing the publish intermediate `win-x64/EncodingChecker.dll`,
+was rejected: it exists only during the build and no user ever receives it, so
+recording it would document a byproduct rather than the release. Nothing about
+conversion was involved either way; this is evidence hygiene.
+
+### CX-01
+
+**A present option must carry a usable value.** Empty values for all value-taking
+flags are rejected with exit 1; `BlankOptionValueSafetyTests` verifies that
+nothing changes.
+
+### CX-02
+
+**A stale sidecar cannot survive backup replacement.**
+`RemoveBeforeBackupReplacement` removes the old record before replacing the
+backup, including a read-only record.
+
+### CX-03
+
+**Applied plans re-check every path component.**
+`HasReparsePointInPath` rejects a root or descendant replaced by a junction;
+applied-plan integrity tests cover the final component and outside-root cases.
+
+### CX-05
+
+**The journal can say what is and is not known after installation.**
+`ConvertedWithWarning` distinguishes a completed install with a later warning;
+`InstallationUnknown` represents a failure after the replacement outcome can no
+longer be proved.
+
+### CX-06
+
+**EC decides a file looks like random data before it looks for a byte-order
+mark.** In principle a file could be reported as unknown, or as the wrong
+encoding, even though its first bytes say what it is.
+
+This changes what EC *reports*. It is not evidence that conversion writes a file
+it should have refused.
+
+Evidence: the entropy guard returns before `UnicodeDetector.DetectFromBuffer`
+examines the mark.
+
+**Re-scored Occasional to Theoretical on 2026-09-08, after measurement.** No
+text reaches the gate. Across all four corpora, 3,620 files are large enough to
+be gated (512 bytes) and 47 trip the 7.4-bit threshold — every one of them
+binary: 35 fixtures under `13_Binary/`, plus images and a spreadsheet in
+directories the corpora label `None`. The highest-entropy *text* file among 3,568
+candidates is dense Chinese XML in gb2312 at **6.8133**, a margin of 0.59 below
+the threshold, with UTF-16 Chinese just behind it. Base64 caps at 6.0 by
+construction. Reaching 7.4 needs a near-uniform byte distribution, which prose
+in any encoding does not produce.
+
+**A fix was written and then dropped**, which is the part worth recording. Making
+the guard yield to a byte-order mark works, and costs something measurable:
+`CheckBom` returns a codec from the marker bytes alone, so BOM-prefixed binary
+began detecting as `utf-16` instead of `(Unknown)`, and a scan containing one
+moved from exit 0 to exit 3. Strict validation still caught it and no bytes
+changed, so nothing was corrupted — but that is a measured behaviour change
+bought against a benefit no corpus file demonstrates.
+
+Reopen this on evidence of real text at or above the threshold, not on the
+mechanism, which is not in doubt.
+
+### CX-07
+
+**Old JSON and CSV artifacts are intentionally ordinary input.** The earlier
+ledger claimed they were excluded and even described a correction that was
+never made. `docs/CLI.md` deliberately says old plans, journals, and reports are
+scanned because a user may wish to convert them. A current `old-plan.json` probe
+was detected as ASCII. Only backups, sidecars, temporary files, and the current
+command's output paths are excluded.
+
+This false correction was discovered by re-deriving the row from source rather
+than trusting its own note.
+
+### CX-08
+
+**CLI mode conflicts are executable documentation.**
+`DocumentedOptionContractTests` pins the rejected combinations around
+`-DetectOnly`, validation, conversion, plan, and apply.
+
+### CX-09
+
+**An interrupted GUI write run still produces a journal.** Unit coverage and
+GUI smoke phase I reconcile completed and unattempted entries.
+
+### CX-10
+
+**An explicit choice does not erase detection history.** Plan summaries now say
+“chosen by you; detection still ran and is recorded,” with provenance tests.
+
+### CX-11
+
+**Settings-path creation is inside startup error handling.** A failure no longer
+escapes before the guarded settings load begins.
+
+### CX-12
+
+**Window restoration checks the monitors that exist now.**
+`WindowPosition.IsReachable` requires a useful title-bar intersection, with
+tests for removed, left-side, and secondary displays.
+
+### CX-13
+
+**Detector parity is enforced before integration and release.** The parity
+workflow runs on pull requests, and the release workflow declares it as a job
+dependency.
+
+### EC-01
+
+**A reviewed refusal is binding.** `PlannedFile.HasReliableUnicodeDetection`
+carries the policy input that was formerly lost at the plan boundary.
+`AppliedPlanFidelityTests.ThePlanCarriesTheDetectionReliabilityTheVetoDependsOn`
+pins it.
+
+### EC-02
+
+**Read-only modes use the conversion safety decision.**
+`ReadOnlyModeAmbiguityTests` proves that an unprovable BOM-less Unicode source is
+not reported valid when conversion would refuse it.
+
+### EC-03
+
+**The v3.10.1 advisory reaches the real window.** GUI smoke phase H asserts on
+the rendered source-choice text rather than only on an internal decision.
+
+### EC-04
+
+**Plan failures control the exit code.** The plan branch returns processing
+failure before considering `-FailOnChanges`; `PlanPreflightReportingTests`
+covers the ordering.
+
+### EC-05
+
+**Only scheduled conversions require a source hash.** Plan loading no longer
+makes an unreadable skipped or refused entry render the whole plan unusable.
+
+### EC-06
+
+**Drive roots resolve without manufacturing `C:\\`.**
+`ConversionPlan.ResolvePath` now uses a root-aware containment check, with
+theories for `C:\`, nested paths, and outside paths.
+
+This defect was found before v3.11.0, recorded as confirmed, reported as closed,
+and shipped broken in both **v3.11.0 and v3.11.1**. It was rediscovered during an
+unrelated review. This history is why status is now derived from a checkable
+ledger rather than a summary.
+
+### EC-07
+
+**The refusal gives two actionable choices.**
+`BomlessUnicodeSafety.DescribeRefusal` offers both UTF-16 byte orders instead of
+recommending the unproved estimate.
+
+### EC-08
+
+**Fixed by evaluating wildcard masks with .NET's non-backtracking engine.** The
+translation is unchanged — `*` becomes `.*`, `?` becomes `.`, and a
+separator-free mask still matches at any depth — so include and exclude results
+are the same. What changes is that matching runs in time proportional to the
+input rather than retrying an exponential number of alternatives.
+`NonBacktracking` replaces `Compiled`; the two are mutually exclusive.
+
+Was: `CompilePatterns` built a `Compiled` regex, which uses
+`Regex.InfiniteMatchTimeout`. A mask carrying twelve separated wildcards, matched
+against a nonmatching forty-character run of `a`, did not finish within three
+seconds and had to be terminated, while realistic names answered in 0–5 ms. The
+trigger needs both inputs to be deliberately hostile, and the mask comes from the
+operator rather than an untrusted file — which is why reach stayed Theoretical.
+An unbounded runtime is still worth removing for the price of one option.
+
+**It is not free, and the earlier note here that it cost nothing was wrong.**
+Measured over 3,937 files, median of five warm runs: 128 ms with `Compiled`
+against 148 ms with `NonBacktracking` — about 16%, or roughly 5 µs per file, and
+the same figure for a plain `*.txt` mask as for `*a*b*.txt`. That is the price of
+a bounded worst case, recorded so the next reader weighs it instead of
+rediscovering it.
+
+An independent differential comparison of the two engines over 500 generated
+masks against 200 generated paths — 100,000 pairs, including separators and the
+regex-special characters EC escapes — found no case where they disagreed.
+
+`PathAwarePatternTests.WildcardPatternsUseTheNonBacktrackingEngine` asserts the
+option before exercising the hostile input, so restoring the old engine fails in
+9 ms instead of hanging the run. That mutation was performed, and the file
+restored byte-identical by SHA-256.
+
+Three dead ends stay recorded: a matching filename stops at the first success and
+proves nothing; `*` crossing directory separators is deliberate and tested; and
+replacing `.*` with `[^/]*` does not prevent backtracking within a separator-free
+filename. `PathAwarePatternTests.PathQualifiedPattern_MatchesOnlyTheIntendedSubtree`
+pins the intended `src/*.cs` directory behavior.
+
+### EC-09
+
+**Selected EC artifacts are counted.** `.bak`, `.ecmeta.json`, and temporary
+conversion files update `TraversalCounters.FilesExcludedAsEcArtifact`, pinned by
+`ArtifactExclusionCoverageTests`.
+
+### EC-10
+
+**A failed snapshot is an error, not a policy decision.** Journal outcome tests
+pin `ScanFailed` to `Error` rather than `Refused`.
+
+### EC-11
+
+**Both console cancellation subscriptions have bounded lifetimes.** Each Ctrl+C
+handler is removed in `finally`, so it cannot retain a disposed token source.
+
+### EC-12
+
+**Skipped and unchanged are separate GUI counts.** The tally is pinned by
+`SkippedFilesAreNotCountedAsUnchanged`.
+
+### EC-13
+
+**Mixed batches describe source choice per file.** `DescribeSourceChoice` no
+longer presents one run-wide explicit encoding when several were used.
+
+### EC-14
+
+**Source and output text hashes come from separate reads.** The conversion
+record accepts the output digest produced by verification and rejects a missing
+one; `RecordedProvenanceTests` compares the installed output independently.
+
+### EC-15
+
+**Before:** plans and journals carried five safety flags that were always `true`.
+EC never read them when applying a plan, so they proved nothing about whether any
+individual check had run - but a reader could easily take a serialized `true` as
+proof that one had.
+
+**Now:** the files carry one safety-rules version and a sentence describing it.
+EC checks the version; the sentence exists only to tell a reader what the version
+means.
+
+This was a clarity fix, not a conversion-safety fix. EC always executed its strict
+behaviour; only the artifact implied the flags were the reason.
+
+Evidence: `StrictDecoding`, `StrictEncoding`, `OutputVerification`,
+`AtomicInstall` and `LegacyRequiresExplicitSource` were replaced by
+`SemanticsDescription`, the sentence `ConversionSemantics.Describes` already
+held. `SemanticsVersion` remains the only enforced compatibility value, and a
+test confirms the description is never consulted: altering it inside a plan file
+changes nothing about whether that plan loads.
+
+The artifacts changed shape, so their versions say so: plan schema 5 to 6,
+journal schema 4 to 5. That rejects plans written by v3.13.0 as well as older
+ones - semantics 7 shipped in that release, so this is not the free change it
+would have been a day earlier.
+
+### EC-16
+
+**Settings use the same atomic artifact writer as other records.** An
+interruption before replacement leaves the previous preferences intact. This
+was closed incidentally by the v3.12.1 artifact-writer refactor, not by a
+settings-specific change.
+
+### EC-17
+
+**A comment describes the text check backwards.** Control and private-use
+characters *lower* the printable-text ratio. The comment beside the calculation
+says they are ignored.
+
+Nothing a user sees is wrong: the binary-rejection behaviour is the intended one.
+What is wrong is what the next person reads, which is why reach is Common.
+
+Evidence: `TextValidation.cs` increments the total rune count before its category
+switch, so those scalars count toward the denominator while never incrementing
+`printable`.
+
+Still open because the fix is not confined to one repository. The comment is
+byte-identical in EncodingChecker, LineEndingNormalizer and CorpusTesters, and
+the parity check requires it to stay that way, so all three must change together.
+
+### EC-18
+
+**Before:** EC remembered only when it *had* found a BOM-less UTF-16 ambiguity.
+When it found none, that answer was forgotten, and the full check could run again
+on the next pass.
+
+**Now:** both answers are remembered, so each file is examined once. The stored
+value is nullable: null means not yet classified, and `None` means classified
+with no doubt found.
+
+Nothing a user sees changes, which is why this carries no test of its own. It was
+not a speed problem either: measurement found no meaningful cost, because a
+provable file fails the opposite-order decode inside its first buffer. The defect
+was redundant work and a state that could not tell "no" from "not asked".
+
+### EC-19
+
+**The proposed encoding-instance gap did not reach conversion.** Conversion
+re-resolves the codec name through `Encoding.GetEncoding`, whose UTF-8 instance
+has the expected preamble. A current file beginning with two UTF-8 BOMs was
+refused with `MultipleLeadingByteOrderMarks` and exit 5 through both automatic
+detection and `-From utf-8`.
+
+### EC-20
+
+**A file can change while EC is working out what encoding it is.** Detection
+opens the file in a mode that lets another program write to it or delete it at
+the same time, so the encoding EC reports can describe bytes that have already
+changed.
+
+No source file is altered by this. Before conversion writes anything it takes its
+own copy of the bytes, bound to a hash. What can go stale is what detection and
+validation *report*.
+
+Evidence: `TextEncoding.DetectFromFile` opens with
+`FileShare.ReadWrite | FileShare.Delete`, while the validation and
+source-snapshot paths use `FileShare.Read`.
+
+Still open because the obvious correction is not obviously right. Tightening
+detection to match would make EC fail on any file another program holds open,
+which includes ordinary log files.
+
+### EC-21
+
+**All three save dialogs have deterministic disposal.** Each construction site
+uses `using var`.
+
+### EC-22
+
+**Each JSON store shares its reader and writer options.** Plan and recovery
+metadata no longer serialize and deserialize through mismatched option objects.
+
+### EC-23
+
+**Before:** applying a plan assumed an earlier check had already produced a valid
+file path. The assumption held, but nothing said so - and had later code bypassed
+that check, the failure would have surfaced as an unexplained null reference.
+
+**Now:** EC stops with an explicit error naming the check that must have run.
+
+Under the present flow nothing changes, which is why nothing new is asserted and
+no test accompanies it. EC-06 is what happened the last time an invariant of this
+shape was left implicit.
+
+Evidence: `FindStaleFiles` rejects a plan whose paths resolve outside its
+directory; reaching the dereference means that check did not run.
 
 ### EC-24
 **Before:** the smoke driver picked an encoding by searching for a list item -
