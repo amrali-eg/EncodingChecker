@@ -169,7 +169,7 @@ public sealed class ReadOnlyModeAmbiguityTests : IDisposable
 
         Assert.Equal("utf-16", detected.SourceEncoding);
         Assert.Null(detected.ReasonCode);
-        Assert.False(detected.HasAmbiguousBomlessUtf16);
+        Assert.False(detected.HasBomlessUnicodeDoubt);
 
         ConversionReportEntry validated =
             Assert.Single(Scan(ScanAction.Validate, "utf-16"));
@@ -201,7 +201,7 @@ public sealed class ReadOnlyModeAmbiguityTests : IDisposable
 
         ConversionReportEntry entry = Assert.Single(Scan(ScanAction.Detect));
 
-        Assert.False(entry.HasAmbiguousBomlessUtf16);
+        Assert.False(entry.HasBomlessUnicodeDoubt);
         Assert.Null(entry.ReasonCode);
     }
 
@@ -215,7 +215,7 @@ public sealed class ReadOnlyModeAmbiguityTests : IDisposable
         ConversionReportEntry entry = Assert.Single(Scan(ScanAction.Detect));
 
         Assert.Equal("us-ascii", entry.SourceEncoding);
-        Assert.False(entry.HasAmbiguousBomlessUtf16);
+        Assert.False(entry.HasBomlessUnicodeDoubt);
         Assert.Null(entry.ReasonCode);
     }
 }

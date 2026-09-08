@@ -149,7 +149,7 @@ public sealed class TargetAliasIdentityTests : IDisposable
                 "mystery", targetCodePage: 0, targetHasBom: false,
                 sourceWasSpecified: false, isUnicodeOrAscii: false,
                 explicitSourceConflictsWithReliableDetection: false,
-                automaticBomlessUtf16IsAmbiguous: false,
+                automaticBomlessUnicodeDoubt: BomlessUnicodeKind.None,
                 out _, out _));
     }
 

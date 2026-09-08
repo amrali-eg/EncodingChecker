@@ -44,9 +44,8 @@ public sealed class EncodingConversionMatrixTests : IDisposable
         yield return [new UnicodeEncoding(true, false), false, "utf-8", false, TestContent.Multilingual];
         yield return [new UnicodeEncoding(true, true), true, "utf-8-bom", true, TestContent.Multilingual];
 
-        yield return [new UTF32Encoding(false, false), false, "utf-8", false, TestContent.Multilingual];
+        // BOM-less UTF-32 is refused, not converted: see BomlessUtf32RefusalTests.
         yield return [new UTF32Encoding(false, true), true, "utf-8-bom", true, TestContent.Multilingual];
-        yield return [new UTF32Encoding(true, false), false, "utf-8", false, TestContent.Multilingual];
         yield return [new UTF32Encoding(true, true), true, "utf-8-bom", true, TestContent.Multilingual];
 
         yield return [new UTF8Encoding(false), false, "utf-32-bom", true, TestContent.Multilingual];

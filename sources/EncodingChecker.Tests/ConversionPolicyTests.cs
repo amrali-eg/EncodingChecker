@@ -144,7 +144,7 @@ public sealed class ConversionPolicyTests : IDisposable
             "utf-16le", targetCodePage: 1200, targetHasBom: false,
             sourceWasSpecified: false, isUnicodeOrAscii: false,
             explicitSourceConflictsWithReliableDetection: false,
-            automaticBomlessUtf16IsAmbiguous: false,
+            automaticBomlessUnicodeDoubt: BomlessUnicodeKind.None,
             out SourceInterpretation interpretation, out string? reason);
 
         Assert.Equal(PlannedAction.Refuse, action);
@@ -162,7 +162,7 @@ public sealed class ConversionPolicyTests : IDisposable
             "utf-16le", targetCodePage: 1200, targetHasBom: false,
             sourceWasSpecified: false, isUnicodeOrAscii: true,
             explicitSourceConflictsWithReliableDetection: false,
-            automaticBomlessUtf16IsAmbiguous: false,
+            automaticBomlessUnicodeDoubt: BomlessUnicodeKind.None,
             out SourceInterpretation automatic, out _));
         Assert.Equal(SourceInterpretation.AutomaticUnicodeOrAscii, automatic);
 
@@ -173,7 +173,7 @@ public sealed class ConversionPolicyTests : IDisposable
             "utf-8", targetCodePage: 65001, targetHasBom: false,
             sourceWasSpecified: true, isUnicodeOrAscii: false,
             explicitSourceConflictsWithReliableDetection: false,
-            automaticBomlessUtf16IsAmbiguous: false,
+            automaticBomlessUnicodeDoubt: BomlessUnicodeKind.None,
             out SourceInterpretation explicitSource, out _));
         Assert.Equal(SourceInterpretation.ExplicitSource, explicitSource);
     }
@@ -190,7 +190,7 @@ public sealed class ConversionPolicyTests : IDisposable
                 "utf-8", targetCodePage: 65001, targetHasBom: false,
                 sourceWasSpecified: false, isUnicodeOrAscii: true,
                 explicitSourceConflictsWithReliableDetection: false,
-                automaticBomlessUtf16IsAmbiguous: false,
+                automaticBomlessUnicodeDoubt: BomlessUnicodeKind.None,
                 out SourceInterpretation interpretation, out _));
         Assert.Equal(SourceInterpretation.NotApplicable, interpretation);
     }
@@ -207,7 +207,7 @@ public sealed class ConversionPolicyTests : IDisposable
                 "utf-8", targetCodePage: 65001, targetHasBom: false,
                 sourceWasSpecified: false, isUnicodeOrAscii: false,
                 explicitSourceConflictsWithReliableDetection: false,
-                automaticBomlessUtf16IsAmbiguous: false,
+                automaticBomlessUnicodeDoubt: BomlessUnicodeKind.None,
                 out SourceInterpretation interpretation, out _));
         Assert.Equal(SourceInterpretation.NotApplicable, interpretation);
 

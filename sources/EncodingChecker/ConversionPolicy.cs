@@ -45,7 +45,7 @@ internal static class ConversionPolicy
         bool sourceWasSpecified,
         bool isUnicodeOrAscii,
         bool explicitSourceConflictsWithReliableDetection,
-        bool automaticBomlessUtf16IsAmbiguous,
+        BomlessUnicodeKind automaticBomlessUnicodeDoubt,
         out SourceInterpretation sourceInterpretation,
         out string? reason)
     {
@@ -82,11 +82,17 @@ internal static class ConversionPolicy
             return PlannedAction.Refuse;
         }
 
-        if (!sourceWasSpecified && automaticBomlessUtf16IsAmbiguous)
+        if (!sourceWasSpecified &&
+            automaticBomlessUnicodeDoubt != BomlessUnicodeKind.None)
         {
             sourceInterpretation = SourceInterpretation.AutomaticUnicodeOrAscii;
-            reason = "BOM-less UTF-16 needs a byte order that the bytes do not prove. "
-                     + "Choose the original source encoding explicitly before converting.";
+
+            reason = automaticBomlessUnicodeDoubt == BomlessUnicodeKind.Utf32NotProvable
+                ? "BOM-less UTF-32 is an estimate the bytes do not establish. Choose the "
+                  + "original source encoding explicitly before converting."
+                : "BOM-less UTF-16 needs a byte order that the bytes do not prove. "
+                  + "Choose the original source encoding explicitly before converting.";
+
             return PlannedAction.Refuse;
         }
 
@@ -134,12 +140,15 @@ internal static class ConversionPolicy
     /// </remarks>
     internal static string? ReasonCodeFor(
         PlannedAction action,
-        SourceInterpretation sourceInterpretation) => (action, sourceInterpretation) switch
+        SourceInterpretation sourceInterpretation,
+        BomlessUnicodeKind bomlessUnicodeDoubt) => (action, sourceInterpretation) switch
     {
         (PlannedAction.Skip, _) => ConversionReasonCodes.UnknownEncoding,
 
+        // Reads the same input Decide read, rather than working the kind out again.
         (PlannedAction.Refuse, SourceInterpretation.AutomaticUnicodeOrAscii) =>
-            ConversionReasonCodes.AmbiguousBomlessUtf16,
+            BomlessUnicodeSafety.ReasonCodeFor(bomlessUnicodeDoubt)
+            ?? ConversionReasonCodes.AmbiguousBomlessUtf16,
 
         (PlannedAction.Refuse, SourceInterpretation.ExplicitSource) =>
             ConversionReasonCodes.ExplicitSourceConflictsWithDetection,
@@ -161,5 +170,9 @@ internal static class ConversionPolicy
         string.Equals(
             reasonCode,
             ConversionReasonCodes.AmbiguousBomlessUtf16,
+            StringComparison.Ordinal) ||
+        string.Equals(
+            reasonCode,
+            ConversionReasonCodes.UnprovableBomlessUtf32,
             StringComparison.Ordinal);
 }

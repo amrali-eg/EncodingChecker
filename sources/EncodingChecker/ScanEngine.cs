@@ -360,7 +360,7 @@ internal static class ScanEngine
                     entry.DetectedEncodingLabel = snapshot.DetectedEncoding?.WebName;
                     entry.DetectedEncodingHasBom = snapshot.DetectedEncodingHasBom;
                     entry.HasReliableUnicodeDetection = snapshot.HasReliableUnicodeDetection;
-                    entry.HasAmbiguousBomlessUtf16 = snapshot.HasAmbiguousBomlessUtf16;
+                    entry.BomlessUnicodeDoubt = snapshot.BomlessUnicodeDoubt;
                     entry.ExpectedSourceSha256 = snapshot.Sha256;
                     entry.ExpectedSourceSize = snapshot.Size;
                     entry.Action = snapshot.SourceEncoding is null
@@ -446,7 +446,7 @@ internal static class ScanEngine
         Encoding? automaticallyDetected = null;
         bool hasReliableUnicodeDetection = false;
         bool snapshotDetectedHasBom = false;
-        bool snapshotHasAmbiguousBomlessUtf16 = false;
+        BomlessUnicodeKind snapshotBomlessUnicodeDoubt = BomlessUnicodeKind.None;
         bool hasBom;
         string? sourceSha256 = null;
         long? sourceSize = null;
@@ -461,7 +461,7 @@ internal static class ScanEngine
             automaticallyDetected = snapshot.DetectedEncoding;
             hasReliableUnicodeDetection = snapshot.HasReliableUnicodeDetection;
             snapshotDetectedHasBom = snapshot.DetectedEncodingHasBom;
-            snapshotHasAmbiguousBomlessUtf16 = snapshot.HasAmbiguousBomlessUtf16;
+            snapshotBomlessUnicodeDoubt = snapshot.BomlessUnicodeDoubt;
             hasBom = snapshot.HasBom;
             sourceSha256 = snapshot.Sha256;
             sourceSize = snapshot.Size;
@@ -481,9 +481,10 @@ internal static class ScanEngine
             detected = TextEncoding.DetectFromFile(path);
             hasBom = detected != null && HasPreamble(path, detected);
 
-            // Read-only modes must disclose the same unprovable byte order conversion refuses.
-            snapshotHasAmbiguousBomlessUtf16 =
-                detected is not null && IsAmbiguousBomlessUtf16(path, detected, hasBom);
+            // Read-only modes must disclose the same doubt conversion refuses.
+            snapshotBomlessUnicodeDoubt = detected is null
+                ? BomlessUnicodeKind.None
+                : ClassifyBomlessUnicode(path, detected, hasBom);
         }
 
         string sourceCharset =
@@ -508,7 +509,7 @@ internal static class ScanEngine
                 snapshotDetectedHasBom,
             // Not gated on Convert like the two above: those are policy inputs, this
             // states what the bytes do and holds in every mode.
-            HasAmbiguousBomlessUtf16 = snapshotHasAmbiguousBomlessUtf16,
+            BomlessUnicodeDoubt = snapshotBomlessUnicodeDoubt,
         };
 
         if (options.Action == ScanAction.Convert)
@@ -526,7 +527,7 @@ internal static class ScanEngine
                     entry.Diagnostic =
                         "The file's encoding could not be identified from its contents.";
                 }
-                else if (entry.HasAmbiguousBomlessUtf16)
+                else if (entry.HasBomlessUnicodeDoubt)
                 {
                     // Detection found an estimate, not a reading. Nothing failed, so
                     // the result stays Unchanged; the row must still say which it is.
@@ -578,7 +579,7 @@ internal static class ScanEngine
                     entry.ReasonCode = ConversionReasonCodes.StrictValidationFailed;
                     entry.Diagnostic = validationDiagnostic;
                 }
-                else if (entry.HasAmbiguousBomlessUtf16)
+                else if (entry.HasBomlessUnicodeDoubt)
                 {
                     // The two byte orders are separate entries in the allowed set; the
                     // label matched only because .NET names both "utf-16". Passing the
@@ -633,7 +634,7 @@ internal static class ScanEngine
         Encoding? SourceEncoding,
         bool HasReliableUnicodeDetection,
         bool DetectedEncodingHasBom,
-        bool HasAmbiguousBomlessUtf16,
+        BomlessUnicodeKind BomlessUnicodeDoubt,
         bool HasBom,
         string Sha256,
         long Size);
@@ -675,7 +676,7 @@ internal static class ScanEngine
         bool detectedHasBom = detectedEncoding != null && HasPreamble(stream, detectedEncoding);
         bool hasReliableUnicodeDetection = IsReliablyDetectedUnicode(
             stream, detectedEncoding, detectedHasBom);
-        bool hasAmbiguousBomlessUtf16 = BomlessUnicodeSafety.IsAmbiguous(
+        BomlessUnicodeKind bomlessUnicodeDoubt = BomlessUnicodeSafety.Classify(
             stream, detectedEncoding, detectedHasBom);
 
         stream.Position = 0;
@@ -683,7 +684,7 @@ internal static class ScanEngine
 
         return new SourceSnapshot(
             detectedEncoding, sourceEncoding, hasReliableUnicodeDetection,
-            detectedHasBom, hasAmbiguousBomlessUtf16, hasBom, hash, stream.Length);
+            detectedHasBom, bomlessUnicodeDoubt, hasBom, hash, stream.Length);
     }
 
     private static bool IsReliablyDetectedUnicode(
@@ -710,13 +711,16 @@ internal static class ScanEngine
     /// Checks the whole current source before a direct conversion that did not receive
     /// a source-bound planning snapshot.
     /// </summary>
-    private static bool IsAmbiguousBomlessUtf16(
+    private static BomlessUnicodeKind ClassifyBomlessUnicode(
         string path,
         Encoding sourceEncoding,
         bool sourceHasBom)
     {
-        if (sourceHasBom || sourceEncoding.CodePage is not (1200 or 1201))
-            return false;
+        if (sourceHasBom ||
+            sourceEncoding.CodePage is not (1200 or 1201 or 12000 or 12001))
+        {
+            return BomlessUnicodeKind.None;
+        }
 
         using FileStream stream = new(
             path,
@@ -726,7 +730,7 @@ internal static class ScanEngine
             64 * 1024,
             FileOptions.SequentialScan);
 
-        return BomlessUnicodeSafety.IsAmbiguous(stream, sourceEncoding, sourceHasBom);
+        return BomlessUnicodeSafety.Classify(stream, sourceEncoding, sourceHasBom);
     }
 
     /// <summary>
@@ -830,16 +834,19 @@ internal static class ScanEngine
             ? entry.DetectedEncodingHasBom
             : sourceHasBom;
 
-        bool bomlessUtf16IsAmbiguous =
-            entry.HasAmbiguousBomlessUtf16 ||
-            (bomlessCandidate is not null && IsAmbiguousBomlessUtf16(
-                path, bomlessCandidate, candidateHasBom));
+        BomlessUnicodeKind bomlessUnicodeDoubt = entry.HasBomlessUnicodeDoubt
+            ? entry.BomlessUnicodeDoubt
+            : bomlessCandidate is null
+                ? BomlessUnicodeKind.None
+                : ClassifyBomlessUnicode(path, bomlessCandidate, candidateHasBom);
 
-        entry.HasAmbiguousBomlessUtf16 = bomlessUtf16IsAmbiguous;
+        entry.BomlessUnicodeDoubt = bomlessUnicodeDoubt;
 
         // The decision: refuse automatically only when nobody has supplied an answer.
-        bool automaticBomlessUtf16IsAmbiguous =
-            !entry.SourceEncodingWasSpecified && bomlessUtf16IsAmbiguous;
+        BomlessUnicodeKind automaticBomlessUnicodeDoubt =
+            entry.SourceEncodingWasSpecified
+                ? BomlessUnicodeKind.None
+                : bomlessUnicodeDoubt;
 
         PlannedAction action = ConversionPolicy.Decide(
             sourceCharset,
@@ -853,7 +860,7 @@ internal static class ScanEngine
             entry.SourceEncodingWasSpecified && entry.HasReliableUnicodeDetection &&
             automaticallyDetected is not null &&
             automaticallyDetected.CodePage != sourceEncoding.CodePage,
-            automaticBomlessUtf16IsAmbiguous,
+            automaticBomlessUnicodeDoubt,
             out SourceInterpretation sourceInterpretation,
             out string? policyReason);
 
@@ -873,7 +880,8 @@ internal static class ScanEngine
 
         entry.Action = action;
         entry.SourceInterpretation = sourceInterpretation;
-        entry.ReasonCode = ConversionPolicy.ReasonCodeFor(action, sourceInterpretation);
+        entry.ReasonCode = ConversionPolicy.ReasonCodeFor(
+            action, sourceInterpretation, automaticBomlessUnicodeDoubt);
 
         // A retry must not carry a diagnostic from an earlier failed attempt.
         // The optional BOM-less Unicode advisory below is added back for this pass.
@@ -885,7 +893,7 @@ internal static class ScanEngine
             automaticallyDetected is not null &&
             IsUtf16OrUtf32(automaticallyDetected) &&
             !entry.DetectedEncodingHasBom &&
-            (bomlessUtf16IsAmbiguous ||
+            (bomlessUnicodeDoubt != BomlessUnicodeKind.None ||
              automaticallyDetected.CodePage != sourceEncoding.CodePage))
         {
             bool matchesEstimate =
@@ -928,7 +936,7 @@ internal static class ScanEngine
         if (action != PlannedAction.Convert)
         {
             entry.Result = ConversionPolicy.ToRowResult(action);
-            entry.Diagnostic = automaticBomlessUtf16IsAmbiguous
+            entry.Diagnostic = automaticBomlessUnicodeDoubt != BomlessUnicodeKind.None
                 ? BomlessUnicodeSafety.DescribeRefusal(sourceEncoding)
                 : policyReason;
             return;
