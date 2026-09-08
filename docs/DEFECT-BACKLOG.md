@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=63 fixed=52 open=7 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
+<!-- backlog-counts total=65 fixed=52 open=9 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 63 findings — 52 fixed, 7 open, 1 not reproduced, 1 withdrawn,
+**Derived count: 65 findings — 52 fixed, 9 open, 1 not reproduced, 1 withdrawn,
 1 intentional behavior, and 1 design decision.** Recompute and check these
 figures with:
 
@@ -52,6 +52,8 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 |---|---|---|---|---|---|
 | EC-17 | A comment describes the text check backwards | Open | Low | Common | [EC-17](#ec-17) |
 | EC-20 | A file can change while EC is detecting its encoding | Open | Low | Rare | [EC-20](#ec-20) |
+| EC-25 | The smoke suite never sets the main window's target encoding | Open | Low | Rare | [EC-25](#ec-25) |
+| EC-26 | The smoke driver trusts an enabled flag that has been seen stale | Open | Low | Rare | [EC-26](#ec-26) |
 | CX-06 | EC checks for random-looking data before checking for a BOM | Open | Medium | Theoretical | [CX-06](#cx-06) |
 | BL-05 | Force-closing during a conversion can produce an error on exit | Open | Low | Rare | [BL-05](#bl-05) |
 | BL-19 | ASCII with many NUL bytes can be reported as UTF-16 | Open | Medium | Rare | [BL-19](#bl-19) |
@@ -532,8 +534,8 @@ moved from exit 0 to exit 3. Strict validation still caught it and no bytes
 changed, so nothing was corrupted — but that is a measured behaviour change
 bought against a benefit no corpus file demonstrates.
 
-Reopen this on evidence of real text at or above the threshold, not on the
-mechanism, which is not in doubt.
+It stays open at Theoretical. Re-score it only on evidence of real text at or
+above the threshold - not on the mechanism, which is not in doubt.
 
 ### CX-07
 
@@ -862,13 +864,41 @@ thing a future phase could still trip over," and phase E is that phase. The
 keyboard fallback went with the searches: it foregrounded a window and typed into
 whatever held focus, and could not have repaired either cause.
 
-**Recorded, not fixed here.** `ConfigureScan` asks for `utf-8` on `lstConvert`
-while that control is still disabled, and succeeds only because `utf-8` is
-already selected, so the method returns before setting anything: the suite never
-exercises the new path on that combo, and a changed application default would
-fail every phase at setup. Separately, `Current.IsEnabled` was observed stale for
-five seconds on a control that then accepted `Invoke`, and the driver uses
-`IsEnabled` as a readiness signal elsewhere. Neither was reproduced as a failure.
+Two loose ends were found while making this change and neither is fixed by it.
+They carry their own IDs rather than sitting inside a closed entry where the
+ledger cannot give them a status: [EC-25](#ec-25) and [EC-26](#ec-26).
+
+### EC-25
+
+**The smoke suite never exercises setting the main window's target encoding.**
+`ConfigureScan` asks for `utf-8` on `lstConvert` before scanning, while that
+control is still disabled. It succeeds only because `utf-8` is already selected,
+so `SelectCombo` returns before setting anything.
+
+Nothing is wrong with EC here; the gap is in the suite. Two consequences follow.
+The path [EC-24](#ec-24) replaced is never driven on that combo, so a defect in it
+would not be caught. And if the application's default target ever changed, every
+phase would fail during setup rather than in the phase that cares.
+
+Closing it means asserting the default before the scan and exercising a
+non-default target after scanning enables the control. Neither was written,
+because doing so changes the suite that had just been stabilised.
+
+### EC-26
+
+**The driver treats an enabled flag as a readiness signal, and it has been seen
+stale.** `Current.IsEnabled` reported a control disabled for five seconds while
+that same control accepted `Invoke` and closed the review. The driver uses
+`IsEnabled` elsewhere to decide that a scan has finished, that the main window is
+ready, and when cancellation may be attempted.
+
+No failure was reproduced from it. What it means is that a phase could time out
+waiting for a control that was ready the whole time, and report a defect in EC
+that is not there - the same shape of wrong answer that the preflight check exists
+to prevent.
+
+A readiness check that also confirms the operation it is waiting for would not
+depend on the flag. Nothing has been changed yet.
 
 ## Decisions and mistakes that must remain visible
 

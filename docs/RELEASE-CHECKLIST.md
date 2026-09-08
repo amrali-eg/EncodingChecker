@@ -1,10 +1,13 @@
 # Release checklist
 
-Automated coverage is the first gate and is enforced by CI. Three checks are required
-before anything merges to master: `build` (compile and unit tests), `gui-smoke` (the ten
-phases below, against an ordinary Release build), and `parity` (the shared detector
-sources still match across all three repositories). What follows is what CI cannot
-answer.
+This file records every gate a release passes, automated and manual, so that one list
+can be worked through end to end.
+
+Three checks are required before anything merges to master, and CI enforces them:
+`build` (compile and unit tests), `gui-smoke` (the ten phases below, against an ordinary
+Release build), and `parity` (the shared detector sources still match across all three
+repositories). The items below repeat the ones worth confirming by eye at release time,
+and add the ones no workflow can answer.
 
 ## Source and version
 
@@ -76,12 +79,19 @@ is what ties a release to its source.
 
 **Two workflows run this for you.** `ci.yml` runs all ten phases on every pull request
 and push to master, against an ordinary Release build, as a required `gui-smoke` check.
-`release.yml` runs them again against the signed, published executable — the bytes that
-ship, not a rebuild of the same commit — after signing and before packaging, and uploads
-the report as a `gui-smoke-evidence` artifact. A failure there stops the release.
+`release.yml` runs them again against the published framework-dependent executable —
+a file that ships, not a rebuild of the same commit — after the signing step and before
+packaging, and uploads the report as a `gui-smoke-evidence` artifact. A failure there
+stops the release.
+
+Be precise about what that second run covers. Signing is conditional on the certificate
+secrets: when they are absent the step is skipped and the suite drives an **unsigned**
+file. And only the framework-dependent executable is driven; the self-contained build is
+packaged and shipped without being driven. Widening the run to both is a decision nobody
+has taken.
 
 So a regression should be caught on the pull request. The release run remains the only
-one that drives the artifact users receive. Run it locally while developing if you like;
+one that drives a file users receive. Run it locally while developing if you like;
 neither gate depends on your remembering to.
 
 Two prerequisites, each refused with exit 2 rather than reported as a pass: an
@@ -106,7 +116,11 @@ checks the status line *against* the bytes on disk rather than trusting it.
 The ten phases record themselves. `gui-smoke-report.md` and `gui-smoke-report.json`
 already carry the EC version, the executable hash, the OS and .NET versions, and every
 phase's before and after file hashes — better evidence than a transcribed letter, and not
-subject to a typo. Keep both files with the release.
+subject to a typo.
+
+They are uploaded as a workflow artifact and expire on GitHub's retention schedule. If a
+release needs them permanently, attach both files to the GitHub release; nothing does
+that automatically today.
 
 What still needs a person is the spot check above, because nobody has automated a
 judgement about whether text is readable. Fill this in and keep it alongside them.
