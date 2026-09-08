@@ -646,8 +646,9 @@ never as ground truth.
 
 #### The GUI smoke evidence records no managed-assembly hash
 
-`RELEASE-CHECKLIST.md` states that the report carries "the executable and managed-assembly
-hashes", and several records above repeat it. The executable hash is real. The managed one
+`RELEASE-CHECKLIST.md` said at this release that the report carries "the executable and
+managed-assembly hashes", as did `GUI-SMOKE-TEST.md` in its own phrasing; both were
+corrected afterwards. The executable hash is real. The managed one
 is **absent**: `gui-smoke-report.json` has no `EcManagedAssemblySha256` key, and the
 Markdown renders an empty pair of backticks, while both still name the
 `EncodingChecker.dll` path as though the value were there.

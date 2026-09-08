@@ -40,13 +40,20 @@ internal static class Program
             string workspace = Path.Combine(options.Output, "workspace");
             Directory.CreateDirectory(workspace);
 
+            // Record the assembly path only when there is one to hash, so the report
+            // never names a file it could not read.
+            string? managedAssembly = ManagedAssemblyPath(options.App);
+            string? managedAssemblySha256 = HashIfPresent(managedAssembly);
+            if (managedAssemblySha256 is null)
+                managedAssembly = null;
+
             var suite = new SmokeSuite(options.App, workspace);
             SmokeReport report = suite.Run(options.Phase) with
             {
                 EcVersion = FileVersionInfo.GetVersionInfo(options.App).FileVersion
                             ?? "unknown",
-                EcManagedAssembly = ManagedAssemblyPath(options.App),
-                EcManagedAssemblySha256 = HashIfPresent(ManagedAssemblyPath(options.App)),
+                EcManagedAssembly = managedAssembly,
+                EcManagedAssemblySha256 = managedAssemblySha256,
             };
 
             WriteReports(options.Output, report);
@@ -117,9 +124,25 @@ internal static class Program
             .AppendLine()
             .AppendLine($"- Result: **{(report.Passed ? "PASS" : "FAIL")}**")
             .AppendLine($"- EC version: `{report.EcVersion}`")
-            .AppendLine($"- Executable SHA-256: `{report.EcSha256}`")
-            .AppendLine($"- Managed assembly: `{report.EcManagedAssembly}`")
-            .AppendLine($"- Managed assembly SHA-256: `{report.EcManagedAssemblySha256}`")
+            .AppendLine($"- Executable SHA-256: `{report.EcSha256}`");
+
+        // Two lines when a loose assembly is there to hash, one sentence when it is not.
+        // Never a path with an empty hash beside it, and never a blank line in the list.
+        if (report.EcManagedAssemblySha256 is { Length: > 0 })
+        {
+            markdown
+                .AppendLine($"- Managed assembly: `{report.EcManagedAssembly}`")
+                .AppendLine(
+                    $"- Managed assembly SHA-256: `{report.EcManagedAssemblySha256}`");
+        }
+        else
+        {
+            markdown.AppendLine(
+                "- Managed assembly: none; a single-file publish leaves no loose "
+                + "assembly, so only the executable above is hashed");
+        }
+
+        markdown
             .AppendLine($"- Started UTC: `{report.StartedUtc}`")
             .AppendLine($"- Completed UTC: `{report.CompletedUtc}`")
             .AppendLine($"- Windows: `{report.OS}`")

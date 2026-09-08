@@ -73,10 +73,15 @@ internal sealed class ConversionReportEntry
     /// What detection could not establish about a BOM-less Unicode source. Internal
     /// planning state; not in CSV.
     /// </summary>
-    internal BomlessUnicodeKind BomlessUnicodeDoubt { get; set; }
+    /// <remarks>
+    /// Null means not yet classified. <see cref="BomlessUnicodeKind.None"/> means
+    /// classified with no doubt found, so the file is examined once either way.
+    /// </remarks>
+    internal BomlessUnicodeKind? BomlessUnicodeDoubt { get; set; }
 
     /// <summary>Whether that doubt exists at all.</summary>
-    internal bool HasBomlessUnicodeDoubt => BomlessUnicodeDoubt != BomlessUnicodeKind.None;
+    internal bool HasBomlessUnicodeDoubt =>
+        BomlessUnicodeDoubt is not null and not BomlessUnicodeKind.None;
 
     /// <summary>
     /// The SHA-256 this file must still have when installed, or <see langword="null"/>
