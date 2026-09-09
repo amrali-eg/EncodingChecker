@@ -272,11 +272,13 @@ internal sealed class EcGuiDriver : IDisposable
     ///
     /// The two ways a click can fail mean different things. A refusal - the control
     /// reporting itself not-enabled - happens before anything is delivered, so trying
-    /// again is safe and right. An element that disappears mid-call, or a COM failure,
-    /// is what a click that *did* land looks like when the window hides the button in
-    /// response; it may equally have failed before delivering. Clicking again there
-    /// would be a fresh action rather than a retry, so the attempt stops and the status
-    /// is left to say what happened.
+    /// again is safe and right, and it is left to the shared retry loop, which repeats it
+    /// and keeps it as the cause a timeout would name.
+    ///
+    /// Any other automation failure might have followed a click that did land: an element
+    /// disappearing mid-call is what a successful cancel looks like when the window hides
+    /// the button in response. Clicking again there would be a fresh action rather than a
+    /// retry, so the attempt stops and the status is left to say what happened.
     /// </remarks>
     private void RequestCancel()
     {
@@ -299,13 +301,18 @@ internal sealed class EcGuiDriver : IDisposable
                             Invoke(cancel);
                             clickMayHaveLanded = true;
                         }
-                        catch (ElementNotEnabledException)
-                        {
-                            // Refused outright, so nothing was delivered. Try again.
-                            return false;
-                        }
+                        // A refusal is the one failure that certainly delivered nothing,
+                        // and it is deliberately not caught: the shared loop retries it
+                        // and keeps it, so a wait that expires on repeated refusals can
+                        // name them. Answering "not ready" here would clear that cause.
+                        //
+                        // Every other automation failure might have followed a click that
+                        // landed, so the attempt stops and the status is left to say.
                         catch (Exception ex) when (
-                            ex is ElementNotAvailableException or COMException)
+                            ex is not ElementNotEnabledException &&
+                            ex is ElementNotAvailableException
+                                or COMException
+                                or InvalidOperationException)
                         {
                             clickMayHaveLanded = true;
                         }
