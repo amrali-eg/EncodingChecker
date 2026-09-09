@@ -241,36 +241,66 @@ internal sealed class EcGuiDriver : IDisposable
         // Timed against real progress rather than a sleep, so the phase does not depend
         // on how fast the machine converts. Cancelling before the first write would
         // exercise the declined-review path instead, which phase A already covers.
-        WaitForOperationOutcome(
-            () => writingHasBegun() || ConversionHasFinished(),
-            "The conversion did not begin writing.");
+        bool nothingLeftToCancel = WaitForWritingOrCompletion(writingHasBegun);
 
         // A run short enough to finish first is not a failure; the phase then checks a
         // completed run instead, and its assertions still hold.
-        TryCancel();
+        if (!nothingLeftToCancel)
+            Cancel();
 
         WaitForMainReady();
     }
 
-    /// <summary>Clicks Cancel if there is still a Cancel to click.</summary>
+    /// <summary>
+    /// Waits for the conversion to start writing, or to report that it is already over.
+    /// </summary>
+    /// <returns>
+    /// True only when the run reported itself finished with no write observed - the one
+    /// case where there is nothing left to cancel. A run that wrote and then finished
+    /// returns false, so the cancel step still has to establish which happened.
+    /// </returns>
+    private bool WaitForWritingOrCompletion(Func<bool> writingHasBegun)
+    {
+        bool finished = false;
+
+        WaitForOperationOutcome(
+            () =>
+            {
+                if (writingHasBegun())
+                    return true;
+
+                finished = ConversionHasFinished();
+                return finished;
+            },
+            "The conversion did not begin writing.");
+
+        return finished;
+    }
+
+    /// <summary>Cancels the run, or establishes that it finished before it could be.</summary>
     /// <remarks>
     /// The window hides the button when a run ends - <c>MainForm</c> sets
-    /// <c>btnCancel.Visible</c> - so by the time a finished run is noticed the control is
-    /// not disabled but absent, and the ordinary lookup would wait the full timeout for
-    /// something deliberately gone. Not finding it therefore means the run already
-    /// stopped, which is the outcome the caller wanted anyway.
+    /// <c>btnCancel.Visible</c> - so an absent button has two meanings: the run beat the
+    /// phase to it, or automation failed to see a button that is on screen. Only the
+    /// window's own final status separates them, and accepting absence on its own would
+    /// let the phase pass without ever exercising cancellation.
     ///
-    /// The short budget is for the live case, where the button is on screen throughout
-    /// the run and the first probe finds it. Nothing is reported when the wait comes back
-    /// empty: an absent button is an answer, not a failure.
+    /// Both acceptable outcomes are therefore raced, and neither arriving is a failure
+    /// that carries whatever the probe kept throwing.
     /// </remarks>
-    private void TryCancel()
+    private void Cancel()
     {
-        AutomationElement? cancel = WaitFor(
-            () => FindById(MainWindow, "btnCancel"),
-            TimeSpan.FromSeconds(2),
-            out Exception? _);
+        AutomationElement? cancel = null;
 
+        WaitUntil(
+            () =>
+            {
+                cancel = FindById(MainWindow, "btnCancel");
+                return cancel is not null || ConversionHasFinished();
+            },
+            "The run offered neither a Cancel button nor a final status.");
+
+        // Conversion won the race, and said so.
         if (cancel is null)
             return;
 
@@ -278,13 +308,14 @@ internal sealed class EcGuiDriver : IDisposable
         {
             Invoke(cancel);
         }
-        catch (ElementNotEnabledException)
+        catch (Exception ex) when (
+            ex is ElementNotEnabledException or ElementNotAvailableException)
         {
-            // It stopped between finding the button and clicking it.
-        }
-        catch (ElementNotAvailableException)
-        {
-            // The button was hidden between the two.
+            // The button went between finding it and clicking it. That is only acceptable
+            // if the run stopped on its own, which the window has to say for itself.
+            WaitForOperationOutcome(
+                () => ConversionHasFinished(),
+                "Cancel became unavailable without the run reporting that it had stopped.");
         }
     }
 
@@ -811,8 +842,7 @@ internal sealed class EcGuiDriver : IDisposable
     /// likeliest reason a wait expired, and it is what a bare timeout cannot report.
     /// There is deliberately no overload without it, so a wait that reports a timeout
     /// cannot leave the cause out by accident. Only a caller with nothing to report
-    /// discards it - see <see cref="TryCancel"/>, where an empty result is the answer
-    /// rather than a failure.
+    /// discards it, and no wait in this driver currently does.
     /// </param>
     private static T? WaitFor<T>(Func<T?> probe, TimeSpan timeout, out Exception? lastError)
         where T : class

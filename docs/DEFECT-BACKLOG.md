@@ -946,8 +946,27 @@ run ends, so the button leaves the automation tree altogether and the ordinary
 lookup waited the full thirty seconds and threw `TimeoutException: Control
 'btnCancel' was not found`. A run that finished between the check and the click
 would have failed the phase - the same flake the guard was written to prevent.
-Cancelling is now a bounded attempt that treats an absent button as the answer it
-is, and the control passes.
+
+**The replacement was wrong too, and review caught it rather than a control.** It
+treated a button it could not find as proof that the run had finished, and stopped
+looking after two seconds. A missing button has two meanings - the run beat the
+phase to it, or automation failed to see a button that is on screen - and only the
+window's own final status separates them. A driver that could never resolve the
+button would have reported phase I as passing while cancelling nothing: blinded to
+`btnCancel` permanently, that version passes twice out of two, converts all four
+hundred files, and still calls the result an interrupted run.
+
+Cancelling now races a real button against a confirmed final status, and reports
+when neither arrives. Blinded to both, it fails twice out of two with *"The run
+offered neither a Cancel button nor a final status"*. A button that disappears
+between being found and being clicked has to be confirmed by a final status before
+that disappearance is accepted, and a run already over when the cancel step is
+reached is accepted through that same confirmation, which two more runs show.
+
+What the controls could not settle is whether the two-second budget had ever been
+the limiting factor on this machine. Blinding the driver for three seconds ends
+identically on both versions, because the conversion finishes inside that window.
+That part of the correction rests on the reasoning, not on a measured difference.
 
 **A regression was introduced and fixed inside this change, and is recorded
 because the numbers below would otherwise look better than the work was.** The
@@ -958,9 +977,9 @@ runs gave one pass and fourteen phase I failures. Reading only the status bar's
 own subtree, and treating a lost race as "no evidence yet" rather than as a
 failure, is what fixed it.
 
-**Runs afterwards.** Fifteen consecutive full runs on the status-bar read, twelve
-more on the final shape with the bounded cancel, and five on the exact file
-committed here, which differs from those twelve by two comments. As with
+**Runs afterwards.** Fifteen consecutive full runs on the status-bar read,
+seventeen across the shape that preceded the raced cancel, and ten on the file
+committed here. As with
 [EC-27](#ec-27), clean runs corroborate rather than prove; what closes this is
 that the dependency is gone from the driver, and that the controls which could
 have caught a mistake did.
