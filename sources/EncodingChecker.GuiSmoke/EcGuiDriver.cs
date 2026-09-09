@@ -261,13 +261,16 @@ internal sealed class EcGuiDriver : IDisposable
     /// own, and EC writes "Conversion stopped" for the first and "Conversion complete"
     /// for the second.
     ///
-    /// The press is attempted once. A refusal - the control reporting itself
+    /// At most one press with an uncertain outcome is attempted. A press that was
+    /// definitely refused may be retried: a refusal - the control reporting itself
     /// not-enabled - is the one failure that certainly delivered nothing, so it is left
     /// to the retry loop, which repeats it and keeps it as a cause. Any other automation
     /// failure might have followed a press that did land, so pressing stops there and
-    /// the exception is kept: it is the likeliest explanation of a run that then
-    /// finishes uncancelled, and without it that outcome is indistinguishable from a
-    /// machine too fast to interrupt.
+    /// the exception is kept.
+    ///
+    /// Either way the reason is named in the failure. A run that finishes uncancelled
+    /// after a press that was refused, or one whose outcome was unknown, is otherwise
+    /// indistinguishable from a machine too fast to interrupt.
     /// </remarks>
     private void CancelAndConfirmStopped()
     {
@@ -309,11 +312,13 @@ internal sealed class EcGuiDriver : IDisposable
 
         if (finalStatus is null)
         {
+            // Only the uncertain press is added here: Expired already names whatever
+            // the wait was still retrying, which is where a refusal shows up.
             throw Expired(
                 (pressed
                     ? "Cancel was pressed but the run never reported a final status."
                     : "No Cancel button appeared and the run never reported a final status.")
-                + Blame(uncertainPress),
+                + Blame(uncertainPress, null),
                 lastError);
         }
 
@@ -321,19 +326,37 @@ internal sealed class EcGuiDriver : IDisposable
         {
             throw new GuiDriverException(
                 "Cancellation was not exercised. EC instead reported: " + finalStatus
-                + Blame(uncertainPress));
+                + Blame(uncertainPress, lastError));
         }
     }
 
     /// <summary>
-    /// Names the failed press when there was one, so a run that finished uncancelled is
+    /// Names why the press did not stop the run, so a run that finished uncancelled is
     /// not reported as a machine that was simply too fast.
     /// </summary>
-    private static string Blame(Exception? uncertainPress) =>
-        uncertainPress is null
-            ? string.Empty
-            : " The press to Cancel failed with an unknown outcome and was not repeated: "
-              + $"{uncertainPress.GetType().Name}: {uncertainPress.Message}";
+    /// <remarks>
+    /// The two are different evidence and read differently. An uncertain press may have
+    /// landed and was deliberately not repeated. A refusal certainly delivered nothing
+    /// and was retried for as long as the run lasted, and arrives as
+    /// <paramref name="lastRefusal"/> - the error the wait was still holding, which it
+    /// keeps only when the refusal was the most recent thing to happen.
+    /// </remarks>
+    private static string Blame(Exception? uncertainPress, Exception? lastRefusal)
+    {
+        if (uncertainPress is not null)
+        {
+            return " The Cancel press failed with an unknown outcome and was not repeated: "
+                   + $"{uncertainPress.GetType().Name}: {uncertainPress.Message}";
+        }
+
+        if (lastRefusal is ElementNotEnabledException)
+        {
+            return " The last attempt to press Cancel was refused: "
+                   + $"{lastRefusal.GetType().Name}: {lastRefusal.Message}";
+        }
+
+        return string.Empty;
+    }
 
     /// <summary>Waits until the status line contains <paramref name="fragment"/>.</summary>
     /// <remarks>
