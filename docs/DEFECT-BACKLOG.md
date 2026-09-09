@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=66 fixed=54 open=8 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
+<!-- backlog-counts total=66 fixed=55 open=7 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 66 findings — 54 fixed, 8 open, 1 not reproduced, 1 withdrawn,
+**Derived count: 66 findings — 55 fixed, 7 open, 1 not reproduced, 1 withdrawn,
 1 intentional behavior, and 1 design decision.** Recompute and check these
 figures with:
 
@@ -52,7 +52,6 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 |---|---|---|---|---|---|
 | EC-17 | A comment describes the text check backwards | Open | Low | Common | [EC-17](#ec-17) |
 | EC-20 | A file can change while EC is detecting its encoding | Open | Low | Rare | [EC-20](#ec-20) |
-| EC-26 | The smoke driver trusts an enabled flag that has been seen stale | Open | Low | Rare | [EC-26](#ec-26) |
 | CX-06 | EC checks for random-looking data before checking for a BOM | Open | Medium | Theoretical | [CX-06](#cx-06) |
 | BL-05 | Force-closing during a conversion can produce an error on exit | Open | Low | Rare | [BL-05](#bl-05) |
 | BL-19 | ASCII with many NUL bytes can be reported as UTF-16 | Open | Medium | Rare | [BL-19](#bl-19) |
@@ -71,6 +70,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | EC-08 | A constructed include pattern could hang a scan indefinitely | Fixed | — | — | [EC-08](#ec-08) |
 | EC-24 | The GUI smoke gate could select in the wrong combo | Fixed | — | — | [EC-24](#ec-24) |
 | EC-25 | The smoke suite never set the main window's target encoding | Fixed | — | — | [EC-25](#ec-25) |
+| EC-26 | The smoke driver trusted an enabled flag that had been seen stale | Fixed | — | — | [EC-26](#ec-26) |
 | EC-27 | The smoke driver read a status line the window had not written yet | Fixed | — | — | [EC-27](#ec-27) |
 | EC-18 | EC repeated a BOM-less UTF-16 safety check unnecessarily | Fixed | — | — | [EC-18](#ec-18) |
 | EC-23 | Plan application assumed a required path existed instead of checking it | Fixed | — | — | [EC-23](#ec-23) |
@@ -902,28 +902,68 @@ suite retires the evidence gathered for the previous one.
 
 ### EC-26
 
-**The driver treats an enabled flag as a readiness signal, and it has been seen
-stale.** `Current.IsEnabled` reported a control disabled for five seconds while
-that same control accepted `Invoke` and closed the review.
+**Before:** the driver asked whether a button was enabled and treated the answer
+as "the work has finished". `Current.IsEnabled` had been seen reporting a control
+disabled for five seconds while that same control accepted `Invoke` and closed the
+review, so four readiness checks rested on a flag that was known to lie: that a
+scan had finished, that writing had begun, whether cancellation was still
+possible, and that the main window had returned to idle. A phase could time out
+waiting for a control that was ready the whole time, and report a defect in EC
+that was not there.
 
-Four readiness checks still rest on it: that a scan has finished, that writing has
-begun, whether cancellation is still possible, and that the main window has
-returned to idle. None of them confirms the thing it is waiting for; each asks the
-flag instead.
+**Now:** each of those waits names evidence the operation itself produced - rows
+in the list, bytes on disk, the summary the window writes when it stops - through
+one helper, `WaitForOperationOutcome`. The rule it enforces is that `IsEnabled`
+answers "is this button enabled", which is a different question from "has the work
+finished". The helper that read the flag is gone from the driver, so the compiler,
+not a convention, is what keeps it out of the next readiness check.
 
-What it means is that a phase could time out waiting for a control that was ready
-the whole time, and report a defect in EC that is not there - the same shape of
-wrong answer the preflight check exists to prevent.
+**EC is unchanged.** Enabling a button before the work behind it is complete is a
+reasonable thing for a window to do, and nothing a user sees depends on the order.
+The defect was in the instrument's idea of "finished". The one production file
+this touches, `MainForm`, was read and not edited.
 
-**This was briefly closed on the strength of [EC-27](#ec-27), and should not have
-been.** That fix stopped one phase reading a status the window had not written
-yet, by waiting for the text rather than the button. It removed a consequence of
-trusting the flag in one place; it did not remove the dependency, and the four
-checks above are unchanged. Twenty-five clean runs say nothing about a flag that
-was seen misreporting once.
+**What the controls showed.** One found a defect by failing. Another could not
+be run at all.
 
-Closing it means readiness checks that confirm the operation rather than consult
-the flag. Nothing has been changed for that yet.
+The first control - forcing the flag to stay false and proving the suite still
+completes - could not be run as asked, because there is no longer anything to
+force: removing the helper left no caller for a stale flag to reach. That is a
+stronger guarantee than the control would have given, and it is also why the
+control is absent rather than passed.
+
+The second let the conversion finish before the phase reached its cancel step, to
+exercise the path a fast machine would take. Instrumented, the ordinary run
+rewrites 48 of 400 files and leaves 352 untouched; under the control it rewrites
+all 400 and leaves none, so the mutation demonstrably changed what happened. Phase
+I passed three times either way.
+
+The third clicked Cancel on a run that had already stopped, and **failed three
+times out of three** - which is the finding. The first attempt at this fix caught
+`ElementNotEnabledException`, on the assumption that a finished run leaves a
+disabled button. It does not: `MainForm` sets `btnCancel.Visible = false` when a
+run ends, so the button leaves the automation tree altogether and the ordinary
+lookup waited the full thirty seconds and threw `TimeoutException: Control
+'btnCancel' was not found`. A run that finished between the check and the click
+would have failed the phase - the same flake the guard was written to prevent.
+Cancelling is now a bounded attempt that treats an absent button as the answer it
+is, and the control passes.
+
+**A regression was introduced and fixed inside this change, and is recorded
+because the numbers below would otherwise look better than the work was.** The
+first version of the fix replaced the flag with a whole-window text scan, polled
+every 50 ms. In phase I that walks four hundred result rows while they are still
+being added; elements vanished mid-enumeration and the read threw. Fifteen full
+runs gave one pass and fourteen phase I failures. Reading only the status bar's
+own subtree, and treating a lost race as "no evidence yet" rather than as a
+failure, is what fixed it.
+
+**Runs afterwards.** Fifteen consecutive full runs on the status-bar read, twelve
+more on the final shape with the bounded cancel, and five on the exact file
+committed here, which differs from those twelve by two comments. As with
+[EC-27](#ec-27), clean runs corroborate rather than prove; what closes this is
+that the dependency is gone from the driver, and that the controls which could
+have caught a mistake did.
 
 ### EC-27
 

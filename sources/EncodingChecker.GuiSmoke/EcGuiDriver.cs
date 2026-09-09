@@ -95,8 +95,8 @@ internal sealed class EcGuiDriver : IDisposable
     private void Scan(int expectedFiles)
     {
         Invoke(MainWindow, "btnView");
-        WaitUntil(
-            () => ResultCount() == expectedFiles && IsEnabled(MainWindow, "btnView"),
+        WaitForOperationOutcome(
+            () => ResultCount() == expectedFiles && ScanHasFinished(),
             $"View did not finish with {expectedFiles} result row(s).");
     }
 
@@ -210,10 +210,10 @@ internal sealed class EcGuiDriver : IDisposable
 
     /// <summary>Every piece of text the main window is showing, joined.</summary>
     /// <remarks>
-    /// The status line is a ToolStripStatusLabel, which is not a window and carries no
-    /// automation id, so it cannot be found the way ordinary controls are. Reading the
-    /// window's rendered text finds it without depending on how the toolstrip chooses
-    /// to expose its items.
+    /// This is for failure messages, where the whole window is what you want: an
+    /// unexpected dialog or an empty result list explains a timeout that the status line
+    /// alone would not. Waiting is a different job - see <see cref="StatusLine"/>, which
+    /// reads only the status bar and does not throw.
     /// </remarks>
     internal string StatusText() =>
         string.Join(
@@ -241,16 +241,51 @@ internal sealed class EcGuiDriver : IDisposable
         // Timed against real progress rather than a sleep, so the phase does not depend
         // on how fast the machine converts. Cancelling before the first write would
         // exercise the declined-review path instead, which phase A already covers.
-        WaitUntil(
-            () => writingHasBegun() || IsEnabled(MainWindow, "btnView"),
+        WaitForOperationOutcome(
+            () => writingHasBegun() || ConversionHasFinished(),
             "The conversion did not begin writing.");
 
         // A run short enough to finish first is not a failure; the phase then checks a
         // completed run instead, and its assertions still hold.
-        if (!IsEnabled(MainWindow, "btnView"))
-            Invoke(MainWindow, "btnCancel");
+        TryCancel();
 
         WaitForMainReady();
+    }
+
+    /// <summary>Clicks Cancel if there is still a Cancel to click.</summary>
+    /// <remarks>
+    /// The window hides the button when a run ends - <c>MainForm</c> sets
+    /// <c>btnCancel.Visible</c> - so by the time a finished run is noticed the control is
+    /// not disabled but absent, and the ordinary lookup would wait the full timeout for
+    /// something deliberately gone. Not finding it therefore means the run already
+    /// stopped, which is the outcome the caller wanted anyway.
+    ///
+    /// The short budget is for the live case, where the button is on screen throughout
+    /// the run and the first probe finds it. Nothing is reported when the wait comes back
+    /// empty: an absent button is an answer, not a failure.
+    /// </remarks>
+    private void TryCancel()
+    {
+        AutomationElement? cancel = WaitFor(
+            () => FindById(MainWindow, "btnCancel"),
+            TimeSpan.FromSeconds(2),
+            out Exception? _);
+
+        if (cancel is null)
+            return;
+
+        try
+        {
+            Invoke(cancel);
+        }
+        catch (ElementNotEnabledException)
+        {
+            // It stopped between finding the button and clicking it.
+        }
+        catch (ElementNotAvailableException)
+        {
+            // The button was hidden between the two.
+        }
     }
 
     /// <summary>Waits until the status line contains <paramref name="fragment"/>.</summary>
@@ -263,7 +298,7 @@ internal sealed class EcGuiDriver : IDisposable
     internal void WaitForStatus(string fragment)
     {
         if (WaitFor(
-                () => StatusText().Contains(fragment, StringComparison.Ordinal)
+                () => StatusLine()?.Contains(fragment, StringComparison.Ordinal) == true
                     ? new object()
                     : null,
                 Timeout,
@@ -283,9 +318,94 @@ internal sealed class EcGuiDriver : IDisposable
     }
 
     private void WaitForMainReady() =>
-        WaitUntil(
-            () => IsEnabled(MainWindow, "btnView") && FindReviewWindow() is null,
+        WaitForOperationOutcome(
+            () => FindReviewWindow() is null && ConversionHasFinished(),
             "EncodingChecker did not return to its idle state.");
+
+    /// <summary>
+    /// Waits for something the operation itself produced, rather than for a button.
+    /// </summary>
+    /// <remarks>
+    /// Whether a control is enabled is a different question from whether the work has
+    /// finished. The window re-enables its buttons before it writes the result, and its
+    /// enabled flag has been seen reporting a control disabled for five seconds while
+    /// that same control accepted a click. Rows in the list, bytes on disk and the
+    /// summary the window writes when it stops are evidence of the operation; a
+    /// control's state is not.
+    /// </remarks>
+    private void WaitForOperationOutcome(Func<bool> evidence, string what)
+    {
+        if (WaitFor(() => evidence() ? new object() : null, Timeout, out Exception? lastError)
+            is not null)
+        {
+            return;
+        }
+
+        throw Expired(
+            what + Safely(() => " The status showed: " + StatusText(),
+                          " The status could not be read"),
+            lastError);
+    }
+
+    /// <summary>The window writes "N files processed" when a scan ends.</summary>
+    private bool ScanHasFinished() =>
+        StatusLine() is string status &&
+        (status.Contains("files processed", StringComparison.Ordinal) ||
+         status.Contains("do not have the correct encoding", StringComparison.Ordinal));
+
+    /// <summary>
+    /// The status bar's text, or null when it cannot be read just now.
+    /// </summary>
+    /// <remarks>
+    /// Only the status bar's own subtree is read. Scanning the whole window means walking
+    /// every result row - four hundred of them in the interrupted-run phase, while they
+    /// are still being added - which is both slow to repeat every 50 ms and prone to
+    /// enumerating an element that disappears mid-walk.
+    ///
+    /// A read that loses that race returns null rather than throwing: not being able to
+    /// see the status is not evidence that an operation finished, so a caller waits on.
+    /// </remarks>
+    private string? StatusLine()
+    {
+        try
+        {
+            AutomationElement? bar = FindById(MainWindow, "statusBar");
+
+            if (bar is null)
+                return null;
+
+            return string.Join(
+                "\n",
+                bar.FindAll(TreeScope.Descendants, Condition.TrueCondition)
+                    .Cast<AutomationElement>()
+                    .Select(element => element.Current.Name)
+                    .Where(name => !string.IsNullOrWhiteSpace(name)));
+        }
+        catch (Exception ex) when (
+            ex is ElementNotAvailableException or InvalidOperationException or COMException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Every way a conversion or preview can end writes one of these, including the paths
+    /// where nothing was modified. Matching the headline rather than the counts keeps this
+    /// independent of what the run actually did.
+    /// </summary>
+    private bool ConversionHasFinished()
+    {
+        if (StatusLine() is not string status)
+            return false;
+
+        return status.Contains("Conversion complete", StringComparison.Ordinal) ||
+               status.Contains("Conversion stopped", StringComparison.Ordinal) ||
+               status.Contains("Conversion cancelled", StringComparison.Ordinal) ||
+               status.Contains("Conversion did not run", StringComparison.Ordinal) ||
+               status.Contains("Conversion failed", StringComparison.Ordinal) ||
+               status.Contains("Preview complete", StringComparison.Ordinal) ||
+               status.Contains("Preview cancelled", StringComparison.Ordinal);
+    }
 
     private AutomationElement WaitForReview(int previousHandle = 0)
     {
@@ -500,9 +620,6 @@ internal sealed class EcGuiDriver : IDisposable
             $"'{automationId}' did not reach the requested state.");
     }
 
-    private bool IsEnabled(AutomationElement root, string automationId) =>
-        FindById(root, automationId)?.Current.IsEnabled == true;
-
     private void Invoke(AutomationElement root, string automationId) =>
         Invoke(RequireById(root, automationId));
 
@@ -692,7 +809,10 @@ internal sealed class EcGuiDriver : IDisposable
     /// <param name="lastError">
     /// The last error retried before giving up. A probe that threw every time is the
     /// likeliest reason a wait expired, and it is what a bare timeout cannot report.
-    /// There is deliberately no overload without it: both wait paths must report the cause.
+    /// There is deliberately no overload without it, so a wait that reports a timeout
+    /// cannot leave the cause out by accident. Only a caller with nothing to report
+    /// discards it - see <see cref="TryCancel"/>, where an empty result is the answer
+    /// rather than a failure.
     /// </param>
     private static T? WaitFor<T>(Func<T?> probe, TimeSpan timeout, out Exception? lastError)
         where T : class
