@@ -245,104 +245,95 @@ internal sealed class EcGuiDriver : IDisposable
             () => writingHasBegun() || ConversionHasFinished(),
             "The conversion neither began writing nor reported that it had finished.");
 
-        RequestCancel();
-
-        WaitForStoppedConversion();
+        CancelAndConfirmStopped();
     }
 
     /// <summary>
-    /// Requests cancellation, or fails if the run finishes before it can be cancelled.
+    /// Cancels the run and requires the window to report that it was stopped.
     /// </summary>
     /// <remarks>
-    /// The window hides the button when a run ends - <c>MainForm</c> sets
-    /// <c>btnCancel.Visible</c> - so an absent button has two meanings: the run beat the
-    /// phase to it, or automation failed to see a button that is on screen. Only the
-    /// window's own final status separates them. Either meaning prevents this phase from
-    /// proving cancellation, so neither is accepted as a successful test.
+    /// One wait decides everything, because the three things that could be asked
+    /// separately - has a button appeared, did the press land, what did the run report -
+    /// are only meaningful together. Pressing is not proof of cancelling: the window
+    /// hides the button when a run ends, so a press can fail precisely because it
+    /// worked, and an absent button says only that some run is over. The status is the
+    /// single fact that separates a run that was stopped from one that finished on its
+    /// own, and EC writes "Conversion stopped" for the first and "Conversion complete"
+    /// for the second.
     ///
-    /// The button and final status are raced so a fast completion produces a clear failure
-    /// instead of a misleading timeout.
-    ///
-    /// Whether cancellation happened is not decided here. Delivering a click is not
-    /// proof it took effect, and failing to deliver one is not proof it did not: the
-    /// window's own final status is the only thing that separates a run that was stopped
-    /// from one that finished on its own, and <see cref="WaitForStoppedConversion"/>
-    /// reads it. This method's job is to ask, and to wait until the run has reported
-    /// something.
-    ///
-    /// The two ways a click can fail mean different things. A refusal - the control
-    /// reporting itself not-enabled - happens before anything is delivered, so trying
-    /// again is safe and right, and it is left to the shared retry loop, which repeats it
-    /// and keeps it as the cause a timeout would name.
-    ///
-    /// Any other automation failure might have followed a click that did land: an element
-    /// disappearing mid-call is what a successful cancel looks like when the window hides
-    /// the button in response. Clicking again there would be a fresh action rather than a
-    /// retry, so the attempt stops and the status is left to say what happened.
+    /// The press is attempted once. A refusal - the control reporting itself
+    /// not-enabled - is the one failure that certainly delivered nothing, so it is left
+    /// to the retry loop, which repeats it and keeps it as a cause. Any other automation
+    /// failure might have followed a press that did land, so pressing stops there and
+    /// the exception is kept: it is the likeliest explanation of a run that then
+    /// finishes uncancelled, and without it that outcome is indistinguishable from a
+    /// machine too fast to interrupt.
     /// </remarks>
-    private void RequestCancel()
+    private void CancelAndConfirmStopped()
     {
-        bool clickMayHaveLanded = false;
+        bool pressed = false;
+        Exception? uncertainPress = null;
 
-        WaitUntil(
+        string? finalStatus = WaitFor(
             () =>
             {
-                // Once a click may be in flight, stop pressing the button and just watch.
-                if (!clickMayHaveLanded)
+                if (!pressed)
                 {
                     AutomationElement? cancel = FindById(MainWindow, "btnCancel");
 
-                    // Gone means the window hid it, which it does only when a run ends -
-                    // but that has to come from the status, not the button's absence.
                     if (cancel is not null)
                     {
                         try
                         {
                             Invoke(cancel);
-                            clickMayHaveLanded = true;
+                            pressed = true;
                         }
-                        // A refusal is the one failure that certainly delivered nothing,
-                        // and it is deliberately not caught: the shared loop retries it
-                        // and keeps it, so a wait that expires on repeated refusals can
-                        // name them. Answering "not ready" here would clear that cause.
-                        //
-                        // Every other automation failure might have followed a click that
-                        // landed, so the attempt stops and the status is left to say.
                         catch (Exception ex) when (
                             ex is not ElementNotEnabledException &&
                             ex is ElementNotAvailableException
                                 or COMException
                                 or InvalidOperationException)
                         {
-                            clickMayHaveLanded = true;
+                            uncertainPress = ex;
+                            pressed = true;
                         }
                     }
                 }
 
-                return ConversionHasFinished();
+                return StatusLine() is string status && IsFinalConversionStatus(status)
+                    ? status
+                    : null;
             },
-            "The run never reported a final status after cancellation was requested.");
-    }
+            Timeout,
+            out Exception? lastError);
 
-    /// <summary>Requires the cancellation request to produce an interrupted run.</summary>
-    private void WaitForStoppedConversion()
-    {
-        string? finalStatus = null;
+        if (finalStatus is null)
+        {
+            throw Expired(
+                (pressed
+                    ? "Cancel was pressed but the run never reported a final status."
+                    : "No Cancel button appeared and the run never reported a final status.")
+                + Blame(uncertainPress),
+                lastError);
+        }
 
-        WaitForOperationOutcome(
-            () =>
-            {
-                finalStatus = StatusLine();
-                return finalStatus is not null && IsFinalConversionStatus(finalStatus);
-            },
-            "The conversion did not report a final result after cancellation.");
-
-        if (!finalStatus!.Contains("Conversion stopped", StringComparison.Ordinal))
+        if (!finalStatus.Contains("Conversion stopped", StringComparison.Ordinal))
         {
             throw new GuiDriverException(
-                "Cancellation was not exercised. EC instead reported: " + finalStatus);
+                "Cancellation was not exercised. EC instead reported: " + finalStatus
+                + Blame(uncertainPress));
         }
     }
+
+    /// <summary>
+    /// Names the failed press when there was one, so a run that finished uncancelled is
+    /// not reported as a machine that was simply too fast.
+    /// </summary>
+    private static string Blame(Exception? uncertainPress) =>
+        uncertainPress is null
+            ? string.Empty
+            : " The press to Cancel failed with an unknown outcome and was not repeated: "
+              + $"{uncertainPress.GetType().Name}: {uncertainPress.Message}";
 
     /// <summary>Waits until the status line contains <paramref name="fragment"/>.</summary>
     /// <remarks>
