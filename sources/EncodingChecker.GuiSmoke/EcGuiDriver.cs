@@ -241,11 +241,13 @@ internal sealed class EcGuiDriver : IDisposable
                     ? candidate
                     : null;
             },
-            Timeout);
+            Timeout,
+            out Exception? lastError);
 
-        return review ?? throw new TimeoutException(
+        return review ?? throw Expired(
             "The conversion review did not appear. EC exposed these windows: "
-            + DescribeTopLevelWindows());
+            + DescribeTopLevelWindows(),
+            lastError);
     }
 
     private AutomationElement? FindReviewWindow() =>
@@ -596,15 +598,14 @@ internal sealed class EcGuiDriver : IDisposable
     private static AutomationElement WaitForElement(
         Func<AutomationElement?> probe,
         string timeoutMessage) =>
-        WaitFor(probe, Timeout) ?? throw new TimeoutException(timeoutMessage);
-
-    private static T? WaitFor<T>(Func<T?> probe, TimeSpan timeout)
-        where T : class =>
-        WaitFor(probe, timeout, out _);
+        WaitFor(probe, Timeout, out Exception? lastError)
+        ?? throw Expired(timeoutMessage, lastError);
 
     /// <param name="lastError">
     /// The last error retried before giving up. A probe that threw every time is the
     /// likeliest reason a wait expired, and it is what a bare timeout cannot report.
+    /// There is deliberately no overload without it: three waits in this class were
+    /// written against one and each discarded the cause.
     /// </param>
     private static T? WaitFor<T>(Func<T?> probe, TimeSpan timeout, out Exception? lastError)
         where T : class
@@ -652,14 +653,20 @@ internal sealed class EcGuiDriver : IDisposable
             return;
         }
 
-        if (lastError is null)
-            throw new TimeoutException(timeoutMessage);
-
-        throw new TimeoutException(
-            $"{timeoutMessage} Last retried automation error: "
-            + $"{lastError.GetType().Name}: {lastError.Message}",
-            lastError);
+        throw Expired(timeoutMessage, lastError);
     }
+
+    /// <summary>
+    /// A timeout that names the error it kept retrying. A probe that threw every time is
+    /// the likeliest reason a wait expired, and every wait in this class reports it.
+    /// </summary>
+    private static TimeoutException Expired(string message, Exception? lastError) =>
+        lastError is null
+            ? new TimeoutException(message)
+            : new TimeoutException(
+                $"{message} Last retried automation error: "
+                + $"{lastError.GetType().Name}: {lastError.Message}",
+                lastError);
 
     private static void ClickAt(int x, int y)
     {

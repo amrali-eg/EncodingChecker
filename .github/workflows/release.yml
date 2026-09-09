@@ -114,6 +114,7 @@ jobs:
         run: dotnet publish sources\EncodingChecker\EncodingChecker.csproj -p:PublishProfile=SelfContainedRelease
 
       - name: Code-sign executables
+        id: sign
         if: ${{ env.CODE_SIGNING_CERT != '' && env.CODE_SIGNING_CERT_PASSWORD != '' }}
         shell: pwsh
         run: |
@@ -194,10 +195,12 @@ jobs:
         if: github.event_name != 'push'
         shell: pwsh
         run: |
-          $signing = if ($env:CODE_SIGNING_CERT -and $env:CODE_SIGNING_CERT_PASSWORD) {
-            "signed"
-          } else {
-            "not signed, because the certificate secrets are not configured"
+          # Read what the signing step did rather than deciding again from the secrets:
+          # two derivations of one fact can disagree, and this one is the report.
+          $signing = switch ('${{ steps.sign.outcome }}') {
+            'success' { 'signed' }
+            'skipped' { 'not signed, because the certificate secrets are not configured' }
+            default   { "not signed - the signing step reported '$_'" }
           }
 
           $summary = "REHEARSAL for version ${{ steps.version.outputs.version }} - " +

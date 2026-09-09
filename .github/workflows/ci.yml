@@ -36,6 +36,11 @@ jobs:
   gui-smoke:
     runs-on: windows-latest
 
+    # This job drives a real window, so a modal dialog nobody dismisses or a process that
+    # ignores Kill would otherwise run to GitHub's six-hour default - on a required check.
+    # Runs take about two minutes; this bounds a hang without failing a slow runner.
+    timeout-minutes: 10
+
     steps:
       - uses: actions/checkout@v7
 
