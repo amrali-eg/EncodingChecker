@@ -244,10 +244,17 @@ internal sealed class EcGuiDriver : IDisposable
             Timeout,
             out Exception? lastError);
 
-        return review ?? throw Expired(
-            "The conversion review did not appear. EC exposed these windows: "
-            + DescribeTopLevelWindows(),
-            lastError);
+        if (review is not null)
+            return review;
+
+        string message = "The conversion review did not appear.";
+
+        // A repeated automation error is already the strongest available diagnostic.
+        // Do not make another automation query that could hide it while building the message.
+        if (lastError is null)
+            message += " EC exposed these windows: " + DescribeTopLevelWindows();
+
+        throw Expired(message, lastError);
     }
 
     private AutomationElement? FindReviewWindow() =>
@@ -604,8 +611,7 @@ internal sealed class EcGuiDriver : IDisposable
     /// <param name="lastError">
     /// The last error retried before giving up. A probe that threw every time is the
     /// likeliest reason a wait expired, and it is what a bare timeout cannot report.
-    /// There is deliberately no overload without it: three waits in this class were
-    /// written against one and each discarded the cause.
+    /// There is deliberately no overload without it: both wait paths must report the cause.
     /// </param>
     private static T? WaitFor<T>(Func<T?> probe, TimeSpan timeout, out Exception? lastError)
         where T : class
