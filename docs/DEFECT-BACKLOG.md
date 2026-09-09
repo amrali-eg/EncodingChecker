@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=65 fixed=52 open=9 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
+<!-- backlog-counts total=66 fixed=55 open=7 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 65 findings — 52 fixed, 9 open, 1 not reproduced, 1 withdrawn,
+**Derived count: 66 findings — 55 fixed, 7 open, 1 not reproduced, 1 withdrawn,
 1 intentional behavior, and 1 design decision.** Recompute and check these
 figures with:
 
@@ -52,8 +52,6 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 |---|---|---|---|---|---|
 | EC-17 | A comment describes the text check backwards | Open | Low | Common | [EC-17](#ec-17) |
 | EC-20 | A file can change while EC is detecting its encoding | Open | Low | Rare | [EC-20](#ec-20) |
-| EC-25 | The smoke suite never sets the main window's target encoding | Open | Low | Rare | [EC-25](#ec-25) |
-| EC-26 | The smoke driver trusts an enabled flag that has been seen stale | Open | Low | Rare | [EC-26](#ec-26) |
 | CX-06 | EC checks for random-looking data before checking for a BOM | Open | Medium | Theoretical | [CX-06](#cx-06) |
 | BL-05 | Force-closing during a conversion can produce an error on exit | Open | Low | Rare | [BL-05](#bl-05) |
 | BL-19 | ASCII with many NUL bytes can be reported as UTF-16 | Open | Medium | Rare | [BL-19](#bl-19) |
@@ -71,6 +69,9 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | BL-01 | Ambiguous BOM-less UTF-32 could be converted under the wrong byte order | Fixed | — | — | [BL-01](#bl-01) |
 | EC-08 | A constructed include pattern could hang a scan indefinitely | Fixed | — | — | [EC-08](#ec-08) |
 | EC-24 | The GUI smoke gate could select in the wrong combo | Fixed | — | — | [EC-24](#ec-24) |
+| EC-25 | The smoke suite never set the main window's target encoding | Fixed | — | — | [EC-25](#ec-25) |
+| EC-26 | The smoke driver trusted an enabled flag that had been seen stale | Fixed | — | — | [EC-26](#ec-26) |
+| EC-27 | The smoke driver read a status line the window had not written yet | Fixed | — | — | [EC-27](#ec-27) |
 | EC-18 | EC repeated a BOM-less UTF-16 safety check unnecessarily | Fixed | — | — | [EC-18](#ec-18) |
 | EC-23 | Plan application assumed a required path existed instead of checking it | Fixed | — | — | [EC-23](#ec-23) |
 | BL-27 | GUI smoke reports could show an empty or misleading build hash | Fixed | — | — | [BL-27](#bl-27) |
@@ -870,35 +871,183 @@ ledger cannot give them a status: [EC-25](#ec-25) and [EC-26](#ec-26).
 
 ### EC-25
 
-**The smoke suite never exercises setting the main window's target encoding.**
-`ConfigureScan` asks for `utf-8` on `lstConvert` before scanning, while that
-control is still disabled. It succeeds only because `utf-8` is already selected,
-so `SelectCombo` returns before setting anything.
+**Before:** the smoke suite assumed that the main window's target encoding was
+`utf-8`, but it never proved that assumption. During setup it tried to select
+`utf-8` before the target list was enabled. Because `utf-8` was already selected,
+the helper returned without changing anything. The suite therefore never tested
+whether it could actually change that list. If EC's default changed, every phase
+would fail during setup instead of one focused check explaining what was wrong.
 
-Nothing is wrong with EC here; the gap is in the suite. Two consequences follow.
-The path [EC-24](#ec-24) replaced is never driven on that combo, so a defect in it
-would not be caught. And if the application's default target ever changed, every
-phase would fail during setup rather than in the phase that cares.
+**Now:** every phase first checks that the window opens with `utf-8` selected and
+reports that assumption clearly if it is not true. After phase A cancels the
+review, it changes the target to `us-ascii` and then back to `utf-8`. Phase A is a
+safe place for this check because it already verifies that cancelling the review
+does not change any files. The round trip proves both that the expected default is
+present and that the target control can really be changed.
 
-Closing it means asserting the default before the scan and exercising a
-non-default target after scanning enables the control. Neither was written,
-because doing so changes the suite that had just been stabilised.
+`us-ascii` was chosen because its name is unambiguous in the list. BOM variants
+such as `utf-8-bom` and `utf-16BE` share prefixes with other entries, so an
+imprecise selection helper could appear to work while selecting the wrong item.
+
+**EC is unchanged.** The gap was in the smoke suite. `MainForm` selects `utf-8`
+only when that exact entry is available; otherwise it selects the first entry.
+The suite therefore needs to check the startup value rather than silently depend
+on it.
+
+**Evidence:** both halves were checked by mutation, each requiring the build to
+succeed and the compiled binary's hash to change before anything was run - a
+mutation that fails to compile otherwise leaves the previous binary answering the
+question. Deliberately expecting a different default produced a clear failure in
+750 ms. Temporarily making the target-selection method do nothing was caught when
+phase A could not change to `us-ascii` and back. After the source was restored
+byte-for-byte, fifteen consecutive complete smoke-suite runs passed - fewer than
+some earlier findings carry, because altering the suite retires the evidence
+gathered for the previous one.
 
 ### EC-26
 
-**The driver treats an enabled flag as a readiness signal, and it has been seen
-stale.** `Current.IsEnabled` reported a control disabled for five seconds while
-that same control accepted `Invoke` and closed the review. The driver uses
-`IsEnabled` elsewhere to decide that a scan has finished, that the main window is
-ready, and when cancellation may be attempted.
-
-No failure was reproduced from it. What it means is that a phase could time out
+**Before:** the driver asked whether a button was enabled and treated the answer
+as "the work has finished". `Current.IsEnabled` had been seen reporting a control
+disabled for five seconds while that same control accepted `Invoke` and closed the
+review, so four readiness checks rested on a flag that was known to lie: that a
+scan had finished, that writing had begun, whether cancellation was still
+possible, and that the main window had returned to idle. A phase could time out
 waiting for a control that was ready the whole time, and report a defect in EC
-that is not there - the same shape of wrong answer that the preflight check exists
-to prevent.
+that was not there.
 
-A readiness check that also confirms the operation it is waiting for would not
-depend on the flag. Nothing has been changed yet.
+**Now:** each of those waits names evidence the operation itself produced - rows
+in the list, bytes on disk, the summary the window writes when it stops - through
+one helper, `WaitForOperationOutcome`. The rule it enforces is that `IsEnabled`
+answers "is this button enabled", which is a different question from "has the work
+finished". The helper that read the flag is gone from the driver, so the compiler,
+not a convention, is what keeps it out of the next readiness check.
+
+**EC is unchanged.** Enabling a button before the work behind it is complete is a
+reasonable thing for a window to do, and nothing a user sees depends on the order.
+The defect was in the instrument's idea of "finished". The one production file
+this touches, `MainForm`, was read and not edited.
+
+**What the controls showed.** One found a defect by failing. Another could not
+be run at all.
+
+The first control - forcing the flag to stay false and proving the suite still
+completes - could not be run as asked, because there is no longer anything to
+force: removing the helper left no caller for a stale flag to reach. That is a
+stronger guarantee than the control would have given, and it is also why the
+control is absent rather than passed.
+
+The second let the conversion finish before the phase reached its cancel step, to
+exercise the path a fast machine would take. Instrumented, the ordinary run
+rewrites 48 of 400 files and leaves 352 untouched; under the control it rewrites
+all 400 and leaves none, so the mutation demonstrably changed what happened. Phase
+I passed three times either way.
+
+The third clicked Cancel on a run that had already stopped, and **failed three
+times out of three** - which is the finding. The first attempt at this fix caught
+`ElementNotEnabledException`, on the assumption that a finished run leaves a
+disabled button. It does not: `MainForm` sets `btnCancel.Visible = false` when a
+run ends, so the button leaves the automation tree altogether and the ordinary
+lookup waited the full thirty seconds and threw `TimeoutException: Control
+'btnCancel' was not found`. A run that finished between the check and the click
+would have failed the phase - the same flake the guard was written to prevent.
+
+**The next two replacements were wrong too, and review caught both.** The first
+treated a button it could not find as proof that the run had finished, and stopped
+looking after two seconds. A missing button has two meanings - the run beat the
+phase to it, or automation failed to see a button that is on screen - and only the
+window's own final status separates them.
+
+The second raced a real button against that final status, but still accepted an
+ordinary completed run as a successful cancellation test. Blinded only to
+`btnCancel`, it would wait until all four hundred files finished and pass because
+the phase checked its cancellation-specific results only when files happened to
+remain untouched. It had proved completion, not cancellation.
+
+**Now:** phase I passes only after at least one file is converted, at least one is
+left untouched, and the final status says `Conversion stopped` with the matching
+converted and not-attempted counts. It asks for cancellation after the first
+observed write. If completion wins the race, the phase fails plainly instead of
+calling that a cancellation test. A button that disappears between lookup and
+click is likewise accepted only as evidence that the run completed, which still
+fails this phase because cancellation was not exercised.
+
+The decisive negative control hides only `btnCancel` while leaving the final
+status readable. The previous shape passed twice and converted all four hundred
+files. The final shape fails with *"The conversion finished before cancellation
+could be exercised."* Hiding both the button and final status also fails, retaining
+the distinction between a completed run and automation that can observe neither
+outcome.
+
+**A regression was introduced and fixed inside this change, and is recorded
+because the numbers below would otherwise look better than the work was.** The
+first version of the fix replaced the flag with a whole-window text scan, polled
+every 50 ms. In phase I that walks four hundred result rows while they are still
+being added; elements vanished mid-enumeration and the read threw. Fifteen full
+runs gave one pass and fourteen phase I failures. Reading only the status bar's
+own subtree, and treating a lost race as "no evidence yet" rather than as a
+failure, is what fixed it.
+
+**Runs afterwards.** Earlier revisions completed fifteen consecutive full runs on
+the status-bar read, seventeen on the shape before cancellation was made strict,
+and ten on the raced-cancel shape. Those all ran against four hundred files; the
+phase now uses a thousand, where eight focused runs convert 72-93 before
+cancellation lands and three complete suite runs pass at about twenty seconds
+each.
+
+Raising the count buys less than it appears to. The trigger polls by counting
+converted files, so a larger directory costs more per probe and the click lands
+proportionally later - about a twelfth of the workload converted either way. What
+does improve is the absolute room left over: nine hundred unconverted files rather
+than three hundred and seventy, which is what a machine converting far faster
+would have to burn through while UI automation's round trip stays much the same.
+If one ever does, the phase fails and says so, and the answer is to raise the
+count again rather than to accept a completed run. As with [EC-27](#ec-27), clean
+runs corroborate rather
+than prove; what closes this is that the enabled-state dependency and the
+completion-as-cancellation false pass are both unreachable in the final code.
+
+### EC-27
+
+**Before:** the smoke driver treated an enabled button as proof that the run had
+finished. The main window restores its buttons before it writes the final status
+message. During that short interval, the driver could read the previous message,
+an empty value, or unrelated text from the window instead of the result of the
+run that had just ended.
+
+**Now:** the driver waits for the result that the phase is about to verify. In
+phase I it waits until the status contains both `N converted` and `M not
+attempted`, using the numbers observed on disk, and only then reads the complete
+line. It does not use a fixed delay. A delay would merely make the race less
+likely; waiting for the required text removes the race from this check.
+
+**EC is unchanged.** Restoring the buttons before writing the status is a
+reasonable user-interface sequence. The defect was in the test driver's
+assumption that the first event proved the second had already happened.
+
+**How it was found:** on 2026-09-09, one complete run failed phase I with *"The
+324 unreached file(s) are missing from the status"*. The text captured by the
+driver contained control names but no final conversion message because that
+message had not yet been written. The same phase then passed three times by itself
+and twice as part of the complete suite. This intermittent pattern was dangerous:
+the suite could report a product defect that was not present, then pass when the
+same test was repeated. It occurred roughly once in fifteen runs before the fix.
+
+Code review confirmed the ordering in `MainForm.UpdateControlsOnActionDone`: the
+window restores the View button and writes the final status later in the same
+update. Because the driver checked every 50 ms, it could observe the window
+between those two actions.
+
+Twenty-five consecutive complete runs passed after the status-based wait was
+added. Those runs support the fix but do not prove it by themselves: at the
+roughly one-in-fifteen failure rate observed, twenty-five clean runs happen by
+chance about one time in five. The finding
+is closed because its cause was identified and the driver now waits for the exact
+text it needs instead of inferring completion from a button.
+
+EC-27 fixed one visible result of [EC-26](#ec-26): reading the final status too
+early. EC-26 was later fixed by removing the remaining enabled-button checks from
+readiness decisions. The driver now waits for evidence produced by the operation
+itself.
 
 ## Decisions and mistakes that must remain visible
 

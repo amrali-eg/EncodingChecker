@@ -173,6 +173,18 @@ internal sealed class SmokeSuite
             "The mixed review did not offer a source-encoding choice.");
         gui.CancelReview(review);
 
+        // The suite converts to utf-8 everywhere and never sets the target, so nothing
+        // otherwise drives that control. Exercise it here, where the run is over and this
+        // phase is about to prove no bytes moved: a target that could not be changed would
+        // pass every other phase unnoticed.
+        gui.SetTargetEncoding("us-ascii");
+        Check(gui.TargetEncoding() == "us-ascii",
+            $"The target encoding did not change: {gui.TargetEncoding()}");
+
+        gui.SetTargetEncoding("utf-8");
+        Check(gui.TargetEncoding() == "utf-8",
+            $"The target encoding did not change back: {gui.TargetEncoding()}");
+
         AssertSameFiles(before, Snapshot(directory));
         AssertNoArtifacts(directory);
     }
@@ -398,7 +410,10 @@ internal sealed class SmokeSuite
     private void PhaseI(PhaseContext phase)
     {
         string directory = phase.Directory;
-        const int count = 400;
+        // Large enough that a fast machine cannot finish converting before the cancel
+        // click lands. If one ever does, the phase says so rather than passing, and the
+        // answer is to raise this again rather than to accept a completed run.
+        const int count = 1000;
         string body = string.Concat(Enumerable.Repeat("Ligne accentuee: cafe resume. ", 200));
 
         for (int i = 1; i <= count; i++)
@@ -407,27 +422,48 @@ internal sealed class SmokeSuite
         using var gui = new EcGuiDriver(_app);
         System.Windows.Automation.AutomationElement review = gui.OpenReview(directory, count);
 
-        gui.ProceedThenCancel(review, () => RewrittenCount(directory) >= 5);
+        gui.ProceedThenCancel(review, () => RewrittenCount(directory) >= 1);
 
-        string status = gui.StatusText();
         int rewritten = RewrittenCount(directory);
         int untouched = count - rewritten;
+
+        // Printed on every run, before the checks, so a failing run shows the figures
+        // that failed it. This is the margin between cancellation landing and the run
+        // finishing unaided, and the report cannot carry it: this phase records no
+        // before-snapshot, because a thousand hashes would swamp the evidence file for
+        // a phase that compares counts rather than bytes. Reading it from a CI log is
+        // the only way to see a faster machine approaching the point where there is
+        // nothing left to interrupt.
+        Console.WriteLine(
+            $"[INFO] I: cancelled after {rewritten} of {count} file(s) were converted; "
+            + $"{untouched} left untouched");
+
+        Check(rewritten > 0,
+            "Cancellation was requested before any file was converted.");
+        Check(untouched > 0,
+            "All files were converted, so this phase did not exercise an interrupted run.");
+
+        // The run is over - the files are written and the buttons are back - but the
+        // window assigns its final status after re-enabling them, so the status read here
+        // could still be the previous one. Wait for the figures this phase is about to
+        // assert, then read once.
+        gui.WaitForStatus($"{rewritten} converted");
+
+        gui.WaitForStatus($"{untouched} not attempted");
+
+        string status = gui.StatusText();
 
         Check(
             status.Contains($"{rewritten} converted", StringComparison.Ordinal),
             $"The status line disagrees with the {rewritten} file(s) actually rewritten: {status}");
 
-        // Present whenever the run stopped early, and the count that used to vanish.
-        if (untouched > 0)
-        {
-            Check(
-                status.Contains("stopped", StringComparison.OrdinalIgnoreCase),
-                $"An interrupted run was not reported as stopped: {status}");
+        Check(
+            status.Contains("Conversion stopped", StringComparison.Ordinal),
+            $"An interrupted run was not reported as stopped: {status}");
 
-            Check(
-                status.Contains($"{untouched} not attempted", StringComparison.Ordinal),
-                $"The {untouched} unreached file(s) are missing from the status: {status}");
-        }
+        Check(
+            status.Contains($"{untouched} not attempted", StringComparison.Ordinal),
+            $"The {untouched} unreached file(s) are missing from the status: {status}");
     }
 
     /// <summary>
