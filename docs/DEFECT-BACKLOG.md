@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=65 fixed=52 open=9 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
+<!-- backlog-counts total=65 fixed=53 open=8 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 65 findings — 52 fixed, 9 open, 1 not reproduced, 1 withdrawn,
+**Derived count: 65 findings — 53 fixed, 8 open, 1 not reproduced, 1 withdrawn,
 1 intentional behavior, and 1 design decision.** Recompute and check these
 figures with:
 
@@ -53,7 +53,6 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | EC-17 | A comment describes the text check backwards | Open | Low | Common | [EC-17](#ec-17) |
 | EC-20 | A file can change while EC is detecting its encoding | Open | Low | Rare | [EC-20](#ec-20) |
 | EC-25 | The smoke suite never sets the main window's target encoding | Open | Low | Rare | [EC-25](#ec-25) |
-| EC-26 | The smoke driver trusts an enabled flag that has been seen stale | Open | Low | Rare | [EC-26](#ec-26) |
 | CX-06 | EC checks for random-looking data before checking for a BOM | Open | Medium | Theoretical | [CX-06](#cx-06) |
 | BL-05 | Force-closing during a conversion can produce an error on exit | Open | Low | Rare | [BL-05](#bl-05) |
 | BL-19 | ASCII with many NUL bytes can be reported as UTF-16 | Open | Medium | Rare | [BL-19](#bl-19) |
@@ -71,6 +70,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | BL-01 | Ambiguous BOM-less UTF-32 could be converted under the wrong byte order | Fixed | — | — | [BL-01](#bl-01) |
 | EC-08 | A constructed include pattern could hang a scan indefinitely | Fixed | — | — | [EC-08](#ec-08) |
 | EC-24 | The GUI smoke gate could select in the wrong combo | Fixed | — | — | [EC-24](#ec-24) |
+| EC-26 | The smoke driver read a status line the window had not written yet | Fixed | — | — | [EC-26](#ec-26) |
 | EC-18 | EC repeated a BOM-less UTF-16 safety check unnecessarily | Fixed | — | — | [EC-18](#ec-18) |
 | EC-23 | Plan application assumed a required path existed instead of checking it | Fixed | — | — | [EC-23](#ec-23) |
 | BL-27 | GUI smoke reports could show an empty or misleading build hash | Fixed | — | — | [BL-27](#bl-27) |
@@ -886,19 +886,43 @@ because doing so changes the suite that had just been stabilised.
 
 ### EC-26
 
-**The driver treats an enabled flag as a readiness signal, and it has been seen
-stale.** `Current.IsEnabled` reported a control disabled for five seconds while
-that same control accepted `Invoke` and closed the review. The driver uses
-`IsEnabled` elsewhere to decide that a scan has finished, that the main window is
-ready, and when cancellation may be attempted.
+**Before:** the driver treated an enabled button as "the run has finished". The
+window enables its buttons before it assigns the final status text, so a phase
+that read the status the moment the buttons came back could read the previous
+message, or none at all.
 
-No failure was reproduced from it. What it means is that a phase could time out
-waiting for a control that was ready the whole time, and report a defect in EC
-that is not there - the same shape of wrong answer that the preflight check exists
-to prevent.
+**Now:** the driver waits for the status a phase is about to assert, rather than
+for the button. Phase I counts the files actually rewritten, waits for that figure
+to appear as `N converted` and, when the run stopped early, for `M not attempted`,
+and only then reads the line. No sleep is involved: a sleep makes a race less
+likely rather than absent.
 
-A readiness check that also confirms the operation it is waiting for would not
-depend on the flag. Nothing has been changed yet.
+**EC is unchanged.** Enabling the buttons before assigning the status is a
+reasonable order for a window, and nothing a user sees depends on it. The defect
+was in the instrument's idea of "finished".
+
+**Reproduced, which is what closed it.** On 2026-09-09 a full run failed phase I
+with *"The 324 unreached file(s) are missing from the status"*, quoting a status
+that was the window's control names with no run message among them - the
+assignment had not happened yet. It then passed three times in isolation and twice
+in full runs. That is what makes this shape dangerous: the phase reports a defect
+in EC, in the alarming direction, and then disappears when you look again. Roughly
+one failure in fifteen runs before the fix.
+
+Twenty-five consecutive full runs passed afterwards. That is corroboration rather
+than proof - at the observed rate, twenty-five clean runs happen by chance about
+one time in five - so what closes this is the identified cause and a wait on the
+text being read, with the runs agreeing.
+
+`MainForm.UpdateControlsOnActionDone` enables `btnView` on its first line and
+assigns `actionStatus.Text` forty-five lines later. A driver polling every 50 ms
+lands between the two often enough to matter.
+
+The original observation has the same root and is kept: `Current.IsEnabled` was
+seen reporting a control disabled for five seconds while that control accepted
+`Invoke`. Whether the flag is stale or merely early, it answers a question the
+driver was not asking. A readiness check that confirms the thing being waited for
+does not have that problem, and that is now the rule this driver follows.
 
 ## Decisions and mistakes that must remain visible
 

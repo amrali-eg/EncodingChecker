@@ -409,9 +409,19 @@ internal sealed class SmokeSuite
 
         gui.ProceedThenCancel(review, () => RewrittenCount(directory) >= 5);
 
-        string status = gui.StatusText();
         int rewritten = RewrittenCount(directory);
         int untouched = count - rewritten;
+
+        // The run is over - the files are written and the buttons are back - but the
+        // window assigns its final status after re-enabling them, so the status read here
+        // could still be the previous one. Wait for the figures this phase is about to
+        // assert, then read once.
+        gui.WaitForStatus($"{rewritten} converted");
+
+        if (untouched > 0)
+            gui.WaitForStatus($"{untouched} not attempted");
+
+        string status = gui.StatusText();
 
         Check(
             status.Contains($"{rewritten} converted", StringComparison.Ordinal),

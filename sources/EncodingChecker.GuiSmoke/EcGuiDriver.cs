@@ -225,6 +225,32 @@ internal sealed class EcGuiDriver : IDisposable
         WaitForMainReady();
     }
 
+    /// <summary>Waits until the status line contains <paramref name="fragment"/>.</summary>
+    /// <remarks>
+    /// The window enables its buttons before it assigns the final status, so a run that
+    /// has returned to idle may still be showing the previous message. A phase that reads
+    /// the status the moment the buttons come back can therefore read the old one. Waiting
+    /// for the text itself closes that window; a sleep would only make it less likely.
+    /// </remarks>
+    internal void WaitForStatus(string fragment)
+    {
+        if (WaitFor(
+                () => StatusText().Contains(fragment, StringComparison.Ordinal)
+                    ? new object()
+                    : null,
+                Timeout,
+                out Exception? lastError) is not null)
+        {
+            return;
+        }
+
+        // Read once more here rather than in the message passed in, so the failure shows
+        // what was on screen when the wait gave up.
+        throw Expired(
+            $"The status line never showed '{fragment}'. It showed: {StatusText()}",
+            lastError);
+    }
+
     private void WaitForMainReady() =>
         WaitUntil(
             () => IsEnabled(MainWindow, "btnView") && FindReviewWindow() is null,
