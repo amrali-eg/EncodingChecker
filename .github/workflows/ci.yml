@@ -68,9 +68,11 @@ jobs:
             throw "GUI smoke suite failed with exit code $LASTEXITCODE."
           }
 
-      # Kept on success as well as failure: the report carries each phase's before
-      # and after file hashes, and a run that passed is the sample that shows
-      # whether an intermittent phase has stopped being intermittent.
+      # Kept on success as well as failure: the report carries each phase's after
+      # hashes and, for the phases that compare bytes, the before hashes too. A run
+      # that passed is the sample that shows whether an intermittent phase has stopped
+      # being intermittent. Phase I's cancellation margin is not in here - it is the
+      # [INFO] line in the step above.
       #
       # Missing evidence only warns here. When the suite cannot start it has already
       # failed the step above, and erroring again would bury that message.

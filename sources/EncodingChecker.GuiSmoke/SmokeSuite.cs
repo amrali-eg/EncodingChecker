@@ -427,6 +427,17 @@ internal sealed class SmokeSuite
         int rewritten = RewrittenCount(directory);
         int untouched = count - rewritten;
 
+        // Printed on every run, before the checks, so a failing run shows the figures
+        // that failed it. This is the margin between cancellation landing and the run
+        // finishing unaided, and the report cannot carry it: this phase records no
+        // before-snapshot, because a thousand hashes would swamp the evidence file for
+        // a phase that compares counts rather than bytes. Reading it from a CI log is
+        // the only way to see a faster machine approaching the point where there is
+        // nothing left to interrupt.
+        Console.WriteLine(
+            $"[INFO] I: cancelled after {rewritten} of {count} file(s) were converted; "
+            + $"{untouched} left untouched");
+
         Check(rewritten > 0,
             "Cancellation was requested before any file was converted.");
         Check(untouched > 0,
