@@ -20,7 +20,7 @@ internal sealed class EcGuiDriver : IDisposable
         {
             UseShellExecute = false,
             WorkingDirectory = Path.GetDirectoryName(executable)!,
-        }) ?? throw new InvalidOperationException("EncodingChecker did not start.");
+        }) ?? throw new GuiDriverException("EncodingChecker did not start.");
 
         try
         {
@@ -353,7 +353,7 @@ internal sealed class EcGuiDriver : IDisposable
         if (edit is null ||
             !edit.TryGetCurrentPattern(ValuePattern.Pattern, out rawValue))
         {
-            throw new InvalidOperationException(
+            throw new GuiDriverException(
                 $"'{automationId}' does not support text input.");
         }
 
@@ -378,13 +378,13 @@ internal sealed class EcGuiDriver : IDisposable
             return;
 
         if (!combo.TryGetCurrentPattern(ValuePattern.Pattern, out object? rawValue))
-            throw new InvalidOperationException($"'{automationId}' cannot be set by value.");
+            throw new GuiDriverException($"'{automationId}' cannot be set by value.");
 
         var setter = (ValuePattern)rawValue;
 
         if (setter.Current.IsReadOnly)
         {
-            throw new InvalidOperationException(
+            throw new GuiDriverException(
                 $"'{automationId}' is read-only, so '{value}' cannot be set.");
         }
 
@@ -420,7 +420,7 @@ internal sealed class EcGuiDriver : IDisposable
         AutomationElement element = RequireById(root, automationId);
 
         if (!element.TryGetCurrentPattern(TogglePattern.Pattern, out object? rawToggle))
-            throw new InvalidOperationException($"'{automationId}' cannot be toggled.");
+            throw new GuiDriverException($"'{automationId}' cannot be toggled.");
 
         var toggle = (TogglePattern)rawToggle;
         bool current = toggle.Current.ToggleState == ToggleState.On;
@@ -443,7 +443,7 @@ internal sealed class EcGuiDriver : IDisposable
     private static void Invoke(AutomationElement element)
     {
         if (!element.TryGetCurrentPattern(InvokePattern.Pattern, out object? rawInvoke))
-            throw new InvalidOperationException($"'{element.Current.Name}' cannot be invoked.");
+            throw new GuiDriverException($"'{element.Current.Name}' cannot be invoked.");
 
         ((InvokePattern)rawInvoke).Invoke();
     }
@@ -649,6 +649,9 @@ internal sealed class EcGuiDriver : IDisposable
             {
                 lastError = ex;
             }
+            // GuiDriverException is deliberately absent from these: a control that
+            // cannot be toggled or set will not start working on the next attempt, and
+            // retrying it would turn a precise message into a generic timeout.
             catch (InvalidOperationException ex)
             {
                 lastError = ex;
@@ -688,6 +691,20 @@ internal sealed class EcGuiDriver : IDisposable
                 $"{message} Last retried automation error: "
                 + $"{lastError.GetType().Name}: {lastError.Message}",
                 lastError);
+
+    /// <summary>
+    /// A failure in the driver's contract with the window - a control that cannot be
+    /// toggled, set or invoked - rather than the transient automation errors WaitFor
+    /// retries. It deliberately does not derive from InvalidOperationException, which
+    /// that retry loop catches, so a deliberate failure surfaces at once with its own
+    /// message instead of expiring as an unrelated timeout.
+    /// </summary>
+    private sealed class GuiDriverException : Exception
+    {
+        internal GuiDriverException(string message) : base(message)
+        {
+        }
+    }
 
     private static void ClickAt(int x, int y)
     {
