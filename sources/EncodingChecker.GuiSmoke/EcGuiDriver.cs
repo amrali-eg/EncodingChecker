@@ -160,7 +160,7 @@ internal sealed class EcGuiDriver : IDisposable
         int handle = review.Current.NativeWindowHandle;
         Invoke(review, "btnCancelConversionReview");
         WaitUntil(() => !WindowExists(handle), "The conversion review did not close.");
-        WaitForMainReady();
+        WaitForMainReady("Conversion cancelled");
     }
 
     internal void Proceed(AutomationElement review)
@@ -168,7 +168,7 @@ internal sealed class EcGuiDriver : IDisposable
         int handle = review.Current.NativeWindowHandle;
         Invoke(review, "btnProceedConversion");
         WaitUntil(() => !WindowExists(handle), "The conversion review did not close.");
-        WaitForMainReady();
+        WaitForMainReady("Conversion complete");
     }
 
     internal void ProceedExpectingWarning(AutomationElement review)
@@ -188,7 +188,7 @@ internal sealed class EcGuiDriver : IDisposable
         Invoke(ok);
 
         WaitUntil(() => !WindowExists(warningHandle), "The warning did not close.");
-        WaitForMainReady();
+        WaitForMainReady("Conversion did not run");
     }
 
     internal bool ReviewContainsControl(AutomationElement review, string automationId) =>
@@ -387,10 +387,72 @@ internal sealed class EcGuiDriver : IDisposable
             lastError);
     }
 
-    private void WaitForMainReady() =>
-        WaitForOperationOutcome(
-            () => FindReviewWindow() is null && ConversionHasFinished(),
-            "EncodingChecker did not return to its idle state.");
+    /// <summary>
+    /// Waits for the window to finish the action just performed and go idle.
+    /// </summary>
+    /// <remarks>
+    /// The caller names the headline its own action produces, rather than this accepting
+    /// any final conversion status. A status outlives the action that wrote it - the
+    /// window clears it only when the next action starts - so accepting any of them lets
+    /// a wait be satisfied by the previous action's report and return before the current
+    /// one has finished. Every phase drives one action per window today, which is the
+    /// only reason that has not bitten; it is the shape EC-26 was about, in the one
+    /// helper that fix did not reach.
+    /// </remarks>
+    private void WaitForMainReady(string expectedHeadline)
+    {
+        if (WaitFor(
+                () => FindReviewWindow() is null
+                      && StatusLine() is string status
+                      && status.Contains(expectedHeadline, StringComparison.Ordinal)
+                    ? new object()
+                    : null,
+                Timeout,
+                out Exception? lastError) is not null)
+        {
+            return;
+        }
+
+        throw Expired(
+            $"EncodingChecker did not go idle: no '{expectedHeadline}' was reported."
+            + Safely(() => " The status showed: " + StatusText(),
+                     " The status could not be read")
+            + DescribeIdleState(),
+            lastError);
+    }
+
+    /// <summary>
+    /// What could still be established about the window when a wait for idle gave up.
+    /// </summary>
+    /// <remarks>
+    /// A timeout otherwise says only that something expected did not arrive, which is the
+    /// position EC-28 left: a phase A failure whose diagnostic showed window chrome and
+    /// nothing else, with no way to tell afterwards whether the process had died, the
+    /// review was still open, the held main-window element had gone stale while the
+    /// window was healthy, or the status bar simply could not be found. These four
+    /// separate those, and each is gathered on its own so one unreadable answer does not
+    /// cost the others.
+    /// </remarks>
+    private string DescribeIdleState() =>
+        " Process alive: " + Ask(() => _process.HasExited ? "no" : "yes")
+        + "; main window handle: " + Ask(() => MainWindow.Current.NativeWindowHandle.ToString())
+        + "; review present: " + Ask(() => FindReviewWindow() is not null ? "yes" : "no")
+        + "; status bar found: "
+        + Ask(() => FindById(MainWindow, "statusBar") is not null ? "yes" : "no")
+        + "; status bar readable: " + Ask(() => StatusLine() is null ? "no" : "yes") + ".";
+
+    /// <summary>One fact for a diagnostic, or why it could not be had.</summary>
+    private static string Ask(Func<string> fact)
+    {
+        try
+        {
+            return fact();
+        }
+        catch (Exception ex)
+        {
+            return "unknown (" + ex.GetType().Name + ")";
+        }
+    }
 
     /// <summary>
     /// Waits for something the operation itself produced, rather than for a button.
