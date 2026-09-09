@@ -177,13 +177,20 @@ internal sealed class SmokeSuite
         // otherwise drives that control. Exercise it here, where the run is over and this
         // phase is about to prove no bytes moved: a target that could not be changed would
         // pass every other phase unnoticed.
+        // Read once and report that same reading: Check takes a message that is built
+        // whether or not it fails, so asking the window again inside it would drive the
+        // control on every passing run and could describe a value the assertion never
+        // tested. Compared the way the driver compares it, so the two cannot disagree
+        // over a control label's casing.
         gui.SetTargetEncoding("us-ascii");
-        Check(gui.TargetEncoding() == "us-ascii",
-            $"The target encoding did not change: {gui.TargetEncoding()}");
+        string changed = gui.TargetEncoding();
+        Check(changed.Equals("us-ascii", StringComparison.OrdinalIgnoreCase),
+            $"The target encoding did not change: {changed}");
 
         gui.SetTargetEncoding("utf-8");
-        Check(gui.TargetEncoding() == "utf-8",
-            $"The target encoding did not change back: {gui.TargetEncoding()}");
+        string restored = gui.TargetEncoding();
+        Check(restored.Equals("utf-8", StringComparison.OrdinalIgnoreCase),
+            $"The target encoding did not change back: {restored}");
 
         AssertSameFiles(before, Snapshot(directory));
         AssertNoArtifacts(directory);
