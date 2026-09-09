@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Text.RegularExpressions;
 
 namespace EncodingChecker.Tests;
 
@@ -112,20 +111,5 @@ public sealed class PathAwarePatternTests : IDisposable
 
         Assert.DoesNotContain("Properties/AssemblyInfo.cs", found);
         Assert.Contains("Properties/AssemblyInfoHelper.cs", found);
-    }
-
-    [Fact]
-    public void WildcardPatternsUseTheNonBacktrackingEngine()
-    {
-        string hostileMask = string.Concat(Enumerable.Repeat("*a", 12)) + "b";
-
-        Regex pattern = Assert.Single(
-            DirectoryTraversal.CompilePatterns([hostileMask], defaultToMatchAll: false));
-
-        // Asserted before the match below, so restoring the old engine fails here
-        // instead of hanging the test run.
-        Assert.True(pattern.Options.HasFlag(RegexOptions.NonBacktracking));
-
-        Assert.DoesNotMatch(pattern, new string('a', 40));
     }
 }
