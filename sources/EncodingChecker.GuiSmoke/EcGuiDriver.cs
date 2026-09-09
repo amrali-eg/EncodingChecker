@@ -269,6 +269,11 @@ internal sealed class EcGuiDriver : IDisposable
     /// refusal says nothing about whether the run is over; only the window's own final
     /// status does. So each attempt reacquires the button, and the wait ends on a click
     /// that was accepted, a run that reported itself finished, or the timeout.
+    ///
+    /// The refusal is left to that shared loop rather than caught here. It already
+    /// retries these errors and keeps the last one, so a wait that does expire can name
+    /// the refusal it kept hitting; catching it here would retry just as often and
+    /// report nothing.
     /// </remarks>
     private void RequestCancel()
     {
@@ -284,19 +289,12 @@ internal sealed class EcGuiDriver : IDisposable
                 if (cancel is null)
                     return ConversionHasFinished();
 
-                try
-                {
-                    Invoke(cancel);
-                    cancelled = true;
-                    return true;
-                }
-                catch (Exception ex) when (
-                    ex is ElementNotEnabledException or ElementNotAvailableException)
-                {
-                    // Refused this time. The next attempt looks the button up again; if
-                    // the run really has ended, the branch above sees the status say so.
-                    return false;
-                }
+                // A refusal throws out of here into the retry loop, which reacquires the
+                // button on the next attempt. If the run really has ended by then, the
+                // branch above sees the status say so.
+                Invoke(cancel);
+                cancelled = true;
+                return true;
             },
             "Cancel was never accepted, and the run never reported that it had stopped.");
 

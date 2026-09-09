@@ -511,7 +511,6 @@ internal sealed class SmokeSuite
         AssertNoArtifacts(phase.Directory);
     }
 
-    /// <summary>Files whose byte-order mark has been stripped, so they were written.</summary>
     /// <summary>Whether EC has rewritten anything yet.</summary>
     /// <remarks>
     /// Asked every 50 ms while the conversion is running, so it stops at the first
