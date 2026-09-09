@@ -274,13 +274,21 @@ internal sealed class EcGuiDriver : IDisposable
     /// </remarks>
     private void CancelAndConfirmStopped()
     {
-        bool pressed = false;
+        bool pressAttempted = false;
         Exception? uncertainPress = null;
 
         string? finalStatus = WaitFor(
             () =>
             {
-                if (!pressed)
+                // The status is read first because a refusal throws out of the press
+                // below, which would end the attempt before the status was ever looked
+                // at. Progress would then depend on the button disappearing rather than
+                // on the run reporting, and a button that lingered after the run ended
+                // would keep being refused with the answer already on screen.
+                if (StatusLine() is string status && IsFinalConversionStatus(status))
+                    return status;
+
+                if (!pressAttempted)
                 {
                     AutomationElement? cancel = FindById(MainWindow, "btnCancel");
 
@@ -289,7 +297,7 @@ internal sealed class EcGuiDriver : IDisposable
                         try
                         {
                             Invoke(cancel);
-                            pressed = true;
+                            pressAttempted = true;
                         }
                         catch (Exception ex) when (
                             ex is not ElementNotEnabledException &&
@@ -298,14 +306,12 @@ internal sealed class EcGuiDriver : IDisposable
                                 or InvalidOperationException)
                         {
                             uncertainPress = ex;
-                            pressed = true;
+                            pressAttempted = true;
                         }
                     }
                 }
 
-                return StatusLine() is string status && IsFinalConversionStatus(status)
-                    ? status
-                    : null;
+                return null;
             },
             Timeout,
             out Exception? lastError);
@@ -315,19 +321,32 @@ internal sealed class EcGuiDriver : IDisposable
             // Only the uncertain press is added here: Expired already names whatever
             // the wait was still retrying, which is where a refusal shows up.
             throw Expired(
-                (pressed
-                    ? "Cancel was pressed but the run never reported a final status."
-                    : "No Cancel button appeared and the run never reported a final status.")
+                (pressAttempted
+                    ? "A Cancel press was attempted but the run never reported a final status."
+                    : "The driver could not find a Cancel button and the run never "
+                      + "reported a final status.")
                 + Blame(uncertainPress, null),
                 lastError);
         }
 
-        if (!finalStatus.Contains("Conversion stopped", StringComparison.Ordinal))
+        // Three outcomes, and only one of them is about cancellation. Collapsing the
+        // rest into "cancellation was not exercised" would report a conversion that
+        // failed - which EC says outright - as a problem with this phase's timing.
+        if (finalStatus.Contains("Conversion stopped", StringComparison.Ordinal))
+            return;
+
+        if (finalStatus.Contains("Conversion complete", StringComparison.Ordinal))
         {
             throw new GuiDriverException(
-                "Cancellation was not exercised. EC instead reported: " + finalStatus
+                "Cancellation was not exercised: the run finished before it could be "
+                + "stopped. EC reported: " + finalStatus
                 + Blame(uncertainPress, lastError));
         }
+
+        throw new GuiDriverException(
+            "The conversion neither stopped nor completed, so this phase proved nothing "
+            + "about cancellation. EC reported: " + finalStatus
+            + Blame(uncertainPress, lastError));
     }
 
     /// <summary>
