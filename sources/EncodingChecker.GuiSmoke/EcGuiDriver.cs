@@ -241,54 +241,30 @@ internal sealed class EcGuiDriver : IDisposable
         // Timed against real progress rather than a sleep, so the phase does not depend
         // on how fast the machine converts. Cancelling before the first write would
         // exercise the declined-review path instead, which phase A already covers.
-        bool nothingLeftToCancel = WaitForWritingOrCompletion(writingHasBegun);
+        WaitForOperationOutcome(
+            () => writingHasBegun() || ConversionHasFinished(),
+            "The conversion neither began writing nor reported that it had finished.");
 
-        // A run short enough to finish first is not a failure; the phase then checks a
-        // completed run instead, and its assertions still hold.
-        if (!nothingLeftToCancel)
-            Cancel();
+        RequestCancel();
 
-        WaitForMainReady();
+        WaitForStoppedConversion();
     }
 
     /// <summary>
-    /// Waits for the conversion to start writing, or to report that it is already over.
+    /// Requests cancellation, or fails if the run finishes before it can be cancelled.
     /// </summary>
-    /// <returns>
-    /// True only when the run reported itself finished with no write observed - the one
-    /// case where there is nothing left to cancel. A run that wrote and then finished
-    /// returns false, so the cancel step still has to establish which happened.
-    /// </returns>
-    private bool WaitForWritingOrCompletion(Func<bool> writingHasBegun)
-    {
-        bool finished = false;
-
-        WaitForOperationOutcome(
-            () =>
-            {
-                if (writingHasBegun())
-                    return true;
-
-                finished = ConversionHasFinished();
-                return finished;
-            },
-            "The conversion did not begin writing.");
-
-        return finished;
-    }
-
-    /// <summary>Cancels the run, or establishes that it finished before it could be.</summary>
     /// <remarks>
     /// The window hides the button when a run ends - <c>MainForm</c> sets
     /// <c>btnCancel.Visible</c> - so an absent button has two meanings: the run beat the
     /// phase to it, or automation failed to see a button that is on screen. Only the
-    /// window's own final status separates them, and accepting absence on its own would
-    /// let the phase pass without ever exercising cancellation.
+    /// window's own final status separates them. Either meaning prevents this phase from
+    /// proving cancellation, so neither is accepted as a successful test.
     ///
-    /// Both acceptable outcomes are therefore raced, and neither arriving is a failure
-    /// that carries whatever the probe kept throwing.
+    /// The button and final status are raced so a fast completion produces a clear failure
+    /// instead of a misleading timeout. If neither appears, the wait retains the last
+    /// automation error.
     /// </remarks>
-    private void Cancel()
+    private void RequestCancel()
     {
         AutomationElement? cancel = null;
 
@@ -300,9 +276,11 @@ internal sealed class EcGuiDriver : IDisposable
             },
             "The run offered neither a Cancel button nor a final status.");
 
-        // Conversion won the race, and said so.
         if (cancel is null)
-            return;
+        {
+            throw new GuiDriverException(
+                "The conversion finished before cancellation could be exercised.");
+        }
 
         try
         {
@@ -311,11 +289,34 @@ internal sealed class EcGuiDriver : IDisposable
         catch (Exception ex) when (
             ex is ElementNotEnabledException or ElementNotAvailableException)
         {
-            // The button went between finding it and clicking it. That is only acceptable
-            // if the run stopped on its own, which the window has to say for itself.
+            // Confirm why the button vanished, but do not count ordinary completion as a
+            // cancellation test.
             WaitForOperationOutcome(
                 () => ConversionHasFinished(),
                 "Cancel became unavailable without the run reporting that it had stopped.");
+
+            throw new GuiDriverException(
+                "The conversion finished before cancellation could be exercised.");
+        }
+    }
+
+    /// <summary>Requires the cancellation request to produce an interrupted run.</summary>
+    private void WaitForStoppedConversion()
+    {
+        string? finalStatus = null;
+
+        WaitForOperationOutcome(
+            () =>
+            {
+                finalStatus = StatusLine();
+                return finalStatus is not null && IsFinalConversionStatus(finalStatus);
+            },
+            "The conversion did not report a final result after cancellation.");
+
+        if (!finalStatus!.Contains("Conversion stopped", StringComparison.Ordinal))
+        {
+            throw new GuiDriverException(
+                "Cancellation was not exercised. EC instead reported: " + finalStatus);
         }
     }
 
@@ -429,14 +430,17 @@ internal sealed class EcGuiDriver : IDisposable
         if (StatusLine() is not string status)
             return false;
 
-        return status.Contains("Conversion complete", StringComparison.Ordinal) ||
-               status.Contains("Conversion stopped", StringComparison.Ordinal) ||
-               status.Contains("Conversion cancelled", StringComparison.Ordinal) ||
-               status.Contains("Conversion did not run", StringComparison.Ordinal) ||
-               status.Contains("Conversion failed", StringComparison.Ordinal) ||
-               status.Contains("Preview complete", StringComparison.Ordinal) ||
-               status.Contains("Preview cancelled", StringComparison.Ordinal);
+        return IsFinalConversionStatus(status);
     }
+
+    private static bool IsFinalConversionStatus(string status) =>
+        status.Contains("Conversion complete", StringComparison.Ordinal) ||
+        status.Contains("Conversion stopped", StringComparison.Ordinal) ||
+        status.Contains("Conversion cancelled", StringComparison.Ordinal) ||
+        status.Contains("Conversion did not run", StringComparison.Ordinal) ||
+        status.Contains("Conversion failed", StringComparison.Ordinal) ||
+        status.Contains("Preview complete", StringComparison.Ordinal) ||
+        status.Contains("Preview cancelled", StringComparison.Ordinal);
 
     private AutomationElement WaitForReview(int previousHandle = 0)
     {

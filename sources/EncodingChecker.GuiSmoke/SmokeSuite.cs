@@ -419,10 +419,15 @@ internal sealed class SmokeSuite
         using var gui = new EcGuiDriver(_app);
         System.Windows.Automation.AutomationElement review = gui.OpenReview(directory, count);
 
-        gui.ProceedThenCancel(review, () => RewrittenCount(directory) >= 5);
+        gui.ProceedThenCancel(review, () => RewrittenCount(directory) >= 1);
 
         int rewritten = RewrittenCount(directory);
         int untouched = count - rewritten;
+
+        Check(rewritten > 0,
+            "Cancellation was requested before any file was converted.");
+        Check(untouched > 0,
+            "All files were converted, so this phase did not exercise an interrupted run.");
 
         // The run is over - the files are written and the buttons are back - but the
         // window assigns its final status after re-enabling them, so the status read here
@@ -430,8 +435,7 @@ internal sealed class SmokeSuite
         // assert, then read once.
         gui.WaitForStatus($"{rewritten} converted");
 
-        if (untouched > 0)
-            gui.WaitForStatus($"{untouched} not attempted");
+        gui.WaitForStatus($"{untouched} not attempted");
 
         string status = gui.StatusText();
 
@@ -439,17 +443,13 @@ internal sealed class SmokeSuite
             status.Contains($"{rewritten} converted", StringComparison.Ordinal),
             $"The status line disagrees with the {rewritten} file(s) actually rewritten: {status}");
 
-        // Present whenever the run stopped early, and the count that used to vanish.
-        if (untouched > 0)
-        {
-            Check(
-                status.Contains("stopped", StringComparison.OrdinalIgnoreCase),
-                $"An interrupted run was not reported as stopped: {status}");
+        Check(
+            status.Contains("Conversion stopped", StringComparison.Ordinal),
+            $"An interrupted run was not reported as stopped: {status}");
 
-            Check(
-                status.Contains($"{untouched} not attempted", StringComparison.Ordinal),
-                $"The {untouched} unreached file(s) are missing from the status: {status}");
-        }
+        Check(
+            status.Contains($"{untouched} not attempted", StringComparison.Ordinal),
+            $"The {untouched} unreached file(s) are missing from the status: {status}");
     }
 
     /// <summary>
