@@ -989,13 +989,20 @@ failure, is what fixed it.
 
 **Runs afterwards.** Earlier revisions completed fifteen consecutive full runs on
 the status-bar read, seventeen on the shape before cancellation was made strict,
-and ten on the raced-cancel shape. The final stricter phase passed five focused
-runs, converting 24-32 of the four hundred files and leaving the rest untouched
-each time, and then ten consecutive complete runs. That margin - roughly a twelfth
-of the workload converted before cancellation lands - is what keeps the new
-strictness from turning a fast machine into a failing gate, and it is worth
-re-checking on hardware quicker than this one. As with [EC-27](#ec-27), clean runs
-corroborate rather
+and ten on the raced-cancel shape. Those all ran against four hundred files; the
+phase now uses a thousand, where eight focused runs convert 72-93 before
+cancellation lands and three complete suite runs pass at about twenty seconds
+each.
+
+Raising the count buys less than it appears to. The trigger polls by counting
+converted files, so a larger directory costs more per probe and the click lands
+proportionally later - about a twelfth of the workload converted either way. What
+does improve is the absolute room left over: nine hundred unconverted files rather
+than three hundred and seventy, which is what a machine converting far faster
+would have to burn through while UI automation's round trip stays much the same.
+If one ever does, the phase fails and says so, and the answer is to raise the
+count again rather than to accept a completed run. As with [EC-27](#ec-27), clean
+runs corroborate rather
 than prove; what closes this is that the enabled-state dependency and the
 completion-as-cancellation false pass are both unreachable in the final code.
 

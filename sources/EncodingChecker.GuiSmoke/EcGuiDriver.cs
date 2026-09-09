@@ -390,7 +390,7 @@ internal sealed class EcGuiDriver : IDisposable
     /// </summary>
     /// <remarks>
     /// Only the status bar's own subtree is read. Scanning the whole window means walking
-    /// every result row - four hundred of them in the interrupted-run phase, while they
+    /// every result row - a thousand of them in the interrupted-run phase, while they
     /// are still being added - which is both slow to repeat every 50 ms and prone to
     /// enumerating an element that disappears mid-walk.
     ///

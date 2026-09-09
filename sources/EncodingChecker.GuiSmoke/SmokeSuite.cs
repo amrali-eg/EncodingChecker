@@ -410,7 +410,10 @@ internal sealed class SmokeSuite
     private void PhaseI(PhaseContext phase)
     {
         string directory = phase.Directory;
-        const int count = 400;
+        // Large enough that a fast machine cannot finish converting before the cancel
+        // click lands. If one ever does, the phase says so rather than passing, and the
+        // answer is to raise this again rather than to accept a completed run.
+        const int count = 1000;
         string body = string.Concat(Enumerable.Repeat("Ligne accentuee: cafe resume. ", 200));
 
         for (int i = 1; i <= count; i++)
