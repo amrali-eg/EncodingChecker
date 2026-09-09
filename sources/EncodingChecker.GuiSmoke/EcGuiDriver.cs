@@ -263,38 +263,45 @@ internal sealed class EcGuiDriver : IDisposable
     /// The button and final status are raced so a fast completion produces a clear failure
     /// instead of a misleading timeout. If neither appears, the wait retains the last
     /// automation error.
+    ///
+    /// A refused click is retried rather than believed. A control reporting itself
+    /// not-enabled is the same flag this driver stopped trusting for readiness, and one
+    /// refusal says nothing about whether the run is over; only the window's own final
+    /// status does. So each attempt reacquires the button, and the wait ends on a click
+    /// that was accepted, a run that reported itself finished, or the timeout.
     /// </remarks>
     private void RequestCancel()
     {
-        AutomationElement? cancel = null;
+        bool cancelled = false;
 
         WaitUntil(
             () =>
             {
-                cancel = FindById(MainWindow, "btnCancel");
-                return cancel is not null || ConversionHasFinished();
+                AutomationElement? cancel = FindById(MainWindow, "btnCancel");
+
+                // Gone means the window hid it, which it does only when a run ends - but
+                // that has to come from the status, not from the button's absence.
+                if (cancel is null)
+                    return ConversionHasFinished();
+
+                try
+                {
+                    Invoke(cancel);
+                    cancelled = true;
+                    return true;
+                }
+                catch (Exception ex) when (
+                    ex is ElementNotEnabledException or ElementNotAvailableException)
+                {
+                    // Refused this time. The next attempt looks the button up again; if
+                    // the run really has ended, the branch above sees the status say so.
+                    return false;
+                }
             },
-            "The run offered neither a Cancel button nor a final status.");
+            "Cancel was never accepted, and the run never reported that it had stopped.");
 
-        if (cancel is null)
+        if (!cancelled)
         {
-            throw new GuiDriverException(
-                "The conversion finished before cancellation could be exercised.");
-        }
-
-        try
-        {
-            Invoke(cancel);
-        }
-        catch (Exception ex) when (
-            ex is ElementNotEnabledException or ElementNotAvailableException)
-        {
-            // Confirm why the button vanished, but do not count ordinary completion as a
-            // cancellation test.
-            WaitForOperationOutcome(
-                () => ConversionHasFinished(),
-                "Cancel became unavailable without the run reporting that it had stopped.");
-
             throw new GuiDriverException(
                 "The conversion finished before cancellation could be exercised.");
         }

@@ -422,7 +422,7 @@ internal sealed class SmokeSuite
         using var gui = new EcGuiDriver(_app);
         System.Windows.Automation.AutomationElement review = gui.OpenReview(directory, count);
 
-        gui.ProceedThenCancel(review, () => RewrittenCount(directory) >= 1);
+        gui.ProceedThenCancel(review, () => AnyRewritten(directory));
 
         int rewritten = RewrittenCount(directory);
         int untouched = count - rewritten;
@@ -512,6 +512,18 @@ internal sealed class SmokeSuite
     }
 
     /// <summary>Files whose byte-order mark has been stripped, so they were written.</summary>
+    /// <summary>Whether EC has rewritten anything yet.</summary>
+    /// <remarks>
+    /// Asked every 50 ms while the conversion is running, so it stops at the first
+    /// rewritten file rather than counting them all. Counting opens every file in the
+    /// directory on each probe, which delays the cancellation this triggers and eats the
+    /// margin phase I depends on - the count is wanted once, after the run has stopped.
+    /// </remarks>
+    private static bool AnyRewritten(string directory) =>
+        Directory.EnumerateFiles(directory, "file-*.txt")
+            .Any(path => !StartsWithUtf8Bom(path));
+
+    /// <summary>How many files EC rewrote. Taken after the run, never during it.</summary>
     private static int RewrittenCount(string directory) =>
         Directory.EnumerateFiles(directory, "file-*.txt")
             .Count(path => !StartsWithUtf8Bom(path));
