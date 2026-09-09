@@ -105,9 +105,9 @@ internal sealed class EcGuiDriver : IDisposable
         SetToggle(MainWindow, "chkSelectDeselectAll", true);
         WaitUntil(
             () => CheckedResultCount() == expectedFiles,
-            $"Select all did not check {expectedFiles} result row(s). " +
-            $"Observed {CheckedResultCount()} checked row(s). " +
-            DescribeResultItems());
+            () => $"Select all did not check {expectedFiles} result row(s). "
+                  + $"Observed {CheckedResultCount()} checked row(s). "
+                  + DescribeResultItems());
         Invoke(MainWindow, "btnConvert");
 
         return WaitForReview();
@@ -200,10 +200,13 @@ internal sealed class EcGuiDriver : IDisposable
     /// prove the label exists. What matters is the wording a reader actually sees, so
     /// this reads the rendered text rather than a control's presence.
     /// </remarks>
-    internal string ReviewText(AutomationElement review) =>
+    internal string ReviewText(AutomationElement review) => VisibleText(review);
+
+    /// <summary>Every non-blank name under an element, joined one per line.</summary>
+    private static string VisibleText(AutomationElement root) =>
         string.Join(
             "\n",
-            review.FindAll(TreeScope.Descendants, Condition.TrueCondition)
+            root.FindAll(TreeScope.Descendants, Condition.TrueCondition)
                 .Cast<AutomationElement>()
                 .Select(element => element.Current.Name)
                 .Where(name => !string.IsNullOrWhiteSpace(name)));
@@ -215,13 +218,7 @@ internal sealed class EcGuiDriver : IDisposable
     /// alone would not. Waiting is a different job - see <see cref="StatusLine"/>, which
     /// reads only the status bar and does not throw.
     /// </remarks>
-    internal string StatusText() =>
-        string.Join(
-            "\n",
-            MainWindow.FindAll(TreeScope.Descendants, Condition.TrueCondition)
-                .Cast<AutomationElement>()
-                .Select(element => element.Current.Name)
-                .Where(name => !string.IsNullOrWhiteSpace(name)));
+    internal string StatusText() => VisibleText(MainWindow);
 
     /// <summary>
     /// Starts the conversion and cancels it once the status bar shows progress.
@@ -238,9 +235,8 @@ internal sealed class EcGuiDriver : IDisposable
         Invoke(review, "btnProceedConversion");
         WaitUntil(() => !WindowExists(handle), "The conversion review did not close.");
 
-        // Timed against real progress rather than a sleep, so the phase does not depend
-        // on how fast the machine converts. Cancelling before the first write would
-        // exercise the declined-review path instead, which phase A already covers.
+        // Cancelling before the first write would exercise the declined-review path
+        // instead, which phase A already covers.
         WaitForOperationOutcome(
             () => writingHasBegun() || ConversionHasFinished(),
             "The conversion neither began writing nor reported that it had finished.");
@@ -285,7 +281,7 @@ internal sealed class EcGuiDriver : IDisposable
                 // at. Progress would then depend on the button disappearing rather than
                 // on the run reporting, and a button that lingered after the run ended
                 // would keep being refused with the answer already on screen.
-                if (StatusLine() is string status && IsFinalConversionStatus(status))
+                if (FinalConversionStatus() is string status)
                     return status;
 
                 if (!pressAttempted)
@@ -414,9 +410,7 @@ internal sealed class EcGuiDriver : IDisposable
     /// any final conversion status. A status outlives the action that wrote it - the
     /// window clears it only when the next action starts - so accepting any of them lets
     /// a wait be satisfied by the previous action's report and return before the current
-    /// one has finished. Every phase drives one action per window today, which is the
-    /// only reason that has not bitten; it is the shape EC-26 was about, in the one
-    /// helper that fix did not reach.
+    /// one has finished, so each caller names the headline its own action produces.
     /// </remarks>
     private void WaitForMainReady(string expectedHeadline)
     {
@@ -434,8 +428,7 @@ internal sealed class EcGuiDriver : IDisposable
 
         throw Expired(
             $"EncodingChecker did not go idle: no '{expectedHeadline}' was reported."
-            + Safely(() => " The status showed: " + StatusText(),
-                     " The status could not be read")
+            + DescribeStatusSafely()
             + DescribeIdleState(),
             lastError);
     }
@@ -493,8 +486,7 @@ internal sealed class EcGuiDriver : IDisposable
         }
 
         throw Expired(
-            what + Safely(() => " The status showed: " + StatusText(),
-                          " The status could not be read"),
+            what + DescribeStatusSafely(),
             lastError);
     }
 
@@ -525,12 +517,7 @@ internal sealed class EcGuiDriver : IDisposable
             if (bar is null)
                 return null;
 
-            return string.Join(
-                "\n",
-                bar.FindAll(TreeScope.Descendants, Condition.TrueCondition)
-                    .Cast<AutomationElement>()
-                    .Select(element => element.Current.Name)
-                    .Where(name => !string.IsNullOrWhiteSpace(name)));
+            return VisibleText(bar);
         }
         catch (Exception ex) when (
             ex is ElementNotAvailableException or InvalidOperationException or COMException)
@@ -539,19 +526,19 @@ internal sealed class EcGuiDriver : IDisposable
         }
     }
 
+    private bool ConversionHasFinished() => FinalConversionStatus() is not null;
+
+    /// <summary>
+    /// The status a finished run reported, or null while one is still running.
+    /// </summary>
+    private string? FinalConversionStatus() =>
+        StatusLine() is string status && IsFinalConversionStatus(status) ? status : null;
+
     /// <summary>
     /// Every way a conversion or preview can end writes one of these, including the paths
     /// where nothing was modified. Matching the headline rather than the counts keeps this
     /// independent of what the run actually did.
     /// </summary>
-    private bool ConversionHasFinished()
-    {
-        if (StatusLine() is not string status)
-            return false;
-
-        return IsFinalConversionStatus(status);
-    }
-
     private static bool IsFinalConversionStatus(string status) =>
         status.Contains("Conversion complete", StringComparison.Ordinal) ||
         status.Contains("Conversion stopped", StringComparison.Ordinal) ||
@@ -590,6 +577,10 @@ internal sealed class EcGuiDriver : IDisposable
     /// important one. A listing that fails says why, alongside that error rather than
     /// instead of it.
     /// </summary>
+    private string DescribeStatusSafely() =>
+        Safely(() => " The status showed: " + StatusText(),
+               " The status could not be read");
+
     private string DescribeWindowsSafely() =>
         Safely(() => " EC exposed these windows: " + DescribeTopLevelWindows(),
                " The windows could not be listed either");
@@ -616,20 +607,10 @@ internal sealed class EcGuiDriver : IDisposable
         FindProcessElementById("ConversionConfirmationForm") ??
         FindProcessElementByTitle("Review conversion");
 
-    private int ResultCount()
-    {
-        AutomationElement? list = FindById(MainWindow, "lstResults");
-
-        if (list is null)
-            return 0;
-
-        AutomationElementCollection children = list.FindAll(
-            TreeScope.Children, Condition.TrueCondition);
-
-        return children.Cast<AutomationElement>().Count(element =>
-            element.Current.ControlType is var type &&
-            (type == ControlType.DataItem || type == ControlType.ListItem));
-    }
+    private int ResultCount() =>
+        FindById(MainWindow, "lstResults") is AutomationElement list
+            ? ResultItems(list).Count()
+            : 0;
 
     private void SetRefusedFileChecked(
         AutomationElement review,
@@ -772,8 +753,7 @@ internal sealed class EcGuiDriver : IDisposable
             toggle.Toggle();
 
         WaitUntil(
-            () => ((TogglePattern)element.GetCurrentPattern(TogglePattern.Pattern))
-                      .Current.ToggleState == (value ? ToggleState.On : ToggleState.Off),
+            () => toggle.Current.ToggleState == (value ? ToggleState.On : ToggleState.Off),
             $"'{automationId}' did not reach the requested state.");
     }
 
@@ -1011,7 +991,20 @@ internal sealed class EcGuiDriver : IDisposable
         return null;
     }
 
-    private static void WaitUntil(Func<bool> predicate, string timeoutMessage)
+    private static void WaitUntil(Func<bool> predicate, string timeoutMessage) =>
+        WaitUntil(predicate, () => timeoutMessage);
+
+    /// <summary>
+    /// Waits, building the failure message only if there is a failure to describe.
+    /// </summary>
+    /// <remarks>
+    /// A message assembled up front runs whatever it interpolates on every passing
+    /// call, and an automation call in there can fail a wait whose predicate was
+    /// satisfied. It also describes the state before the wait rather than when it
+    /// gave up. Building it here fixes both, and routes it through Safely so a
+    /// description that throws cannot replace the timeout it exists to explain.
+    /// </remarks>
+    private static void WaitUntil(Func<bool> predicate, Func<string> timeoutMessage)
     {
         if (WaitFor(
                 () => predicate() ? new object() : null,
@@ -1021,7 +1014,9 @@ internal sealed class EcGuiDriver : IDisposable
             return;
         }
 
-        throw Expired(timeoutMessage, lastError);
+        throw Expired(
+            Safely(timeoutMessage, "The wait expired and could not be described"),
+            lastError);
     }
 
     /// <summary>
