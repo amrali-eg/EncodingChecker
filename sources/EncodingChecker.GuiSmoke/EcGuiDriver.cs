@@ -76,7 +76,7 @@ internal sealed class EcGuiDriver : IDisposable
     {
         string target = TargetEncoding();
 
-        if (!target.Equals("utf-8", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(target, "utf-8", StringComparison.OrdinalIgnoreCase))
         {
             throw new GuiDriverException(
                 $"The target encoding opens on '{target}', not 'utf-8'. Every phase "
@@ -263,45 +263,58 @@ internal sealed class EcGuiDriver : IDisposable
     /// The button and final status are raced so a fast completion produces a clear failure
     /// instead of a misleading timeout.
     ///
-    /// A refused click is retried rather than believed. A control reporting itself
-    /// not-enabled is the same flag this driver stopped trusting for readiness, and one
-    /// refusal says nothing about whether the run is over; only the window's own final
-    /// status does. So each attempt reacquires the button, and the wait ends on a click
-    /// that was accepted, a run that reported itself finished, or the timeout.
+    /// Whether cancellation happened is not decided here. Delivering a click is not
+    /// proof it took effect, and failing to deliver one is not proof it did not: the
+    /// window's own final status is the only thing that separates a run that was stopped
+    /// from one that finished on its own, and <see cref="WaitForStoppedConversion"/>
+    /// reads it. This method's job is to ask, and to wait until the run has reported
+    /// something.
     ///
-    /// The refusal is left to that shared loop rather than caught here. The loop retries
-    /// it and can report it if refusals continue until the timeout. Catching it here
-    /// would turn every refusal into a clean "not ready" answer, which is what makes the
-    /// loop drop the cause.
+    /// The two ways a click can fail mean different things. A refusal - the control
+    /// reporting itself not-enabled - happens before anything is delivered, so trying
+    /// again is safe and right. An element that disappears mid-call, or a COM failure,
+    /// is what a click that *did* land looks like when the window hides the button in
+    /// response; it may equally have failed before delivering. Clicking again there
+    /// would be a fresh action rather than a retry, so the attempt stops and the status
+    /// is left to say what happened.
     /// </remarks>
     private void RequestCancel()
     {
-        bool cancelled = false;
+        bool clickMayHaveLanded = false;
 
         WaitUntil(
             () =>
             {
-                AutomationElement? cancel = FindById(MainWindow, "btnCancel");
+                // Once a click may be in flight, stop pressing the button and just watch.
+                if (!clickMayHaveLanded)
+                {
+                    AutomationElement? cancel = FindById(MainWindow, "btnCancel");
 
-                // Gone means the window hid it, which it does only when a run ends - but
-                // that has to come from the status, not from the button's absence.
-                if (cancel is null)
-                    return ConversionHasFinished();
+                    // Gone means the window hid it, which it does only when a run ends -
+                    // but that has to come from the status, not the button's absence.
+                    if (cancel is not null)
+                    {
+                        try
+                        {
+                            Invoke(cancel);
+                            clickMayHaveLanded = true;
+                        }
+                        catch (ElementNotEnabledException)
+                        {
+                            // Refused outright, so nothing was delivered. Try again.
+                            return false;
+                        }
+                        catch (Exception ex) when (
+                            ex is ElementNotAvailableException or COMException)
+                        {
+                            clickMayHaveLanded = true;
+                        }
+                    }
+                }
 
-                // A refusal throws out of here into the retry loop, which reacquires the
-                // button on the next attempt. If the run really has ended by then, the
-                // branch above sees the status say so.
-                Invoke(cancel);
-                cancelled = true;
-                return true;
+                return ConversionHasFinished();
             },
-            "Cancel was never accepted, and the run never reported that it had stopped.");
-
-        if (!cancelled)
-        {
-            throw new GuiDriverException(
-                "The conversion finished before cancellation could be exercised.");
-        }
+            "The run never reported a final status after cancellation was requested.");
     }
 
     /// <summary>Requires the cancellation request to produce an interrupted run.</summary>
@@ -599,7 +612,7 @@ internal sealed class EcGuiDriver : IDisposable
     {
         AutomationElement combo = RequireById(root, automationId);
 
-        if (SelectedName(combo).Equals(value, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(SelectedName(combo), value, StringComparison.OrdinalIgnoreCase))
             return;
 
         if (!combo.TryGetCurrentPattern(ValuePattern.Pattern, out object? rawValue))
@@ -616,7 +629,7 @@ internal sealed class EcGuiDriver : IDisposable
         setter.SetValue(value);
 
         WaitUntil(
-            () => SelectedName(combo).Equals(value, StringComparison.OrdinalIgnoreCase),
+            () => string.Equals(SelectedName(combo), value, StringComparison.OrdinalIgnoreCase),
             $"'{value}' was not selected in '{automationId}'.");
     }
 
@@ -628,11 +641,14 @@ internal sealed class EcGuiDriver : IDisposable
                 ((SelectionPattern)rawSelection).Current.GetSelection();
 
             if (selected.Length > 0)
-                return selected[0].Current.Name;
+                return selected[0].Current.Name ?? string.Empty;
         }
 
+        // A provider may hand back null for either of these. Absorbing it here means
+        // callers can compare the result without guarding, and an unreadable selection
+        // fails their assertion rather than their null check.
         if (combo.TryGetCurrentPattern(ValuePattern.Pattern, out object? rawValue))
-            return ((ValuePattern)rawValue).Current.Value;
+            return ((ValuePattern)rawValue).Current.Value ?? string.Empty;
 
         return string.Empty;
     }

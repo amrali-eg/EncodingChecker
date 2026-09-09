@@ -184,12 +184,12 @@ internal sealed class SmokeSuite
         // over a control label's casing.
         gui.SetTargetEncoding("us-ascii");
         string changed = gui.TargetEncoding();
-        Check(changed.Equals("us-ascii", StringComparison.OrdinalIgnoreCase),
+        Check(string.Equals(changed, "us-ascii", StringComparison.OrdinalIgnoreCase),
             $"The target encoding did not change: {changed}");
 
         gui.SetTargetEncoding("utf-8");
         string restored = gui.TargetEncoding();
-        Check(restored.Equals("utf-8", StringComparison.OrdinalIgnoreCase),
+        Check(string.Equals(restored, "utf-8", StringComparison.OrdinalIgnoreCase),
             $"The target encoding did not change back: {restored}");
 
         AssertSameFiles(before, Snapshot(directory));
