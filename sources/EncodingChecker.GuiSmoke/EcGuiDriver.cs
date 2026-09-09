@@ -273,9 +273,12 @@ internal sealed class EcGuiDriver : IDisposable
         }
 
         // Read once more here rather than in the message passed in, so the failure shows
-        // what was on screen when the wait gave up.
+        // what was on screen when the wait gave up - and safely, because reading it is
+        // another automation call and must not replace the timeout it is describing.
         throw Expired(
-            $"The status line never showed '{fragment}'. It showed: {StatusText()}",
+            $"The status line never showed '{fragment}'."
+            + Safely(() => " It showed: " + StatusText(),
+                     " The status could not be read either"),
             lastError);
     }
 
@@ -313,16 +316,25 @@ internal sealed class EcGuiDriver : IDisposable
     /// important one. A listing that fails says why, alongside that error rather than
     /// instead of it.
     /// </summary>
-    private string DescribeWindowsSafely()
+    private string DescribeWindowsSafely() =>
+        Safely(() => " EC exposed these windows: " + DescribeTopLevelWindows(),
+               " The windows could not be listed either");
+
+    /// <summary>
+    /// Builds a piece of a failure message that is itself an automation call, and never
+    /// throws. When automation is what failed, the call gathering detail about it is
+    /// likely to fail too, and the detail must never replace the failure it describes.
+    /// A part that cannot be gathered says so instead.
+    /// </summary>
+    private static string Safely(Func<string> describe, string whenItFails)
     {
         try
         {
-            return " EC exposed these windows: " + DescribeTopLevelWindows();
+            return describe();
         }
         catch (Exception ex)
         {
-            return " The windows could not be listed either: "
-                   + $"{ex.GetType().Name}: {ex.Message}";
+            return $"{whenItFails}: {ex.GetType().Name}: {ex.Message}";
         }
     }
 

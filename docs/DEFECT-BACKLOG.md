@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=65 fixed=54 open=7 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
+<!-- backlog-counts total=66 fixed=54 open=8 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 65 findings — 54 fixed, 7 open, 1 not reproduced, 1 withdrawn,
+**Derived count: 66 findings — 54 fixed, 8 open, 1 not reproduced, 1 withdrawn,
 1 intentional behavior, and 1 design decision.** Recompute and check these
 figures with:
 
@@ -52,6 +52,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 |---|---|---|---|---|---|
 | EC-17 | A comment describes the text check backwards | Open | Low | Common | [EC-17](#ec-17) |
 | EC-20 | A file can change while EC is detecting its encoding | Open | Low | Rare | [EC-20](#ec-20) |
+| EC-26 | The smoke driver trusts an enabled flag that has been seen stale | Open | Low | Rare | [EC-26](#ec-26) |
 | CX-06 | EC checks for random-looking data before checking for a BOM | Open | Medium | Theoretical | [CX-06](#cx-06) |
 | BL-05 | Force-closing during a conversion can produce an error on exit | Open | Low | Rare | [BL-05](#bl-05) |
 | BL-19 | ASCII with many NUL bytes can be reported as UTF-16 | Open | Medium | Rare | [BL-19](#bl-19) |
@@ -70,7 +71,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | EC-08 | A constructed include pattern could hang a scan indefinitely | Fixed | — | — | [EC-08](#ec-08) |
 | EC-24 | The GUI smoke gate could select in the wrong combo | Fixed | — | — | [EC-24](#ec-24) |
 | EC-25 | The smoke suite never set the main window's target encoding | Fixed | — | — | [EC-25](#ec-25) |
-| EC-26 | The smoke driver read a status line the window had not written yet | Fixed | — | — | [EC-26](#ec-26) |
+| EC-27 | The smoke driver read a status line the window had not written yet | Fixed | — | — | [EC-27](#ec-27) |
 | EC-18 | EC repeated a BOM-less UTF-16 safety check unnecessarily | Fixed | — | — | [EC-18](#ec-18) |
 | EC-23 | Plan application assumed a required path existed instead of checking it | Fixed | — | — | [EC-23](#ec-23) |
 | BL-27 | GUI smoke reports could show an empty or misleading build hash | Fixed | — | — | [BL-27](#bl-27) |
@@ -901,6 +902,31 @@ suite retires the evidence gathered for the previous one.
 
 ### EC-26
 
+**The driver treats an enabled flag as a readiness signal, and it has been seen
+stale.** `Current.IsEnabled` reported a control disabled for five seconds while
+that same control accepted `Invoke` and closed the review.
+
+Four readiness checks still rest on it: that a scan has finished, that writing has
+begun, whether cancellation is still possible, and that the main window has
+returned to idle. None of them confirms the thing it is waiting for; each asks the
+flag instead.
+
+What it means is that a phase could time out waiting for a control that was ready
+the whole time, and report a defect in EC that is not there - the same shape of
+wrong answer the preflight check exists to prevent.
+
+**This was briefly closed on the strength of [EC-27](#ec-27), and should not have
+been.** That fix stopped one phase reading a status the window had not written
+yet, by waiting for the text rather than the button. It removed a consequence of
+trusting the flag in one place; it did not remove the dependency, and the four
+checks above are unchanged. Twenty-five clean runs say nothing about a flag that
+was seen misreporting once.
+
+Closing it means readiness checks that confirm the operation rather than consult
+the flag. Nothing has been changed for that yet.
+
+### EC-27
+
 **Before:** the driver treated an enabled button as "the run has finished". The
 window enables its buttons before it assigns the final status text, so a phase
 that read the status the moment the buttons came back could read the previous
@@ -933,11 +959,8 @@ text being read, with the runs agreeing.
 assigns `actionStatus.Text` forty-five lines later. A driver polling every 50 ms
 lands between the two often enough to matter.
 
-The original observation has the same root and is kept: `Current.IsEnabled` was
-seen reporting a control disabled for five seconds while that control accepted
-`Invoke`. Whether the flag is stale or merely early, it answers a question the
-driver was not asking. A readiness check that confirms the thing being waited for
-does not have that problem, and that is now the rule this driver follows.
+This is one consequence of [EC-26](#ec-26) removed, not EC-26 itself. The driver
+still consults the flag in four other readiness checks.
 
 ## Decisions and mistakes that must remain visible
 
