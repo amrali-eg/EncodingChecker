@@ -261,8 +261,7 @@ internal sealed class EcGuiDriver : IDisposable
     /// proving cancellation, so neither is accepted as a successful test.
     ///
     /// The button and final status are raced so a fast completion produces a clear failure
-    /// instead of a misleading timeout. If neither appears, the wait retains the last
-    /// automation error.
+    /// instead of a misleading timeout.
     ///
     /// A refused click is retried rather than believed. A control reporting itself
     /// not-enabled is the same flag this driver stopped trusting for readiness, and one
@@ -270,10 +269,10 @@ internal sealed class EcGuiDriver : IDisposable
     /// status does. So each attempt reacquires the button, and the wait ends on a click
     /// that was accepted, a run that reported itself finished, or the timeout.
     ///
-    /// The refusal is left to that shared loop rather than caught here. It already
-    /// retries these errors and keeps the last one, so a wait that does expire can name
-    /// the refusal it kept hitting; catching it here would retry just as often and
-    /// report nothing.
+    /// The refusal is left to that shared loop rather than caught here. The loop retries
+    /// it and can report it if refusals continue until the timeout. Catching it here
+    /// would turn every refusal into a clean "not ready" answer, which is what makes the
+    /// loop drop the cause.
     /// </remarks>
     private void RequestCancel()
     {
@@ -847,8 +846,10 @@ internal sealed class EcGuiDriver : IDisposable
         ?? throw Expired(timeoutMessage, lastError);
 
     /// <param name="lastError">
-    /// The last error retried before giving up. A probe that threw every time is the
-    /// likeliest reason a wait expired, and it is what a bare timeout cannot report.
+    /// The last error retried, when the probe was still failing at the end. A poll that
+    /// answers cleanly clears it, so this reports the cause of a wait that kept throwing
+    /// rather than one that simply never became true - which is the case a bare timeout
+    /// cannot explain by itself.
     /// There is deliberately no overload without it, so a wait that reports a timeout
     /// cannot leave the cause out by accident. Only a caller with nothing to report
     /// discards it, and no wait in this driver currently does.
