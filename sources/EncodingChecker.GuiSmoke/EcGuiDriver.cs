@@ -61,8 +61,36 @@ internal sealed class EcGuiDriver : IDisposable
         SetToggle(MainWindow, "chkIncludeSubdirectories", false);
         SetToggle(MainWindow, "chkCreateBackup", true);
         SetToggle(MainWindow, "chkPreviewChanges", false);
-        SelectCombo(MainWindow, "lstConvert", "utf-8");
+        RequireDefaultTarget();
     }
+
+    /// <summary>Fails unless the window opens on utf-8, which every phase assumes.</summary>
+    /// <remarks>
+    /// The target list is disabled until a scan has run, so this cannot set it - and
+    /// asking for the value it already holds would quietly do nothing. MainForm selects
+    /// utf-8 only when it finds it, falling back to the first entry otherwise, so the
+    /// assumption is worth stating: one clear failure here beats every phase failing in
+    /// setup for a reason none of them mentions.
+    /// </remarks>
+    private void RequireDefaultTarget()
+    {
+        string target = TargetEncoding();
+
+        if (!target.Equals("utf-8", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new GuiDriverException(
+                $"The target encoding opens on '{target}', not 'utf-8'. Every phase "
+                + "converts to utf-8 and none of them sets it.");
+        }
+    }
+
+    /// <summary>The target encoding the main window currently shows.</summary>
+    internal string TargetEncoding() =>
+        SelectedName(RequireById(MainWindow, "lstConvert"));
+
+    /// <summary>Sets the target encoding, once a scan has enabled the list.</summary>
+    internal void SetTargetEncoding(string value) =>
+        SelectCombo(MainWindow, "lstConvert", value);
 
     private void Scan(int expectedFiles)
     {

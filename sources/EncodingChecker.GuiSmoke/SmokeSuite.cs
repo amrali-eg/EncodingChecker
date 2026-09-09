@@ -173,6 +173,18 @@ internal sealed class SmokeSuite
             "The mixed review did not offer a source-encoding choice.");
         gui.CancelReview(review);
 
+        // The suite converts to utf-8 everywhere and never sets the target, so nothing
+        // otherwise drives that control. Exercise it here, where the run is over and this
+        // phase is about to prove no bytes moved: a target that could not be changed would
+        // pass every other phase unnoticed.
+        gui.SetTargetEncoding("us-ascii");
+        Check(gui.TargetEncoding() == "us-ascii",
+            $"The target encoding did not change: {gui.TargetEncoding()}");
+
+        gui.SetTargetEncoding("utf-8");
+        Check(gui.TargetEncoding() == "utf-8",
+            $"The target encoding did not change back: {gui.TargetEncoding()}");
+
         AssertSameFiles(before, Snapshot(directory));
         AssertNoArtifacts(directory);
     }

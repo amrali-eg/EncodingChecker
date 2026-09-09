@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=65 fixed=53 open=8 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
+<!-- backlog-counts total=65 fixed=54 open=7 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 65 findings — 53 fixed, 8 open, 1 not reproduced, 1 withdrawn,
+**Derived count: 65 findings — 54 fixed, 7 open, 1 not reproduced, 1 withdrawn,
 1 intentional behavior, and 1 design decision.** Recompute and check these
 figures with:
 
@@ -52,7 +52,6 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 |---|---|---|---|---|---|
 | EC-17 | A comment describes the text check backwards | Open | Low | Common | [EC-17](#ec-17) |
 | EC-20 | A file can change while EC is detecting its encoding | Open | Low | Rare | [EC-20](#ec-20) |
-| EC-25 | The smoke suite never sets the main window's target encoding | Open | Low | Rare | [EC-25](#ec-25) |
 | CX-06 | EC checks for random-looking data before checking for a BOM | Open | Medium | Theoretical | [CX-06](#cx-06) |
 | BL-05 | Force-closing during a conversion can produce an error on exit | Open | Low | Rare | [BL-05](#bl-05) |
 | BL-19 | ASCII with many NUL bytes can be reported as UTF-16 | Open | Medium | Rare | [BL-19](#bl-19) |
@@ -70,6 +69,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | BL-01 | Ambiguous BOM-less UTF-32 could be converted under the wrong byte order | Fixed | — | — | [BL-01](#bl-01) |
 | EC-08 | A constructed include pattern could hang a scan indefinitely | Fixed | — | — | [EC-08](#ec-08) |
 | EC-24 | The GUI smoke gate could select in the wrong combo | Fixed | — | — | [EC-24](#ec-24) |
+| EC-25 | The smoke suite never set the main window's target encoding | Fixed | — | — | [EC-25](#ec-25) |
 | EC-26 | The smoke driver read a status line the window had not written yet | Fixed | — | — | [EC-26](#ec-26) |
 | EC-18 | EC repeated a BOM-less UTF-16 safety check unnecessarily | Fixed | — | — | [EC-18](#ec-18) |
 | EC-23 | Plan application assumed a required path existed instead of checking it | Fixed | — | — | [EC-23](#ec-23) |
@@ -870,19 +870,34 @@ ledger cannot give them a status: [EC-25](#ec-25) and [EC-26](#ec-26).
 
 ### EC-25
 
-**The smoke suite never exercises setting the main window's target encoding.**
-`ConfigureScan` asks for `utf-8` on `lstConvert` before scanning, while that
-control is still disabled. It succeeds only because `utf-8` is already selected,
-so `SelectCombo` returns before setting anything.
+**Before:** `ConfigureScan` asked for `utf-8` on `lstConvert` before scanning,
+while that control is still disabled. It succeeded only because `utf-8` was
+already selected, so the call returned before setting anything. The selection path
+[EC-24](#ec-24) replaced was therefore never driven on that combo, and a changed
+application default would have failed every phase during setup rather than in the
+phase that cares.
 
-Nothing is wrong with EC here; the gap is in the suite. Two consequences follow.
-The path [EC-24](#ec-24) replaced is never driven on that combo, so a defect in it
-would not be caught. And if the application's default target ever changed, every
-phase would fail during setup rather than in the phase that cares.
+**Now:** the suite states the assumption and exercises the path. `ConfigureScan`
+requires the window to open on `utf-8` and fails with one message naming that if
+it does not. Phase A sets the target to `us-ascii` and back after cancelling its
+review, where the run is over and the phase already proves no bytes moved.
 
-Closing it means asserting the default before the scan and exercising a
-non-default target after scanning enables the control. Neither was written,
-because doing so changes the suite that had just been stabilised.
+`us-ascii` rather than a BOM variant on purpose: `utf-8-bom` and `utf-16BE` share
+a prefix with other entries, so a setter that matched on prefix would have made
+the check pass while selecting something else.
+
+**EC is unchanged.** The gap was in the suite. It is worth noting what the
+assertion protects, though: `MainForm` selects `utf-8` only when
+`FindStringExact` finds it and falls back to the first entry otherwise, so the
+default every phase depends on is conditional in the product rather than
+guaranteed.
+
+**Both halves are load-bearing**, checked by mutation with the build required to
+succeed and the compiled binary's hash required to change first. Expecting a
+different default fails in 750 ms with `GuiDriverException`; making the setter a
+no-op is caught by the round trip. Fifteen consecutive full runs passed after the
+change - fewer than the twenty-five behind [EC-26](#ec-26), because altering the
+suite retires the evidence gathered for the previous one.
 
 ### EC-26
 
