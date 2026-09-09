@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=66 fixed=55 open=7 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
+<!-- backlog-counts total=67 fixed=55 open=8 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 66 findings — 55 fixed, 7 open, 1 not reproduced, 1 withdrawn,
+**Derived count: 67 findings — 55 fixed, 8 open, 1 not reproduced, 1 withdrawn,
 1 intentional behavior, and 1 design decision.** Recompute and check these
 figures with:
 
@@ -52,6 +52,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 |---|---|---|---|---|---|
 | EC-17 | A comment describes the text check backwards | Open | Low | Common | [EC-17](#ec-17) |
 | EC-20 | A file can change while EC is detecting its encoding | Open | Low | Rare | [EC-20](#ec-20) |
+| EC-28 | Phase A once timed out waiting for the window to go idle | Open | Medium | Rare | [EC-28](#ec-28) |
 | CX-06 | EC checks for random-looking data before checking for a BOM | Open | Medium | Theoretical | [CX-06](#cx-06) |
 | BL-05 | Force-closing during a conversion can produce an error on exit | Open | Low | Rare | [BL-05](#bl-05) |
 | BL-19 | ASCII with many NUL bytes can be reported as UTF-16 | Open | Medium | Rare | [BL-19](#bl-19) |
@@ -1048,6 +1049,48 @@ EC-27 fixed one visible result of [EC-26](#ec-26): reading the final status too
 early. EC-26 was later fixed by removing the remaining enabled-button checks from
 readiness decisions. The driver now waits for evidence produced by the operation
 itself.
+
+### EC-28
+
+**Phase A failed once with `TimeoutException: EncodingChecker did not return to
+its idle state`, and the cause is not known.** It happened on 2026-09-10 in one
+full-suite run out of thirteen, while validating the cancellation state machine.
+
+`WaitForMainReady` waits for the review window to be gone and for the status to
+show a final conversion result. The diagnostic it printed listed only the window's
+chrome - `File Encoding Checker | System Menu Bar | System | Minimize | Maximize |
+Close` - with no status bar text and no result rows among it, so at that moment
+the driver could see the window frame but nothing inside it.
+
+**It did not reproduce.** Phase A alone passed twelve times out of twelve on the
+build that failed, and twelve out of twelve on `master`. The full suite passed
+eight times out of eight afterwards. Isolated runs may simply be the wrong shape
+to catch it: the failure appeared in a sequence where nine other phases had
+already driven the same window.
+
+**It is not attributable to the change being validated.** Phase A cancels a review
+and never enters the cancellation path that change rewrote, and the patch was
+checked to have removed only the two methods it intended to remove. `master`
+carries the same `WaitForMainReady`, so the flake most likely predates it.
+
+Where to look, in the order that would settle it fastest:
+
+- `WaitForMainReady` waits for *any* final conversion status rather than evidence
+  of the action just performed. That is [EC-26](#ec-26)'s shape reappearing in a
+  helper the fix did not reach, and it is recorded there as still open.
+- The timeout reports what the window showed but not whether the process is still
+  alive, whether the main-window handle is still valid, whether the review is
+  genuinely gone, or whether `statusBar` can be found at all. A failure that
+  cannot distinguish those is hard to diagnose from CI alone.
+- The driver holds the `AutomationElement` for the main window from startup. If
+  that element goes stale, every later read fails while the window is perfectly
+  healthy; reacquiring it on failure would tell the two apart.
+- Reproduction should run the whole suite rather than the phase alone.
+
+Until then this is one unexplained red on a required check. It is recorded rather
+than waited out because a gate that fails for reasons nobody can name is the
+problem this project keeps returning to - [EC-24](#ec-24), [EC-26](#ec-26) and
+[EC-27](#ec-27) are all the same story, and each of them looked like noise first.
 
 ## Decisions and mistakes that must remain visible
 
