@@ -247,14 +247,29 @@ internal sealed class EcGuiDriver : IDisposable
         if (review is not null)
             return review;
 
-        string message = "The conversion review did not appear.";
+        throw Expired(
+            "The conversion review did not appear." + DescribeWindowsSafely(),
+            lastError);
+    }
 
-        // A repeated automation error is already the strongest available diagnostic.
-        // Do not make another automation query that could hide it while building the message.
-        if (lastError is null)
-            message += " EC exposed these windows: " + DescribeTopLevelWindows();
-
-        throw Expired(message, lastError);
+    /// <summary>
+    /// The window list explains an unexpected modal dialog; the retried error explains why
+    /// normal discovery failed. Both are wanted, so listing the windows must never throw:
+    /// it is itself an automation call, and the failure it would replace is the more
+    /// important one. A listing that fails says why, alongside that error rather than
+    /// instead of it.
+    /// </summary>
+    private string DescribeWindowsSafely()
+    {
+        try
+        {
+            return " EC exposed these windows: " + DescribeTopLevelWindows();
+        }
+        catch (Exception ex)
+        {
+            return " The windows could not be listed either: "
+                   + $"{ex.GetType().Name}: {ex.Message}";
+        }
     }
 
     private AutomationElement? FindReviewWindow() =>
