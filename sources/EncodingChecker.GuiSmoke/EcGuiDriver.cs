@@ -76,7 +76,7 @@ internal sealed class EcGuiDriver : IDisposable
     {
         string target = TargetEncoding();
 
-        if (!target.Equals("utf-8", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(target, "utf-8", StringComparison.OrdinalIgnoreCase))
         {
             throw new GuiDriverException(
                 $"The target encoding opens on '{target}', not 'utf-8'. Every phase "
@@ -261,43 +261,67 @@ internal sealed class EcGuiDriver : IDisposable
     /// proving cancellation, so neither is accepted as a successful test.
     ///
     /// The button and final status are raced so a fast completion produces a clear failure
-    /// instead of a misleading timeout. If neither appears, the wait retains the last
-    /// automation error.
+    /// instead of a misleading timeout.
+    ///
+    /// Whether cancellation happened is not decided here. Delivering a click is not
+    /// proof it took effect, and failing to deliver one is not proof it did not: the
+    /// window's own final status is the only thing that separates a run that was stopped
+    /// from one that finished on its own, and <see cref="WaitForStoppedConversion"/>
+    /// reads it. This method's job is to ask, and to wait until the run has reported
+    /// something.
+    ///
+    /// The two ways a click can fail mean different things. A refusal - the control
+    /// reporting itself not-enabled - happens before anything is delivered, so trying
+    /// again is safe and right, and it is left to the shared retry loop, which repeats it
+    /// and keeps it as the cause a timeout would name.
+    ///
+    /// Any other automation failure might have followed a click that did land: an element
+    /// disappearing mid-call is what a successful cancel looks like when the window hides
+    /// the button in response. Clicking again there would be a fresh action rather than a
+    /// retry, so the attempt stops and the status is left to say what happened.
     /// </remarks>
     private void RequestCancel()
     {
-        AutomationElement? cancel = null;
+        bool clickMayHaveLanded = false;
 
         WaitUntil(
             () =>
             {
-                cancel = FindById(MainWindow, "btnCancel");
-                return cancel is not null || ConversionHasFinished();
+                // Once a click may be in flight, stop pressing the button and just watch.
+                if (!clickMayHaveLanded)
+                {
+                    AutomationElement? cancel = FindById(MainWindow, "btnCancel");
+
+                    // Gone means the window hid it, which it does only when a run ends -
+                    // but that has to come from the status, not the button's absence.
+                    if (cancel is not null)
+                    {
+                        try
+                        {
+                            Invoke(cancel);
+                            clickMayHaveLanded = true;
+                        }
+                        // A refusal is the one failure that certainly delivered nothing,
+                        // and it is deliberately not caught: the shared loop retries it
+                        // and keeps it, so a wait that expires on repeated refusals can
+                        // name them. Answering "not ready" here would clear that cause.
+                        //
+                        // Every other automation failure might have followed a click that
+                        // landed, so the attempt stops and the status is left to say.
+                        catch (Exception ex) when (
+                            ex is not ElementNotEnabledException &&
+                            ex is ElementNotAvailableException
+                                or COMException
+                                or InvalidOperationException)
+                        {
+                            clickMayHaveLanded = true;
+                        }
+                    }
+                }
+
+                return ConversionHasFinished();
             },
-            "The run offered neither a Cancel button nor a final status.");
-
-        if (cancel is null)
-        {
-            throw new GuiDriverException(
-                "The conversion finished before cancellation could be exercised.");
-        }
-
-        try
-        {
-            Invoke(cancel);
-        }
-        catch (Exception ex) when (
-            ex is ElementNotEnabledException or ElementNotAvailableException)
-        {
-            // Confirm why the button vanished, but do not count ordinary completion as a
-            // cancellation test.
-            WaitForOperationOutcome(
-                () => ConversionHasFinished(),
-                "Cancel became unavailable without the run reporting that it had stopped.");
-
-            throw new GuiDriverException(
-                "The conversion finished before cancellation could be exercised.");
-        }
+            "The run never reported a final status after cancellation was requested.");
     }
 
     /// <summary>Requires the cancellation request to produce an interrupted run.</summary>
@@ -595,7 +619,7 @@ internal sealed class EcGuiDriver : IDisposable
     {
         AutomationElement combo = RequireById(root, automationId);
 
-        if (SelectedName(combo).Equals(value, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(SelectedName(combo), value, StringComparison.OrdinalIgnoreCase))
             return;
 
         if (!combo.TryGetCurrentPattern(ValuePattern.Pattern, out object? rawValue))
@@ -612,7 +636,7 @@ internal sealed class EcGuiDriver : IDisposable
         setter.SetValue(value);
 
         WaitUntil(
-            () => SelectedName(combo).Equals(value, StringComparison.OrdinalIgnoreCase),
+            () => string.Equals(SelectedName(combo), value, StringComparison.OrdinalIgnoreCase),
             $"'{value}' was not selected in '{automationId}'.");
     }
 
@@ -624,11 +648,14 @@ internal sealed class EcGuiDriver : IDisposable
                 ((SelectionPattern)rawSelection).Current.GetSelection();
 
             if (selected.Length > 0)
-                return selected[0].Current.Name;
+                return selected[0].Current.Name ?? string.Empty;
         }
 
+        // A provider may hand back null for either of these. Absorbing it here means
+        // callers can compare the result without guarding, and an unreadable selection
+        // fails their assertion rather than their null check.
         if (combo.TryGetCurrentPattern(ValuePattern.Pattern, out object? rawValue))
-            return ((ValuePattern)rawValue).Current.Value;
+            return ((ValuePattern)rawValue).Current.Value ?? string.Empty;
 
         return string.Empty;
     }
@@ -842,8 +869,10 @@ internal sealed class EcGuiDriver : IDisposable
         ?? throw Expired(timeoutMessage, lastError);
 
     /// <param name="lastError">
-    /// The last error retried before giving up. A probe that threw every time is the
-    /// likeliest reason a wait expired, and it is what a bare timeout cannot report.
+    /// The last error retried, when the probe was still failing at the end. A poll that
+    /// answers cleanly clears it, so this reports the cause of a wait that kept throwing
+    /// rather than one that simply never became true - which is the case a bare timeout
+    /// cannot explain by itself.
     /// There is deliberately no overload without it, so a wait that reports a timeout
     /// cannot leave the cause out by accident. Only a caller with nothing to report
     /// discards it, and no wait in this driver currently does.

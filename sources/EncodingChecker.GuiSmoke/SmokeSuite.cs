@@ -177,13 +177,20 @@ internal sealed class SmokeSuite
         // otherwise drives that control. Exercise it here, where the run is over and this
         // phase is about to prove no bytes moved: a target that could not be changed would
         // pass every other phase unnoticed.
+        // Read once and report that same reading: Check takes a message that is built
+        // whether or not it fails, so asking the window again inside it would drive the
+        // control on every passing run and could describe a value the assertion never
+        // tested. Compared the way the driver compares it, so the two cannot disagree
+        // over a control label's casing.
         gui.SetTargetEncoding("us-ascii");
-        Check(gui.TargetEncoding() == "us-ascii",
-            $"The target encoding did not change: {gui.TargetEncoding()}");
+        string changed = gui.TargetEncoding();
+        Check(string.Equals(changed, "us-ascii", StringComparison.OrdinalIgnoreCase),
+            $"The target encoding did not change: {changed}");
 
         gui.SetTargetEncoding("utf-8");
-        Check(gui.TargetEncoding() == "utf-8",
-            $"The target encoding did not change back: {gui.TargetEncoding()}");
+        string restored = gui.TargetEncoding();
+        Check(string.Equals(restored, "utf-8", StringComparison.OrdinalIgnoreCase),
+            $"The target encoding did not change back: {restored}");
 
         AssertSameFiles(before, Snapshot(directory));
         AssertNoArtifacts(directory);
@@ -422,7 +429,7 @@ internal sealed class SmokeSuite
         using var gui = new EcGuiDriver(_app);
         System.Windows.Automation.AutomationElement review = gui.OpenReview(directory, count);
 
-        gui.ProceedThenCancel(review, () => RewrittenCount(directory) >= 1);
+        gui.ProceedThenCancel(review, () => AnyRewritten(directory));
 
         int rewritten = RewrittenCount(directory);
         int untouched = count - rewritten;
@@ -511,7 +518,18 @@ internal sealed class SmokeSuite
         AssertNoArtifacts(phase.Directory);
     }
 
-    /// <summary>Files whose byte-order mark has been stripped, so they were written.</summary>
+    /// <summary>Whether EC has rewritten anything yet.</summary>
+    /// <remarks>
+    /// Asked every 50 ms while the conversion is running, so it stops at the first
+    /// rewritten file rather than counting them all. Counting opens every file in the
+    /// directory on each probe, which delays the cancellation this triggers and eats the
+    /// margin phase I depends on - the count is wanted once, after the run has stopped.
+    /// </remarks>
+    private static bool AnyRewritten(string directory) =>
+        Directory.EnumerateFiles(directory, "file-*.txt")
+            .Any(path => !StartsWithUtf8Bom(path));
+
+    /// <summary>How many files EC rewrote. Taken after the run, never during it.</summary>
     private static int RewrittenCount(string directory) =>
         Directory.EnumerateFiles(directory, "file-*.txt")
             .Count(path => !StartsWithUtf8Bom(path));
