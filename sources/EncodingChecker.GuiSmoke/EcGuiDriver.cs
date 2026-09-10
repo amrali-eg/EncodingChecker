@@ -426,11 +426,51 @@ internal sealed class EcGuiDriver : IDisposable
             return;
         }
 
+        RequireWindowStillReachable();
+
         throw Expired(
             $"EncodingChecker did not go idle: no '{expectedHeadline}' was reported."
             + DescribeStatusSafely()
             + DescribeIdleState(),
             lastError);
+    }
+
+    /// <summary>
+    /// Refuses the run when EC is alive but its window can no longer be reached.
+    /// </summary>
+    /// <remarks>
+    /// A wait that expires because the window went out of reach has measured nothing
+    /// about EC, and reporting it as a phase failure says the opposite. The check is
+    /// that the window cannot be found from the desktop at all while the process is
+    /// still running: a held element going stale would still leave a fresh lookup
+    /// working, and a genuinely hung EC would still leave the window findable.
+    ///
+    /// IsOffscreen is not the signal - it reads false for a window on another
+    /// virtual desktop.
+    /// </remarks>
+    private void RequireWindowStillReachable()
+    {
+        bool alive;
+
+        try
+        {
+            alive = !_process.HasExited;
+        }
+        catch (InvalidOperationException)
+        {
+            return;
+        }
+
+        if (!alive || FindTopLevelWindow("MainForm") is not null)
+            return;
+
+        throw new GuiEnvironmentException(
+            "EncodingChecker is still running, but its window can no longer be reached "
+            + "through UI Automation, so nothing about EC was measured. This is what "
+            + "happens when the window is moved to another virtual desktop, or the "
+            + "interactive session goes away. Run the suite on the active desktop of an "
+            + "interactive Windows session."
+            + DescribeIdleState());
     }
 
     /// <summary>
@@ -444,6 +484,12 @@ internal sealed class EcGuiDriver : IDisposable
     /// window was healthy, or the status bar simply could not be found. These four
     /// separate those, and each is gathered on its own so one unreadable answer does not
     /// cost the others.
+    ///
+    /// The window is also looked up again from the desktop, because the held element
+    /// answering while its subtree holds only chrome has two very different
+    /// explanations: the element went stale and a fresh one would work, or the window
+    /// itself is unreachable - not on the active desktop, or offscreen - in which case a
+    /// fresh lookup fails the same way and retrying anything is pointless.
     /// </remarks>
     private string DescribeIdleState() =>
         " Process alive: " + Ask(() => _process.HasExited ? "no" : "yes")
@@ -451,7 +497,21 @@ internal sealed class EcGuiDriver : IDisposable
         + "; review present: " + Ask(() => FindReviewWindow() is not null ? "yes" : "no")
         + "; status bar found: "
         + Ask(() => FindById(MainWindow, "statusBar") is not null ? "yes" : "no")
-        + "; status bar readable: " + Ask(() => StatusLine() is null ? "no" : "yes") + ".";
+        + "; status bar readable: " + Ask(() => StatusLine() is null ? "no" : "yes")
+        + "; window found afresh: " + Ask(() => FindTopLevelWindow("MainForm") is null
+            ? "no"
+            : "yes")
+        + "; handle afresh: " + Ask(() =>
+            FindTopLevelWindow("MainForm") is AutomationElement fresh
+                ? fresh.Current.NativeWindowHandle.ToString()
+                : "n/a")
+        + "; status bar via fresh window: " + Ask(() =>
+            FindTopLevelWindow("MainForm") is AutomationElement fresh
+                && FindById(fresh, "statusBar") is not null
+                    ? "yes"
+                    : "no")
+        + "; window offscreen: " + Ask(() => MainWindow.Current.IsOffscreen ? "yes" : "no")
+        + ".";
 
     /// <summary>One fact for a diagnostic, or why it could not be had.</summary>
     private static string Ask(Func<string> fact)

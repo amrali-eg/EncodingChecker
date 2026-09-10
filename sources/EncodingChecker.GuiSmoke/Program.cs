@@ -73,6 +73,13 @@ internal static class Program
             Console.Error.WriteLine(ex.Message);
             return 2;
         }
+        catch (GuiEnvironmentException ex)
+        {
+            // Exit 2, with the other refused prerequisites: the run did not fail, it
+            // never took place, and calling it a failure would blame EC for the machine.
+            Console.Error.WriteLine(ex.Message);
+            return 2;
+        }
         catch (ArgumentException ex)
         {
             Console.Error.WriteLine(ex.Message);

@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=67 fixed=55 open=8 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
+<!-- backlog-counts total=67 fixed=56 open=7 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 67 findings — 55 fixed, 8 open, 1 not reproduced, 1 withdrawn,
+**Derived count: 67 findings — 56 fixed, 7 open, 1 not reproduced, 1 withdrawn,
 1 intentional behavior, and 1 design decision.** Recompute and check these
 figures with:
 
@@ -52,7 +52,6 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 |---|---|---|---|---|---|
 | EC-17 | A comment describes the text check backwards | Open | Low | Common | [EC-17](#ec-17) |
 | EC-20 | A file can change while EC is detecting its encoding | Open | Low | Rare | [EC-20](#ec-20) |
-| EC-28 | Phase A once timed out waiting for the window to go idle | Open | Medium | Rare | [EC-28](#ec-28) |
 | CX-06 | EC checks for random-looking data before checking for a BOM | Open | Medium | Theoretical | [CX-06](#cx-06) |
 | BL-05 | Force-closing during a conversion can produce an error on exit | Open | Low | Rare | [BL-05](#bl-05) |
 | BL-19 | ASCII with many NUL bytes can be reported as UTF-16 | Open | Medium | Rare | [BL-19](#bl-19) |
@@ -73,6 +72,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | EC-25 | The smoke suite never set the main window's target encoding | Fixed | — | — | [EC-25](#ec-25) |
 | EC-26 | The smoke driver trusted an enabled flag that had been seen stale | Fixed | — | — | [EC-26](#ec-26) |
 | EC-27 | The smoke driver read a status line the window had not written yet | Fixed | — | — | [EC-27](#ec-27) |
+| EC-28 | The smoke driver can lose access to EC's controls while the process and window are alive | Fixed | — | — | [EC-28](#ec-28) |
 | EC-18 | EC repeated a BOM-less UTF-16 safety check unnecessarily | Fixed | — | — | [EC-18](#ec-18) |
 | EC-23 | Plan application assumed a required path existed instead of checking it | Fixed | — | — | [EC-23](#ec-23) |
 | BL-27 | GUI smoke reports could show an empty or misleading build hash | Fixed | — | — | [BL-27](#bl-27) |
@@ -1052,61 +1052,63 @@ itself.
 
 ### EC-28
 
-**Phase A failed once with `TimeoutException: EncodingChecker did not return to
-its idle state`, and the cause is not known.** It happened on 2026-09-10 in one
-full-suite run out of thirteen, while validating the cancellation state machine.
+**Before:** a wait could expire because the driver had lost access to EC's
+controls, and the suite reported that as a phase failure - which reads as EC
+failing to finish work it had in fact finished.
 
-`WaitForMainReady` waits for the review window to be gone and for the status to
-show a final conversion result. The diagnostic it printed listed only the window's
-chrome - `File Encoding Checker | System Menu Bar | System | Minimize | Maximize |
-Close` - with no status bar text and no result rows among it, so at that moment
-the driver could see the window frame but nothing inside it.
+**Now:** when a wait for the window to go idle expires, the driver first asks
+whether EC is still running and whether its window can be found from the desktop
+at all. If the process lives and the window cannot be reached, the run is refused
+rather than failed: `GuiEnvironmentException` carries a message saying nothing
+about EC was measured and naming the likely reasons, `Program` reports it with
+exit 2 alongside the other refused prerequisites, and no phase verdict is
+printed. A phase deliberately does not absorb it, because a phase result would be
+a verdict the run never earned.
 
-**It did not reproduce.** Phase A alone passed twelve times out of twelve on the
-build that failed, and twelve out of twelve on `master`; the full suite passed
-eight times out of eight afterwards. The phase-alone figures carry little weight:
-the failure appeared in a sequence where nine other phases had already driven the
-same window, so running the phase by itself is probably the wrong shape to catch
-it.
+**Reproduced on purpose, which is what closed it.** Sending EC's window to a
+non-active virtual desktop produces the fingerprint exactly. The excursion was
+verified with `IVirtualDesktopManager::IsWindowOnCurrentVirtualDesktop` rather
+than assumed - an early attempt read the state too soon after the hotkey and got
+the pre-switch answer, which would have made the whole experiment a control that
+could not fail.
 
-**It is not attributable to the change being validated.** Phase A cancels a review
-and never enters the cancellation path that change rewrote, and the patch was
-checked to have removed only the two methods it intended to remove. `master`
-carried the same `WaitForMainReady` at the time, so the flake most likely
-predates it - that rests on the code, not on the run counts above.
+Hidden for longer than the thirty-second wait, phase C failed with the status
+showing only `File Encoding Checker | System Menu Bar | System | Minimize |
+Maximize | Close` and `status bar found: no`. Hidden briefly and returned inside
+the wait, the same phase passed - so access comes back when the window does.
 
-**Two of the original leads have been acted on, and neither explained it.**
-`WaitForMainReady` accepted any final conversion status rather than evidence of
-the action just performed - [EC-26](#ec-26)'s shape in the one helper that fix
-did not reach - and each caller now names the headline its own action produces.
-The timeout also now records whether the process is alive, whether the
-main-window handle reads, whether the review is gone, and whether the status bar
-can be found and read. Both were real weaknesses in the failing path. Removing
-them makes the next occurrence legible; it does not show that either was the
-cause, and nothing since has reproduced the failure.
+**It is not a stale automation object.** The held element answered
+`NativeWindowHandle` without throwing, and looking the window up again from the
+desktop found nothing either: `window found afresh: no`. Reacquiring the element,
+which was the standing theory, would not have helped. `IsOffscreen` is no use as
+a signal either - it reads false for a window on another desktop, which is why
+the check is that the window cannot be found from the desktop while the process
+is alive.
 
-What is left:
+**EC is unchanged, and was never at fault.** The workspace preserved from the
+first spontaneous failure shows the conversion completed correctly: `french.txt`
+converted with a backup and a sidecar, `russian.txt` left in its legacy encoding
+exactly as the phase requires. The application did its work; the instrument went
+blind and blamed it.
 
-- The driver holds one `AutomationElement` for the main window from startup. If
-  that object goes stale, every later read through it fails while the window is
-  perfectly healthy - which matches a diagnostic that saw window chrome and
-  nothing inside it. This is still only a theory: nothing has tested it. The test
-  is to compare the held object against a freshly found one at the moment of
-  failure, and reacquisition is worth adding only if that comparison shows they
-  disagree.
-- Reproduction needs the whole ten-phase suite. The failure appeared in a
-  sequence where nine other phases had already driven the same window, and
-  running phase A alone has never produced it.
+**What remains unproven.** The original occurrence, one full-suite run in
+thirteen on 2026-09-10, happened with nobody switching desktops. A deliberate
+desktop excursion reproduces the fingerprint, but that does not establish it was
+the trigger that time; a locked session or a lost interactive desktop would look
+the same. The fix does not depend on knowing which: any occurrence now becomes a
+refusal rather than a false accusation, which is the harm that mattered on a
+required gate.
 
-**How this closes.** A cause reproduced and controlled closes it as fixed, with a
-control showing the old behaviour fails. Runs that merely pass do not: a defined
-stress run without recurrence is recorded as not reproduced and left under
-watch, because that is what the evidence supports.
+**Controls.** With the window hidden past the timeout, the suite exits 2, prints
+the environment message, and prints no phase verdict at all - where the previous
+build printed `[FAIL] C`. On the active desktop, six consecutive full runs passed
+with no spurious refusal, so the check does not fire when the window is simply
+slow.
 
-This is one unexplained red on a required check, and a required check that fails
-for reasons nobody can name is the problem this project keeps returning to -
-[EC-24](#ec-24), [EC-26](#ec-26) and [EC-27](#ec-27) are all the same story, and
-each of them looked like noise first.
+**Setup this settles:** the suite drives a real window and must run on the active
+desktop of an interactive Windows session. Unattended runs need a dedicated
+interactive session, not a background one.
+
 
 ## Decisions and mistakes that must remain visible
 

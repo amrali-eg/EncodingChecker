@@ -11,6 +11,23 @@ namespace EncodingChecker.GuiSmoke;
 /// </summary>
 internal sealed class IncompatibleBuildException(string message) : Exception(message);
 
+/// <summary>
+/// The window stopped being reachable while EC carried on running - the machine
+/// took it away, rather than EC misbehaving.
+/// </summary>
+/// <remarks>
+/// Sending EC to a non-active virtual desktop produces exactly this: the process
+/// lives, the conversion completes and writes correct files, and every control
+/// inside the window becomes unreachable through UI Automation - the held element
+/// answers but its subtree holds only the title bar, and looking the window up
+/// again from the desktop finds nothing. Locking the session or losing the
+/// interactive desktop would look the same.
+///
+/// It is a distinct type because the alternative is reporting it as a phase
+/// failure, which accuses EC of not finishing work it in fact finished.
+/// </remarks>
+internal sealed class GuiEnvironmentException(string message) : Exception(message);
+
 internal sealed record SmokePhaseResult(
     string Id,
     string Name,
@@ -102,6 +119,12 @@ internal sealed class SmokeSuite
         try
         {
             body(phase);
+        }
+        catch (GuiEnvironmentException)
+        {
+            // Not this phase's verdict to record: nothing was measured, so let it reach
+            // the top rather than filing it as EC having failed.
+            throw;
         }
         catch (Exception ex)
         {
