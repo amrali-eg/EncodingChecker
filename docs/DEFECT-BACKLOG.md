@@ -72,7 +72,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | EC-25 | The smoke suite never set the main window's target encoding | Fixed | — | — | [EC-25](#ec-25) |
 | EC-26 | The smoke driver trusted an enabled flag that had been seen stale | Fixed | — | — | [EC-26](#ec-26) |
 | EC-27 | The smoke driver read a status line the window had not written yet | Fixed | — | — | [EC-27](#ec-27) |
-| EC-28 | The smoke driver can lose access to EC's controls while the process and window are alive | Fixed | — | — | [EC-28](#ec-28) |
+| EC-28 | The smoke driver blamed EC when its idle wait lost access to the window | Fixed | — | — | [EC-28](#ec-28) |
 | EC-18 | EC repeated a BOM-less UTF-16 safety check unnecessarily | Fixed | — | — | [EC-18](#ec-18) |
 | EC-23 | Plan application assumed a required path existed instead of checking it | Fixed | — | — | [EC-23](#ec-23) |
 | BL-27 | GUI smoke reports could show an empty or misleading build hash | Fixed | — | — | [BL-27](#bl-27) |
@@ -1056,14 +1056,32 @@ itself.
 controls, and the suite reported that as a phase failure - which reads as EC
 failing to finish work it had in fact finished.
 
-**Now:** when a wait for the window to go idle expires, the driver first asks
+**Now:** when the wait for the window to go idle expires, the driver first asks
 whether EC is still running and whether its window can be found from the desktop
 at all. If the process lives and the window cannot be reached, the run is refused
-rather than failed: `GuiEnvironmentException` carries a message saying nothing
-about EC was measured and naming the likely reasons, `Program` reports it with
-exit 2 alongside the other refused prerequisites, and no phase verdict is
-printed. A phase deliberately does not absorb it, because a phase result would be
-a verdict the run never earned.
+rather than failed: `GuiEnvironmentException` says the phase could not be verified
+and that no verdict about EC is reported - it may already have converted files -
+and names the likely reasons. `Program` reports it with exit 2 alongside the other
+refused prerequisites, and no phase verdict is printed. A phase deliberately does
+not absorb it, because a phase result would be a verdict the run never earned.
+
+**The check began on the idle wait alone, and that was not enough.** A desktop
+excursion timed during phase C's source confirmation expired in a control lookup
+instead, so the check never ran and the phase blamed EC exactly as before. Every
+timeout in the driver is constructed in one place, so the question is asked there
+now and covers every wait.
+
+The exception is startup: before the main window has ever been found, a window
+that cannot be found means EC failed to show one, which is EC's failure and keeps
+its own message. A flag set once the window is first seen separates the two.
+
+**What this does not do.** It does not stop access being lost. The suite still
+cannot drive a window it cannot see; it just no longer reports that as EC
+failing.
+
+The lookup the check depends on is itself an automation call, and it is wrapped:
+a lookup that throws is reported inside the refusal rather than escaping to become
+the phase failure this exists to prevent.
 
 **Reproduced on purpose, which is what closed it.** Sending EC's window to a
 non-active virtual desktop produces the fingerprint exactly. The excursion was

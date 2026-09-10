@@ -12,8 +12,8 @@ namespace EncodingChecker.GuiSmoke;
 internal sealed class IncompatibleBuildException(string message) : Exception(message);
 
 /// <summary>
-/// The window stopped being reachable while EC carried on running - the machine
-/// took it away, rather than EC misbehaving.
+/// The window stopped being reachable while EC carried on running, so the phase could
+/// not be verified.
 /// </summary>
 /// <remarks>
 /// Sending EC to a non-active virtual desktop produces exactly this: the process
@@ -23,8 +23,9 @@ internal sealed class IncompatibleBuildException(string message) : Exception(mes
 /// again from the desktop finds nothing. Locking the session or losing the
 /// interactive desktop would look the same.
 ///
-/// It is a distinct type because the alternative is reporting it as a phase
-/// failure, which accuses EC of not finishing work it in fact finished.
+/// It is a distinct type because the alternative is reporting it as a phase failure,
+/// which accuses EC of not finishing work it may well have finished. This says only
+/// that the check could not be made - not that EC did nothing.
 /// </remarks>
 internal sealed class GuiEnvironmentException(string message) : Exception(message);
 
@@ -122,8 +123,9 @@ internal sealed class SmokeSuite
         }
         catch (GuiEnvironmentException)
         {
-            // Not this phase's verdict to record: nothing was measured, so let it reach
-            // the top rather than filing it as EC having failed.
+            // Not this phase's verdict to record: the phase could not be verified, so let
+            // it reach the top rather than filing it as EC having failed. EC may well have
+            // converted files - what is missing is the ability to check.
             throw;
         }
         catch (Exception ex)

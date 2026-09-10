@@ -75,8 +75,8 @@ internal static class Program
         }
         catch (GuiEnvironmentException ex)
         {
-            // Exit 2, with the other refused prerequisites: the run did not fail, it
-            // never took place, and calling it a failure would blame EC for the machine.
+            // Exit 2, with the other refused prerequisites: the phase could not be
+            // verified, so there is no verdict about EC to report either way.
             Console.Error.WriteLine(ex.Message);
             return 2;
         }
