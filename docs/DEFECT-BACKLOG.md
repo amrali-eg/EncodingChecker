@@ -1063,34 +1063,50 @@ Close` - with no status bar text and no result rows among it, so at that moment
 the driver could see the window frame but nothing inside it.
 
 **It did not reproduce.** Phase A alone passed twelve times out of twelve on the
-build that failed, and twelve out of twelve on `master`. The full suite passed
-eight times out of eight afterwards. Isolated runs may simply be the wrong shape
-to catch it: the failure appeared in a sequence where nine other phases had
-already driven the same window.
+build that failed, and twelve out of twelve on `master`; the full suite passed
+eight times out of eight afterwards. The phase-alone figures carry little weight:
+the failure appeared in a sequence where nine other phases had already driven the
+same window, so running the phase by itself is probably the wrong shape to catch
+it.
 
 **It is not attributable to the change being validated.** Phase A cancels a review
 and never enters the cancellation path that change rewrote, and the patch was
 checked to have removed only the two methods it intended to remove. `master`
-carries the same `WaitForMainReady`, so the flake most likely predates it.
+carried the same `WaitForMainReady` at the time, so the flake most likely
+predates it - that rests on the code, not on the run counts above.
 
-Where to look, in the order that would settle it fastest:
+**Two of the original leads have been acted on, and neither explained it.**
+`WaitForMainReady` accepted any final conversion status rather than evidence of
+the action just performed - [EC-26](#ec-26)'s shape in the one helper that fix
+did not reach - and each caller now names the headline its own action produces.
+The timeout also now records whether the process is alive, whether the
+main-window handle reads, whether the review is gone, and whether the status bar
+can be found and read. Both were real weaknesses in the failing path. Removing
+them makes the next occurrence legible; it does not show that either was the
+cause, and nothing since has reproduced the failure.
 
-- `WaitForMainReady` waits for *any* final conversion status rather than evidence
-  of the action just performed. That is [EC-26](#ec-26)'s shape reappearing in a
-  helper the fix did not reach, and it is recorded there as still open.
-- The timeout reports what the window showed but not whether the process is still
-  alive, whether the main-window handle is still valid, whether the review is
-  genuinely gone, or whether `statusBar` can be found at all. A failure that
-  cannot distinguish those is hard to diagnose from CI alone.
-- The driver holds the `AutomationElement` for the main window from startup. If
-  that element goes stale, every later read fails while the window is perfectly
-  healthy; reacquiring it on failure would tell the two apart.
-- Reproduction should run the whole suite rather than the phase alone.
+What is left:
 
-Until then this is one unexplained red on a required check. It is recorded rather
-than waited out because a gate that fails for reasons nobody can name is the
-problem this project keeps returning to - [EC-24](#ec-24), [EC-26](#ec-26) and
-[EC-27](#ec-27) are all the same story, and each of them looked like noise first.
+- The driver holds one `AutomationElement` for the main window from startup. If
+  that object goes stale, every later read through it fails while the window is
+  perfectly healthy - which matches a diagnostic that saw window chrome and
+  nothing inside it. This is still only a theory: nothing has tested it. The test
+  is to compare the held object against a freshly found one at the moment of
+  failure, and reacquisition is worth adding only if that comparison shows they
+  disagree.
+- Reproduction needs the whole ten-phase suite. The failure appeared in a
+  sequence where nine other phases had already driven the same window, and
+  running phase A alone has never produced it.
+
+**How this closes.** A cause reproduced and controlled closes it as fixed, with a
+control showing the old behaviour fails. Runs that merely pass do not: a defined
+stress run without recurrence is recorded as not reproduced and left under
+watch, because that is what the evidence supports.
+
+This is one unexplained red on a required check, and a required check that fails
+for reasons nobody can name is the problem this project keeps returning to -
+[EC-24](#ec-24), [EC-26](#ec-26) and [EC-27](#ec-27) are all the same story, and
+each of them looked like noise first.
 
 ## Decisions and mistakes that must remain visible
 
