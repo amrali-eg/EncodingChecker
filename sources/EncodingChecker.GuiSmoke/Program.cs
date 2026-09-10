@@ -73,6 +73,13 @@ internal static class Program
             Console.Error.WriteLine(ex.Message);
             return 2;
         }
+        catch (GuiEnvironmentException ex)
+        {
+            // Exit 2, with the other refused prerequisites: the phase could not be
+            // verified, so there is no verdict about EC to report either way.
+            Console.Error.WriteLine(ex.Message);
+            return 2;
+        }
         catch (ArgumentException ex)
         {
             Console.Error.WriteLine(ex.Message);

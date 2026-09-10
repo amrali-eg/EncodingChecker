@@ -12,6 +12,13 @@ internal sealed class EcGuiDriver : IDisposable
 
     private readonly Process _process;
 
+    /// <summary>
+    /// Whether the main window has ever been found. Before it has, a window that
+    /// cannot be found is EC failing to show one - which is EC's problem, and must
+    /// keep its own failure. Afterwards, the same answer means the window went away.
+    /// </summary>
+    private readonly bool _windowWasFound;
+
     internal AutomationElement MainWindow { get; }
 
     internal EcGuiDriver(string executable)
@@ -34,6 +41,8 @@ internal sealed class EcGuiDriver : IDisposable
         MainWindow = WaitForElement(
             () => FindTopLevelWindow("MainForm"),
             "EncodingChecker's main window did not appear.");
+
+        _windowWasFound = true;
     }
 
     internal AutomationElement OpenReview(string directory, int expectedFiles)
@@ -434,6 +443,70 @@ internal sealed class EcGuiDriver : IDisposable
     }
 
     /// <summary>
+    /// Refuses the run when EC is alive but its window can no longer be reached.
+    /// </summary>
+    /// <remarks>
+    /// A wait that expires because the window went out of reach has measured nothing
+    /// about EC, and reporting it as a phase failure says the opposite. The check is
+    /// that the window cannot be found from the desktop at all while the process is
+    /// still running: a held element going stale would still leave a fresh lookup
+    /// working, and a genuinely hung EC would still leave the window findable.
+    ///
+    /// IsOffscreen is not the signal - it reads false for a window on another
+    /// virtual desktop.
+    /// </remarks>
+    private void RequireWindowStillReachable()
+    {
+        if (!_windowWasFound)
+            return;
+
+        bool alive;
+
+        try
+        {
+            alive = !_process.HasExited;
+        }
+        catch (InvalidOperationException)
+        {
+            return;
+        }
+
+        // EC having exited is EC's business, and the ordinary timeout reports it.
+        if (!alive)
+            return;
+
+        string lookupFailure = string.Empty;
+        bool found;
+
+        try
+        {
+            found = FindTopLevelWindow("MainForm") is not null;
+        }
+        catch (Exception ex)
+        {
+            // The lookup is itself an automation call. Letting it throw would turn the
+            // very condition this exists to report back into a phase failure, and a
+            // lookup that cannot run is no basis for a verdict about EC either.
+            found = false;
+            lookupFailure =
+                $" Looking the window up again also failed: {ex.GetType().Name}: {ex.Message}.";
+        }
+
+        if (found)
+            return;
+
+        throw new GuiEnvironmentException(
+            "EncodingChecker is still running, but its window can no longer be reached "
+            + "through UI Automation, so this phase could not be verified and no verdict "
+            + "about EC is reported - it may already have converted files. This is what "
+            + "happens when the window is moved to another virtual desktop, or the "
+            + "interactive session goes away. Run the suite on the active desktop of an "
+            + "interactive Windows session."
+            + lookupFailure
+            + DescribeIdleState());
+    }
+
+    /// <summary>
     /// What could still be established about the window when a wait for idle gave up.
     /// </summary>
     /// <remarks>
@@ -444,6 +517,12 @@ internal sealed class EcGuiDriver : IDisposable
     /// window was healthy, or the status bar simply could not be found. These four
     /// separate those, and each is gathered on its own so one unreadable answer does not
     /// cost the others.
+    ///
+    /// The window is also looked up again from the desktop, because the held element
+    /// answering while its subtree holds only chrome has two very different
+    /// explanations: the element went stale and a fresh one would work, or the window
+    /// itself is unreachable - not on the active desktop, or offscreen - in which case a
+    /// fresh lookup fails the same way and retrying anything is pointless.
     /// </remarks>
     private string DescribeIdleState() =>
         " Process alive: " + Ask(() => _process.HasExited ? "no" : "yes")
@@ -451,7 +530,21 @@ internal sealed class EcGuiDriver : IDisposable
         + "; review present: " + Ask(() => FindReviewWindow() is not null ? "yes" : "no")
         + "; status bar found: "
         + Ask(() => FindById(MainWindow, "statusBar") is not null ? "yes" : "no")
-        + "; status bar readable: " + Ask(() => StatusLine() is null ? "no" : "yes") + ".";
+        + "; status bar readable: " + Ask(() => StatusLine() is null ? "no" : "yes")
+        + "; window found afresh: " + Ask(() => FindTopLevelWindow("MainForm") is null
+            ? "no"
+            : "yes")
+        + "; handle afresh: " + Ask(() =>
+            FindTopLevelWindow("MainForm") is AutomationElement fresh
+                ? fresh.Current.NativeWindowHandle.ToString()
+                : "n/a")
+        + "; status bar via fresh window: " + Ask(() =>
+            FindTopLevelWindow("MainForm") is AutomationElement fresh
+                && FindById(fresh, "statusBar") is not null
+                    ? "yes"
+                    : "no")
+        + "; window offscreen: " + Ask(() => MainWindow.Current.IsOffscreen ? "yes" : "no")
+        + ".";
 
     /// <summary>One fact for a diagnostic, or why it could not be had.</summary>
     private static string Ask(Func<string> fact)
@@ -937,7 +1030,7 @@ internal sealed class EcGuiDriver : IDisposable
 
     private bool WindowExists(int handle) => FindWindow(handle) is not null;
 
-    private static AutomationElement WaitForElement(
+    private AutomationElement WaitForElement(
         Func<AutomationElement?> probe,
         string timeoutMessage) =>
         WaitFor(probe, Timeout, out Exception? lastError)
@@ -991,7 +1084,7 @@ internal sealed class EcGuiDriver : IDisposable
         return null;
     }
 
-    private static void WaitUntil(Func<bool> predicate, string timeoutMessage) =>
+    private void WaitUntil(Func<bool> predicate, string timeoutMessage) =>
         WaitUntil(predicate, () => timeoutMessage);
 
     /// <summary>
@@ -1004,7 +1097,7 @@ internal sealed class EcGuiDriver : IDisposable
     /// gave up. Building it here fixes both, and routes it through Safely so a
     /// description that throws cannot replace the timeout it exists to explain.
     /// </remarks>
-    private static void WaitUntil(Func<bool> predicate, Func<string> timeoutMessage)
+    private void WaitUntil(Func<bool> predicate, Func<string> timeoutMessage)
     {
         if (WaitFor(
                 () => predicate() ? new object() : null,
@@ -1023,13 +1116,21 @@ internal sealed class EcGuiDriver : IDisposable
     /// A timeout that names the error it kept retrying. A probe that threw every time is
     /// the likeliest reason a wait expired, and every wait in this class reports it.
     /// </summary>
-    private static TimeoutException Expired(string message, Exception? lastError) =>
-        lastError is null
+    private TimeoutException Expired(string message, Exception? lastError)
+    {
+        // Every timeout in this driver is built here, which makes it the one place that
+        // can ask whether EC's window was still reachable when the wait gave up. Asking
+        // only in the idle wait was not enough: a desktop excursion during phase C timed
+        // out in a control lookup instead, so the check never ran and the phase blamed EC.
+        RequireWindowStillReachable();
+
+        return lastError is null
             ? new TimeoutException(message)
             : new TimeoutException(
                 $"{message} Last retried automation error: "
                 + $"{lastError.GetType().Name}: {lastError.Message}",
                 lastError);
+    }
 
     /// <summary>
     /// A failure in the driver's contract with the window - a control that cannot be
