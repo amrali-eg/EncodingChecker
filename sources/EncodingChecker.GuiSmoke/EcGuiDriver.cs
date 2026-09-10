@@ -696,9 +696,30 @@ internal sealed class EcGuiDriver : IDisposable
         }
     }
 
-    private AutomationElement? FindReviewWindow() =>
-        FindProcessElementById("ConversionConfirmationForm") ??
-        FindProcessElementByTitle("Review conversion");
+    /// <summary>The conversion review, if EC currently has one open.</summary>
+    /// <remarks>
+    /// The review is an immediate child of the main window, so it is looked for there.
+    /// Searching the desktop instead means repeatedly walking unrelated applications, on
+    /// every poll of several waits.
+    ///
+    /// Automation errors are deliberately not caught: returning null for one would say
+    /// the review is absent when the truth is that nothing could be read, and the waits
+    /// that call this already retry and keep the error.
+    /// </remarks>
+    private AutomationElement? FindReviewWindow()
+    {
+        var condition = new AndCondition(
+            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window),
+            new OrCondition(
+                new PropertyCondition(
+                    AutomationElement.AutomationIdProperty,
+                    "ConversionConfirmationForm"),
+                new PropertyCondition(
+                    AutomationElement.NameProperty,
+                    "Review conversion")));
+
+        return MainWindow.FindFirst(TreeScope.Children, condition);
+    }
 
     private int ResultCount() =>
         FindById(MainWindow, "lstResults") is AutomationElement list
@@ -891,36 +912,6 @@ internal sealed class EcGuiDriver : IDisposable
                 automationId));
 
         return AutomationElement.RootElement.FindFirst(TreeScope.Children, condition);
-    }
-
-    private AutomationElement? FindProcessElementById(string automationId)
-    {
-        var condition = new AndCondition(
-            new PropertyCondition(
-                AutomationElement.ProcessIdProperty,
-                _process.Id),
-            new PropertyCondition(
-                AutomationElement.AutomationIdProperty,
-                automationId));
-
-        return AutomationElement.RootElement.FindFirst(
-            TreeScope.Descendants,
-            condition);
-    }
-
-    private AutomationElement? FindProcessElementByTitle(string title)
-    {
-        var condition = new AndCondition(
-            new PropertyCondition(
-                AutomationElement.ProcessIdProperty,
-                _process.Id),
-            new PropertyCondition(
-                AutomationElement.NameProperty,
-                title));
-
-        return AutomationElement.RootElement.FindFirst(
-            TreeScope.Descendants,
-            condition);
     }
 
     private AutomationElement? FindProcessWindowByTitle(string title)
