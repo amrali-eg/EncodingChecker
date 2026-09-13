@@ -53,7 +53,7 @@ internal static class SmokeOutcomeExtensions
         if (values.Contains(SmokeOutcome.Failed))
             return SmokeOutcome.Failed;
 
-        return values.Contains(SmokeOutcome.Inconclusive)
+        return values.Length == 0 || values.Contains(SmokeOutcome.Inconclusive)
             ? SmokeOutcome.Inconclusive
             : SmokeOutcome.Passed;
     }

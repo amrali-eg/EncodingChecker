@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=73 fixed=62 open=7 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
+<!-- backlog-counts total=76 fixed=65 open=7 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 73 findings — 62 fixed, 7 open, 1 not reproduced, 1 withdrawn,
+**Derived count: 76 findings — 65 fixed, 7 open, 1 not reproduced, 1 withdrawn,
 1 intentional behavior, and 1 design decision.** Recompute and check these
 figures with:
 
@@ -82,6 +82,9 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | BL-28 | The GUI CSV report could name detection instead of the source actually used | Fixed | — | — | [BL-28](#bl-28) |
 | BL-29 | Ctrl+C could skip a requested CLI journal | Fixed | — | — | [BL-29](#bl-29) |
 | BL-30 | A verification test stopped before reaching output verification | Fixed | — | — | [BL-30](#bl-30) |
+| BL-31 | Interrupted runs could report unprocessed files as completed work | Fixed | — | — | [BL-31](#bl-31) |
+| BL-32 | A cancelled scan could leave an old CSV without explaining the missing plan | Fixed | — | — | [BL-32](#bl-32) |
+| EC-32 | A cancellation timeout could hide repeated refusals to press Cancel | Fixed | — | — | [EC-32](#ec-32) |
 | EC-15 | Plans and journals showed fixed safety flags as if they recorded checks | Fixed | — | — | [EC-15](#ec-15) |
 | BL-18 | BOM-less UTF-16 could be detected and converted as UTF-32 | Fixed | — | — | [BL-18](#bl-18) |
 | EC-05 | An unreadable skipped or refused entry blocked the whole plan | Fixed | — | — | [EC-05](#ec-05) |
@@ -1197,6 +1200,36 @@ before EC wrote anything. The replacement test alters the completed temporary
 output immediately before verification. EC returns `VerificationFailed` and the
 original source bytes remain unchanged.
 
+
+### BL-31
+
+**Interrupted reports now distinguish unfinished work from completed work.** The
+CLI apply summary counted unreached files as unchanged, while GUI CSV export
+could call them converted. Both now report `NotAttempted` separately. GUI and
+CLI share the completion-marker helper.
+
+Journal schema 6 adds `Interrupted`. Direct scans may have discovered only part
+of a folder, so their partial journal no longer looks like a completed scan.
+GUI and plan application retain all known rows. Real CLI cancellation tests
+check the console, journal, CSV, exit code and original bytes left untouched;
+orchestration tests cover the GUI's exported rows.
+
+### BL-32
+
+**A cancelled scan saves its partial CSV and explains why it did not write a
+plan.** Previously it returned before either output step, silently leaving an
+older CSV or plan in place. CSV export now runs before returning. A partial
+scan must not become an approved plan: any existing plan is preserved and
+stderr explicitly says no new plan was written. Regression tests exercise
+actual CLI callbacks, including a conversion error followed by cancellation.
+
+### EC-32
+
+**A cancellation timeout keeps the refused press and describes it accurately.**
+The timeout decision dropped the last refusal and could say no button was
+found even after repeated refused presses. It now names the refusal. Tests
+cover no button, refused presses, an attempted press and an uncertain press.
+This fixes diagnostics, not the underlying reason a provider refused a click.
 
 ## Decisions and mistakes that must remain visible
 

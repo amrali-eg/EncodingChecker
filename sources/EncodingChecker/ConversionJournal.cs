@@ -125,7 +125,7 @@ internal sealed record JournalEntry
 /// </remarks>
 internal sealed record ConversionJournal
 {
-    internal const int CurrentJournalVersion = 5;
+    internal const int CurrentJournalVersion = 6;
 
     public int JournalVersion { get; init; } = CurrentJournalVersion;
 
@@ -164,6 +164,9 @@ internal sealed record ConversionJournal
     /// <summary>Whether this was a preview and therefore wrote nothing.</summary>
     public bool Preview { get; init; }
 
+    /// <summary>An interrupted scan may contain only the files reached before cancellation.</summary>
+    public bool Interrupted { get; init; }
+
     public required IReadOnlyList<JournalEntry> Entries { get; init; }
 
     /// <summary>Counts by outcome, so the run can be read without tallying entries.</summary>
@@ -194,6 +197,7 @@ internal sealed record ConversionJournal
     /// <param name="explicitSource">The explicit source encoding, if any.</param>
     /// <param name="appliedPlan">The plan applied by the run, when one was used.</param>
     /// <param name="preview">Indicates whether the run was a preview.</param>
+    /// <param name="interrupted">Whether cancellation stopped the run before completion.</param>
     /// <remarks>
     /// Completed conversions are hashed again so the journal records the bytes actually
     /// written, not merely what the conversion intended to write.
@@ -208,7 +212,8 @@ internal sealed record ConversionJournal
         string surface,
         DateTime startedUtc,
         string? appliedPlan = null,
-        bool preview = false)
+        bool preview = false,
+        bool interrupted = false)
     {
         string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(baseDirectory));
         var lines = new List<JournalEntry>();
@@ -313,6 +318,7 @@ internal sealed record ConversionJournal
             ExplicitSourceEncoding = explicitSource,
             AppliedPlan = appliedPlan,
             Preview = preview,
+            Interrupted = interrupted,
             Entries = [.. lines.OrderBy(l => l.RelativePath, StringComparer.OrdinalIgnoreCase)],
         };
     }

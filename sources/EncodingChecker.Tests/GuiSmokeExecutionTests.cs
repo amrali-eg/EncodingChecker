@@ -335,7 +335,7 @@ public sealed class GuiSmokeExecutionTests : IDisposable
             File.WriteAllText(Path.Combine(_root, SmokeReportWriter.JsonFileName),
                 JsonSerializer.Serialize(new { Outcome = outcome, Phases = new[] { new { Id = "A" } } }));
         string summary = Path.Combine(_root, "summary.md");
-        var start = new ProcessStartInfo("powershell.exe")
+        var start = new ProcessStartInfo("pwsh.exe")
         {
             UseShellExecute = false,
             CreateNoWindow = true,

@@ -420,43 +420,4 @@ public sealed class ConversionSafetyInvariantTests : IDisposable
         Assert.Equal(content, File.ReadAllBytes(path));
     }
 
-    /// <summary>
-    /// Substitutes rather than throwing, and reports a code page that cannot be
-    /// rebuilt, so strict reconstruction cannot rescue it.
-    /// </summary>
-    private sealed class SubstitutingEncoding : Encoding
-    {
-        public override int CodePage => 65_000_003;
-
-        public override int GetByteCount(char[] chars, int index, int count) => count;
-
-        public override int GetBytes(
-            char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex)
-        {
-            for (int i = 0; i < charCount; i++)
-            {
-                char c = chars[charIndex + i];
-                bytes[byteIndex + i] = c < 0x80 ? (byte)c : (byte)'?';
-            }
-
-            return charCount;
-        }
-
-        public override int GetCharCount(byte[] bytes, int index, int count) => count;
-
-        public override int GetChars(
-            byte[] bytes, int byteIndex, int byteCount, char[] chars, int charIndex)
-        {
-            for (int i = 0; i < byteCount; i++)
-            {
-                chars[charIndex + i] = (char)bytes[byteIndex + i];
-            }
-
-            return byteCount;
-        }
-
-        public override int GetMaxByteCount(int charCount) => charCount;
-
-        public override int GetMaxCharCount(int byteCount) => byteCount;
-    }
 }

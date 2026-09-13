@@ -30,6 +30,15 @@ internal enum ConversionRowResult
 /// <summary>Encoding detection/conversion result for one file.</summary>
 internal sealed class ConversionReportEntry
 {
+    /// <summary>Preview decisions are not completed work until their callbacks arrive.</summary>
+    internal static void MarkUnattempted(
+        IEnumerable<ConversionReportEntry> entries, IEnumerable<string> reachedPaths)
+    {
+        var reached = new HashSet<string>(reachedPaths, StringComparer.OrdinalIgnoreCase);
+        foreach (ConversionReportEntry entry in entries)
+            entry.NotAttempted = !reached.Contains(entry.FilePath);
+    }
+
     internal required string FilePath { get; init; }
 
     internal required string SourceEncoding { get; set; }
@@ -284,11 +293,11 @@ internal static class ConversionReport
 
         foreach (ConversionReportEntry entry in entries)
         {
-            // Conversion may have used a user-selected source instead of detection.
-            // ResolvedSourceLabel is captured at read time, before the entry's current
-            // label changes to the target encoding.
+            // A refusal has not accepted the chosen codec. Failed attempts still need
+            // the attempted source so their decoding diagnostic can be understood.
             ScanEngine.ParseCharsetLabel(
-                entry.ResolvedSourceLabel
+                (entry.NotAttempted || entry.Result == ConversionRowResult.Refused
+                    ? null : entry.ResolvedSourceLabel)
                     ?? ScanEngine.FormatCharsetLabel(entry.SourceEncoding, entry.SourceHasBom),
                 out string sourceEncoding,
                 out bool sourceHasBom);
@@ -308,7 +317,7 @@ internal static class ConversionReport
             WriteField(writer, entry.TargetHasBom ? "Yes" : "No");
             writer.Write(Delimiter);
 
-            writer.Write(entry.Result);
+            writer.Write(entry.NotAttempted ? "NotAttempted" : entry.Result.ToString());
             writer.Write(Delimiter);
 
             WriteField(writer, entry.ReasonCode);

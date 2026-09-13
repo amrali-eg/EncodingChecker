@@ -544,7 +544,6 @@ internal sealed class EcGuiDriver : IDisposable
             }
             catch (Exception ex) when (IsAutomationReadFailure(ex))
             {
-                statusBarReadable = false;
                 errors.Add(DescribeError("status-bar read", ex));
             }
 
