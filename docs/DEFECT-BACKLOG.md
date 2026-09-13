@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=76 fixed=65 open=7 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
+<!-- backlog-counts total=77 fixed=66 open=7 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 76 findings — 65 fixed, 7 open, 1 not reproduced, 1 withdrawn,
+**Derived count: 77 findings — 66 fixed, 7 open, 1 not reproduced, 1 withdrawn,
 1 intentional behavior, and 1 design decision.** Recompute and check these
 figures with:
 
@@ -84,6 +84,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | BL-30 | A verification test stopped before reaching output verification | Fixed | — | — | [BL-30](#bl-30) |
 | BL-31 | Interrupted runs could report unprocessed files as completed work | Fixed | — | — | [BL-31](#bl-31) |
 | BL-32 | A cancelled scan could leave an old CSV without explaining the missing plan | Fixed | — | — | [BL-32](#bl-32) |
+| BL-33 | The GUI CSV export could still call cancelled or stale-plan files Converted | Fixed | — | — | [BL-33](#bl-33) |
 | EC-32 | A cancellation timeout could hide repeated refusals to press Cancel | Fixed | — | — | [EC-32](#ec-32) |
 | EC-15 | Plans and journals showed fixed safety flags as if they recorded checks | Fixed | — | — | [EC-15](#ec-15) |
 | BL-18 | BOM-less UTF-16 could be detected and converted as UTF-32 | Fixed | — | — | [BL-18](#bl-18) |
@@ -1222,6 +1223,28 @@ older CSV or plan in place. CSV export now runs before returning. A partial
 scan must not become an approved plan: any existing plan is preserved and
 stderr explicitly says no new plan was written. Regression tests exercise
 actual CLI callbacks, including a conversion error followed by cancellation.
+
+### BL-33
+
+**The GUI CSV export no longer reports cancelled or stale-plan files as
+Converted.** `ConversionOrchestrator`'s decide pass marks eligible entries
+"would convert" before the user is ever asked to confirm. Cancelling the
+review, hitting a stale plan, failing to plan, the `ChooseSourceEncoding`
+retry matching no file, and cancellation reaching the decide pass itself
+(from `RefreshSourceSnapshots`, either `whatIf` pass, or the cancellation
+check between them) all returned or threw without correcting that mark, so
+the same entries could later export as `Converted` even though nothing was
+written. This is distinct from BL-31, which covers the write pass being
+interrupted after it starts.
+
+Each no-write return now marks its entries `NotAttempted`, the idiom BL-31
+already established for the write pass. `Run` also wraps the whole
+decide/confirm/write sequence in one cancellation handler that reconciles
+entries before rethrowing, so cancellation escaping earlier than the
+confirmation loop is covered too. Regression tests drive real orchestration
+for each path and export a real CSV, asserting no `Converted` row and every
+entry `NotAttempted`; each was confirmed to fail against the prior code
+before the fix. See PR #107.
 
 ### EC-32
 
