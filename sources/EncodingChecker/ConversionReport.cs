@@ -284,13 +284,22 @@ internal static class ConversionReport
 
         foreach (ConversionReportEntry entry in entries)
         {
+            // Conversion may have used a user-selected source instead of detection.
+            // ResolvedSourceLabel is captured at read time, before the entry's current
+            // label changes to the target encoding.
+            ScanEngine.ParseCharsetLabel(
+                entry.ResolvedSourceLabel
+                    ?? ScanEngine.FormatCharsetLabel(entry.SourceEncoding, entry.SourceHasBom),
+                out string sourceEncoding,
+                out bool sourceHasBom);
+
             WriteField(writer, entry.FilePath);
             writer.Write(Delimiter);
 
-            WriteField(writer, entry.SourceEncoding);
+            WriteField(writer, sourceEncoding);
             writer.Write(Delimiter);
 
-            WriteField(writer, entry.SourceHasBom ? "Yes" : "No");
+            WriteField(writer, sourceHasBom ? "Yes" : "No");
             writer.Write(Delimiter);
 
             WriteField(writer, entry.TargetEncoding);

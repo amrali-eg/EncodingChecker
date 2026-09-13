@@ -21,6 +21,7 @@ public sealed class ExitCodeContractTests : IDisposable
     private const int ExpectedUsageError = 1;
     private const int ExpectedChangesNeeded = 2;
     private const int ExpectedProcessingErrors = 3;
+    private const int ExpectedCancelled = 4;
     private const int ExpectedSafeRefusal = 5;
 
     private readonly string _root =
@@ -226,6 +227,19 @@ public sealed class ExitCodeContractTests : IDisposable
                 "-BasePath", _root,
                 "-Include", "legacy.txt",
                 "-Target", "utf-8"));
+    }
+
+    [Theory]
+    [InlineData(true, ExpectedProcessingErrors)]
+    [InlineData(false, ExpectedCancelled)]
+    public void InterruptedScan_ReportsProcessingFailureOverCancellation(
+        bool hasError,
+        int expected)
+    {
+        // Genuine OS-level Ctrl+C can't be unit tested (see the class remarks), but the
+        // precedence decision is a pure function - this pins it directly, in both
+        // directions, against the -Apply path it must match.
+        Assert.Equal(expected, Program.ScanCancellationExitCode(hasError));
     }
 
     [Fact]

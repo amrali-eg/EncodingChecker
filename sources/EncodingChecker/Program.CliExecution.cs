@@ -123,6 +123,9 @@ internal static partial class Program
         ];
 
         using var cancellation = new CancellationTokenSource();
+        var reached = new ConcurrentDictionary<string, byte>(
+            StringComparer.OrdinalIgnoreCase);
+        bool interrupted = false;
 
         // Detach this handler before its token source is disposed.
         ConsoleCancelEventHandler cancelHandler = (_, e) =>
@@ -142,13 +145,18 @@ internal static partial class Program
                 options.MaxParallelism ?? ScanEngine.DefaultMaxParallelism,
                 whatIf: false,
                 backup: plan.BackupEnabled,
-                _ => { },
+                entry => reached.TryAdd(entry.FilePath, 0),
                 cancellation.Token);
         }
         catch (OperationCanceledException)
         {
+            // Planned rows retain their preview result until the write pass reaches
+            // them. Mark the remainder explicitly so the journal never claims work
+            // that Ctrl+C prevented.
+            MarkUnattemptedEntries(entries, reached.Keys);
+
             Console.Error.WriteLine("Cancelled.");
-            return 4;
+            interrupted = true;
         }
         finally
         {
@@ -211,8 +219,36 @@ internal static partial class Program
 
         return runFailed
             ? 3
+            : interrupted ? 4
             : completed.Any(e => e.Result == ConversionRowResult.Refused) ? 5 : 0;
     }
+
+    /// <summary>
+    /// Marks planned rows the cancelled write pass did not report as completed.
+    /// </summary>
+    /// <remarks>
+    /// A plan stores preview results, including <c>Converted</c>. Without this marker,
+    /// a journal written after Ctrl+C would present an unreached preview as a completed
+    /// conversion.
+    /// </remarks>
+    internal static void MarkUnattemptedEntries(
+        IEnumerable<ConversionReportEntry> entries,
+        IEnumerable<string> reachedPaths)
+    {
+        var reached = new HashSet<string>(reachedPaths, StringComparer.OrdinalIgnoreCase);
+
+        foreach (ConversionReportEntry entry in entries)
+            entry.NotAttempted = !reached.Contains(entry.FilePath);
+    }
+
+    // Internal so tests can pin this against -Apply's precedence without a real Ctrl+C.
+    /// <summary>The exit code for an interrupted scan, given what it found before Ctrl+C.</summary>
+    /// <remarks>
+    /// Mirrors -Apply's precedence: a file this run actually reached and failed on
+    /// outranks the cancellation itself, so both cancellable paths report the same
+    /// condition the same way.
+    /// </remarks>
+    internal static int ScanCancellationExitCode(bool hasError) => hasError ? 3 : 4;
 
     // Internal so tests can pin the published CLI exit-code contract.
     /// <summary>Returns the first output path known to be unusable before the run.</summary>
@@ -379,6 +415,8 @@ internal static partial class Program
 
         Console.CancelKeyPress += cancelHandler;
 
+        bool scanInterrupted = false;
+
         try
         {
             ScanEngine.ScanDirectory(
@@ -390,7 +428,7 @@ internal static partial class Program
         catch (OperationCanceledException)
         {
             Console.Error.WriteLine("Scan cancelled.");
-            return 4;
+            scanInterrupted = true;
         }
         catch (Exception ex) when (
             ex is IOException or UnauthorizedAccessException)
@@ -487,6 +525,9 @@ internal static partial class Program
                 return 3;
             }
         }
+
+        if (scanInterrupted)
+            return ScanCancellationExitCode(entries.Any(e => e.Result == ConversionRowResult.Error));
 
         if (!string.IsNullOrEmpty(options.ReportPath))
         {

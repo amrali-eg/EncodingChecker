@@ -272,4 +272,23 @@ public sealed class StaleConversionStateTests : IDisposable
         Assert.Equal("Converted", values[5]);     // Result
         Assert.DoesNotContain("utf-8-bom", csv, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void CsvReport_UsesTheExplicitSourceThatActuallyReadTheFile()
+    {
+        // Detection and a user's source choice can disagree. The CSV must report the
+        // codec that conversion actually used, not the older scan result.
+        ConversionReportEntry entry = Entry(
+            Path.Combine(_root, "explicit-report.txt"), "windows-1250");
+        entry.SourceEncodingWasSpecified = true;
+        entry.ResolvedSourceLabel = "iso-8859-1";
+        entry.Result = ConversionRowResult.Converted;
+
+        string csv = ConversionReport.ToCsvString([entry]);
+        string[] values = csv.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)[1]
+            .Split(',');
+
+        Assert.Equal("iso-8859-1", values[1]);
+        Assert.Equal("No", values[2]);
+    }
 }
