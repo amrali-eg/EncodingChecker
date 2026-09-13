@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -5,52 +6,111 @@ using System.Text.Json;
 
 namespace EncodingChecker.GuiSmoke;
 
-/// <summary>
-/// The build under test predates the review dialog's automation ids, so the suite
-/// cannot drive it at all.
-/// </summary>
-internal sealed class IncompatibleBuildException(string message) : Exception(message);
+/// <summary>The suite could not make a trustworthy product verdict.</summary>
+internal abstract class SmokeInconclusiveException(
+    string message,
+    Exception? innerException = null) : Exception(message, innerException);
+
+internal sealed class IncompatibleBuildException(string message)
+    : SmokeInconclusiveException(message);
 
 /// <summary>
 /// The window stopped being reachable while EC carried on running, so the phase could
 /// not be verified.
 /// </summary>
 /// <remarks>
-/// Sending EC to a non-active virtual desktop produces exactly this: the process
-/// lives, the conversion completes and writes correct files, and every control
-/// inside the window becomes unreachable through UI Automation - the held element
-/// answers but its subtree holds only the title bar, and looking the window up
-/// again from the desktop finds nothing. Locking the session or losing the
-/// interactive desktop would look the same.
-///
-/// It is a distinct type because the alternative is reporting it as a phase failure,
-/// which accuses EC of not finishing work it may well have finished. This says only
-/// that the check could not be made - not that EC did nothing.
+/// A missing automation tree alone is not enough: a hung provider can look the same.
+/// This result requires Windows to confirm that the live EC window is on another
+/// virtual desktop. Unknown or failed observations keep their diagnostic and do not
+/// become an environmental excuse for a potentially broken application.
 /// </remarks>
-internal sealed class GuiEnvironmentException(string message) : Exception(message);
+internal sealed class GuiEnvironmentException : SmokeInconclusiveException
+{
+    internal WindowObservation Observation { get; }
 
-internal sealed record SmokePhaseResult(
-    string Id,
-    string Name,
-    bool Passed,
-    string? Error,
-    IReadOnlyDictionary<string, string> Before,
-    IReadOnlyDictionary<string, string> After);
+    internal GuiEnvironmentException(string message, WindowObservation observation,
+        Exception? innerException = null) : base(message, innerException)
+    {
+        if (observation.Reachability != GuiReachability.EnvironmentUnavailable)
+            throw new ArgumentException("The observation does not establish an unavailable desktop.", nameof(observation));
+        Observation = observation;
+    }
+}
+
+internal enum SmokeOutcome
+{
+    Passed,
+    Failed,
+    Inconclusive,
+}
+
+internal static class SmokeOutcomeExtensions
+{
+    internal static SmokeOutcome Overall(this IEnumerable<SmokeOutcome> outcomes)
+    {
+        SmokeOutcome[] values = [.. outcomes];
+
+        if (values.Contains(SmokeOutcome.Failed))
+            return SmokeOutcome.Failed;
+
+        return values.Contains(SmokeOutcome.Inconclusive)
+            ? SmokeOutcome.Inconclusive
+            : SmokeOutcome.Passed;
+    }
+
+    internal static string Label(this SmokeOutcome outcome) => outcome switch
+    {
+        SmokeOutcome.Passed => "PASS",
+        SmokeOutcome.Failed => "FAIL",
+        SmokeOutcome.Inconclusive => "INCONCLUSIVE",
+        _ => "INCONCLUSIVE",
+    };
+
+    internal static int ExitCode(this SmokeOutcome outcome) => outcome switch
+    {
+        SmokeOutcome.Passed => 0,
+        SmokeOutcome.Failed => 1,
+        SmokeOutcome.Inconclusive => 2,
+        _ => 2,
+    };
+}
+
+internal sealed record SmokePhaseResult
+{
+    public required string Id { get; init; }
+    public required string Name { get; init; }
+    public required SmokeOutcome Outcome { get; init; }
+    public bool Passed => Outcome == SmokeOutcome.Passed;
+    public string? Error { get; init; }
+    public IReadOnlyList<string> CleanupErrors { get; init; } = Array.Empty<string>();
+    public IReadOnlyDictionary<string, long> Metrics { get; init; } =
+        new Dictionary<string, long>();
+    public bool BlocksLaterPhases { get; init; }
+    public WindowObservation? Observation { get; init; }
+    public required long DurationMilliseconds { get; init; }
+    public required IReadOnlyDictionary<string, string> Before { get; init; }
+    public required IReadOnlyDictionary<string, string> After { get; init; }
+}
 
 internal sealed record SmokeReport
 {
-    public int ReportVersion { get; init; } = 1;
+    public int ReportVersion { get; init; } = 2;
     public required string StartedUtc { get; init; }
     public required string CompletedUtc { get; init; }
     public string EcVersion { get; init; } = "unknown";
     public required string EcExecutable { get; init; }
-    public required string EcSha256 { get; init; }
+    public string? EcSha256 { get; init; }
     public string? EcManagedAssembly { get; init; }
     public string? EcManagedAssemblySha256 { get; init; }
     public required string OS { get; init; }
     public required string DotNet { get; init; }
     public required string Workspace { get; init; }
-    public required bool Passed { get; init; }
+    public required long DurationMilliseconds { get; init; }
+    public required SmokeOutcome Outcome { get; init; }
+    public bool Passed => Outcome == SmokeOutcome.Passed;
+    public string? Error { get; init; }
+    public SmokePhaseResult? Preflight { get; init; }
+    public IReadOnlyList<string> EvidenceErrors { get; init; } = Array.Empty<string>();
     public required IReadOnlyList<SmokePhaseResult> Phases { get; init; }
 }
 
@@ -61,7 +121,6 @@ internal sealed class SmokeSuite
 
     private readonly string _app;
     private readonly string _workspace;
-    private readonly List<SmokePhaseResult> _results = [];
 
     internal SmokeSuite(string app, string workspace)
     {
@@ -72,75 +131,101 @@ internal sealed class SmokeSuite
 
     internal SmokeReport Run(string? onlyPhase = null)
     {
+        SmokePhase[] phases =
+        [
+            new("A", "Review cancellation changes nothing", PhaseA),
+            new("B", "Unicode and ASCII convert automatically", PhaseB),
+            new("C", "Explicit legacy source is scoped to selected files", PhaseC),
+            new("D", "Ambiguous BOM-less UTF-16 is refused", PhaseD),
+            new("E", "Explicit BOM-less UTF-16 converts safely", PhaseE),
+            new("F", "A stale reviewed file stops the whole run", PhaseF),
+            new("G", "Backup failure leaves the source unchanged", PhaseG),
+            new("H", "A source choice matching an unprovable estimate is flagged", PhaseH),
+            new("I", "An interrupted run reports what it actually wrote", PhaseI),
+            new("J", "An out-of-directory source choice is refused visibly", PhaseJ),
+        ];
+        return RunCore(Preflight, phases.Where(phase =>
+            onlyPhase is null || string.Equals(phase.Id, onlyPhase, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    // The CLI and headless regression tests execute this same phase loop.
+    internal SmokeReport RunCore(
+        Action<SmokePhaseContext> preflight,
+        IEnumerable<SmokePhase> phases,
+        Action<SmokePhaseResult>? reportProgress = null)
+    {
+        Stopwatch timer = Stopwatch.StartNew();
         string started = DateTime.UtcNow.ToString("O");
+        SmokeBuildEvidence build = SmokeBuildEvidence.Capture(_app);
+        var results = new List<SmokePhaseResult>();
+        SmokePhaseResult? preparation = null;
+        string? runError = null;
+        reportProgress ??= Print;
 
-        Preflight();
+        try
+        {
+            if (build.Errors.Count == 0)
+            {
+                preparation = SmokePhaseExecution.Run(
+                    Path.Combine(_workspace, "preflight"),
+                    new SmokePhase("preflight", "Check the build can be driven", preflight));
+                reportProgress(preparation);
 
-        RunIf("A", "Review cancellation changes nothing", PhaseA);
-        RunIf("B", "Unicode and ASCII convert automatically", PhaseB);
-        RunIf("C", "Explicit legacy source is scoped to selected files", PhaseC);
-        RunIf("D", "Ambiguous BOM-less UTF-16 is refused", PhaseD);
-        RunIf("E", "Explicit BOM-less UTF-16 converts safely", PhaseE);
-        RunIf("F", "A stale reviewed file stops the whole run", PhaseF);
-        RunIf("G", "Backup failure leaves the source unchanged", PhaseG);
-        RunIf("H", "A source choice matching an unprovable estimate is flagged", PhaseH);
-        RunIf("I", "An interrupted run reports what it actually wrote", PhaseI);
-        RunIf("J", "An out-of-directory source choice is refused visibly", PhaseJ);
+                if (preparation.Outcome == SmokeOutcome.Passed)
+                {
+                    foreach (SmokePhase phase in phases)
+                    {
+                        SmokePhaseResult result = SmokePhaseExecution.Run(
+                            Path.Combine(_workspace, phase.Id), phase);
+                        results.Add(result);
+                        reportProgress(result);
+                        if (result.BlocksLaterPhases)
+                            break;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Even a progress-output failure must leave completed phase evidence intact.
+            runError = "The smoke runner failed: " + ex;
+        }
+
+        SmokeOutcome outcome = build.Errors.Count > 0 || runError is not null
+            ? SmokeOutcome.Failed
+            : results.Select(result => result.Outcome)
+                .Prepend(preparation!.Outcome).Overall();
 
         return new SmokeReport
         {
             StartedUtc = started,
             CompletedUtc = DateTime.UtcNow.ToString("O"),
             EcExecutable = _app,
-            EcSha256 = Hash(_app),
+            EcVersion = build.Version,
+            EcSha256 = build.ExecutableSha256,
+            EcManagedAssembly = build.ManagedAssembly,
+            EcManagedAssemblySha256 = build.ManagedAssemblySha256,
+            EvidenceErrors = build.Errors,
             OS = Environment.OSVersion.VersionString,
             DotNet = Environment.Version.ToString(),
             Workspace = _workspace,
-            Passed = _results.All(result => result.Passed),
-            Phases = _results,
+            DurationMilliseconds = timer.ElapsedMilliseconds,
+            Outcome = outcome,
+            Preflight = preparation,
+            Error = runError ?? (build.Errors.Count > 0
+                ? "The build could not be identified. No GUI phases were run."
+                : preparation?.Error),
+            Phases = results.AsReadOnly(),
         };
-
-        void RunIf(string id, string name, Action<PhaseContext> body)
-        {
-            if (onlyPhase is null || onlyPhase.Equals(id, StringComparison.OrdinalIgnoreCase))
-                RunPhase(id, name, body);
-        }
     }
 
-    private void RunPhase(
-        string id,
-        string name,
-        Action<PhaseContext> body)
+    private static void Print(SmokePhaseResult result)
     {
-        string directory = Path.Combine(_workspace, id);
-        Directory.CreateDirectory(directory);
-        var phase = new PhaseContext(directory);
-        string? error = null;
-
-        try
-        {
-            body(phase);
-        }
-        catch (GuiEnvironmentException)
-        {
-            // Not this phase's verdict to record: the phase could not be verified, so let
-            // it reach the top rather than filing it as EC having failed. EC may well have
-            // converted files - what is missing is the ability to check.
-            throw;
-        }
-        catch (Exception ex)
-        {
-            error = ex.ToString();
-        }
-
-        Dictionary<string, string> after = Snapshot(directory);
-        bool passed = error is null;
-        _results.Add(new SmokePhaseResult(id, name, passed, error, phase.Before, after));
-
-        Console.WriteLine($"[{(passed ? "PASS" : "FAIL")}] {id}: {name}");
-
-        if (!passed)
-            Console.Error.WriteLine(error);
+        Console.WriteLine($"[{result.Outcome.Label()}] {result.Id}: {result.Name}");
+        if (result.Error is not null)
+            Console.Error.WriteLine(result.Error);
+        foreach (string cleanupError in result.CleanupErrors)
+            Console.Error.WriteLine("Cleanup failed: " + cleanupError);
     }
 
     /// <summary>Ids the review dialog has carried since they were introduced.</summary>
@@ -160,14 +245,14 @@ internal sealed class SmokeSuite
     /// regression rather than a suite that cannot see the control. All five ids arrived
     /// in one commit, so any one of them present means the build is drivable.
     /// </summary>
-    private void Preflight()
+    private void Preflight(SmokePhaseContext phase)
     {
-        string directory = Path.Combine(_workspace, "preflight");
+        string directory = phase.Directory;
         Directory.CreateDirectory(directory);
         Write(directory, "french.txt", "Prix: 100€ pour le café", CodePage("windows-1252"));
 
-        using var gui = new EcGuiDriver(_app);
-        System.Windows.Automation.AutomationElement review = gui.OpenReview(directory, 1);
+        using var gui = phase.OpenGui(_app);
+        GuiReview review = gui.OpenReview(directory, 1);
 
         if (!ReviewAutomationIds.Any(id => gui.ReviewContainsControl(review, id)))
         {
@@ -178,10 +263,9 @@ internal sealed class SmokeSuite
         }
 
         gui.CancelReview(review);
-        Directory.Delete(directory, recursive: true);
     }
 
-    private void PhaseA(PhaseContext phase)
+    private void PhaseA(SmokePhaseContext phase)
     {
         string directory = phase.Directory;
         Write(directory, "unicode.txt", "Hello, 世界 — Привет", StrictUtf8);
@@ -192,8 +276,8 @@ internal sealed class SmokeSuite
 
         Dictionary<string, string> before = phase.CaptureBefore();
 
-        using var gui = new EcGuiDriver(_app);
-        System.Windows.Automation.AutomationElement review = gui.OpenReview(directory, 5);
+        using var gui = phase.OpenGui(_app);
+        GuiReview review = gui.OpenReview(directory, 5);
         Check(gui.ReviewContainsControl(review, "lstSourceEncoding"),
             "The mixed review did not offer a source-encoding choice.");
         gui.CancelReview(review);
@@ -221,7 +305,7 @@ internal sealed class SmokeSuite
         AssertNoArtifacts(directory);
     }
 
-    private void PhaseB(PhaseContext phase)
+    private void PhaseB(SmokePhaseContext phase)
     {
         string directory = phase.Directory;
         const string unicode = "Hello, 世界 — Привет";
@@ -231,8 +315,8 @@ internal sealed class SmokeSuite
 
         Dictionary<string, string> before = phase.CaptureBefore();
 
-        using var gui = new EcGuiDriver(_app);
-        System.Windows.Automation.AutomationElement review = gui.OpenReview(directory, 2);
+        using var gui = phase.OpenGui(_app);
+        GuiReview review = gui.OpenReview(directory, 2);
         Check(!gui.ReviewContainsControl(review, "lstSourceEncoding"),
             "An automatically safe batch unexpectedly requested a source encoding.");
         gui.Proceed(review);
@@ -254,7 +338,7 @@ internal sealed class SmokeSuite
             sourceCodePage: 20127);
     }
 
-    private void PhaseC(PhaseContext phase)
+    private void PhaseC(SmokePhaseContext phase)
     {
         string directory = phase.Directory;
         const string french = "Prix: 100€ pour le café était déjà prêt";
@@ -267,8 +351,8 @@ internal sealed class SmokeSuite
 
         Dictionary<string, string> before = phase.CaptureBefore();
 
-        using var gui = new EcGuiDriver(_app);
-        System.Windows.Automation.AutomationElement review = gui.OpenReview(directory, 2);
+        using var gui = phase.OpenGui(_app);
+        GuiReview review = gui.OpenReview(directory, 2);
         review = gui.ConfirmSource(review, "iso-8859-1", "russian.txt");
         gui.Proceed(review);
 
@@ -285,7 +369,7 @@ internal sealed class SmokeSuite
             sourceCodePage: 28591);
     }
 
-    private void PhaseD(PhaseContext phase)
+    private void PhaseD(SmokePhaseContext phase)
     {
         string directory = phase.Directory;
         const string text = "\u4100\u0a00\u4200\u4100\u0a00\u4200";
@@ -293,8 +377,8 @@ internal sealed class SmokeSuite
 
         Dictionary<string, string> before = phase.CaptureBefore();
 
-        using var gui = new EcGuiDriver(_app);
-        System.Windows.Automation.AutomationElement review = gui.OpenReview(directory, 1);
+        using var gui = phase.OpenGui(_app);
+        GuiReview review = gui.OpenReview(directory, 1);
         Check(gui.ReviewContainsControl(review, "lstSourceEncoding"),
             "The BOM-less UTF-16 refusal did not offer an explicit source choice.");
         gui.CancelReview(review);
@@ -303,7 +387,7 @@ internal sealed class SmokeSuite
         AssertNoArtifacts(directory);
     }
 
-    private void PhaseE(PhaseContext phase)
+    private void PhaseE(SmokePhaseContext phase)
     {
         string directory = phase.Directory;
         const string text = "\u4100\u0a00\u4200\u4100\u0a00\u4200";
@@ -311,8 +395,8 @@ internal sealed class SmokeSuite
 
         Dictionary<string, string> before = phase.CaptureBefore();
 
-        using var gui = new EcGuiDriver(_app);
-        System.Windows.Automation.AutomationElement review = gui.OpenReview(directory, 1);
+        using var gui = phase.OpenGui(_app);
+        GuiReview review = gui.OpenReview(directory, 1);
         review = gui.ConfirmSource(review, "utf-16BE");
         gui.Proceed(review);
 
@@ -325,7 +409,7 @@ internal sealed class SmokeSuite
             sourceCodePage: 1201);
     }
 
-    private void PhaseF(PhaseContext phase)
+    private void PhaseF(SmokePhaseContext phase)
     {
         string directory = phase.Directory;
         const string text = "This source changes after the review opens.";
@@ -340,8 +424,8 @@ internal sealed class SmokeSuite
 
         Dictionary<string, string> before = phase.CaptureBefore();
 
-        using var gui = new EcGuiDriver(_app);
-        System.Windows.Automation.AutomationElement review = gui.OpenReview(directory, 2);
+        using var gui = phase.OpenGui(_app);
+        GuiReview review = gui.OpenReview(directory, 2);
 
         using (var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read))
             stream.Write(Encoding.Unicode.GetBytes(" changed"));
@@ -356,7 +440,7 @@ internal sealed class SmokeSuite
         AssertNoArtifacts(directory);
     }
 
-    private void PhaseG(PhaseContext phase)
+    private void PhaseG(SmokePhaseContext phase)
     {
         string directory = phase.Directory;
         const string text = "A verified backup is required before installation.";
@@ -366,8 +450,8 @@ internal sealed class SmokeSuite
 
         Dictionary<string, string> before = phase.CaptureBefore();
 
-        using var gui = new EcGuiDriver(_app);
-        System.Windows.Automation.AutomationElement review = gui.OpenReview(directory, 1);
+        using var gui = phase.OpenGui(_app);
+        GuiReview review = gui.OpenReview(directory, 1);
         gui.Proceed(review);
 
         Check(Hash(path) == before["backup-failure.txt"],
@@ -389,7 +473,7 @@ internal sealed class SmokeSuite
     /// test passed throughout, because the filter that dropped it is not the logic they
     /// cover. Only rendering the dialog catches that.
     /// </remarks>
-    private void PhaseH(PhaseContext phase)
+    private void PhaseH(SmokePhaseContext phase)
     {
         string directory = phase.Directory;
         const string text = "Hello World, this is plain text here.";
@@ -399,8 +483,8 @@ internal sealed class SmokeSuite
         // decode and EC cannot prove which it is. Choosing utf-16le agrees with EC.
         Write(directory, "matching.txt", text, Encoding.Unicode, writeBom: false);
 
-        using var gui = new EcGuiDriver(_app);
-        System.Windows.Automation.AutomationElement review = gui.OpenReview(directory, 1);
+        using var gui = phase.OpenGui(_app);
+        GuiReview review = gui.OpenReview(directory, 1);
 
         Check(
             gui.ReviewContainsControl(review, "lstRefusedFiles"),
@@ -439,33 +523,33 @@ internal sealed class SmokeSuite
     /// report the whole batch as done however early it stopped. The status line is
     /// therefore checked against the bytes on disk rather than taken at its word.
     /// </remarks>
-    private void PhaseI(PhaseContext phase)
+    private void PhaseI(SmokePhaseContext phase)
     {
         string directory = phase.Directory;
         // Large enough that a fast machine cannot finish converting before the cancel
         // click lands. If one ever does, the phase says so rather than passing, and the
         // answer is to raise this again rather than to accept a completed run.
-        const int count = 1000;
+        const int count = 400;
         string body = string.Concat(Enumerable.Repeat("Ligne accentuee: cafe resume. ", 200));
 
         for (int i = 1; i <= count; i++)
             Write(directory, $"file-{i:D3}.txt", body, new UTF8Encoding(true), writeBom: true);
 
-        using var gui = new EcGuiDriver(_app);
-        System.Windows.Automation.AutomationElement review = gui.OpenReview(directory, count);
+        using var gui = phase.OpenGui(_app);
+        GuiReview review = gui.OpenReview(directory, count);
 
         gui.ProceedThenCancel(review, () => AnyRewritten(directory));
 
         int rewritten = RewrittenCount(directory);
         int untouched = count - rewritten;
+        phase.RecordMetric("SelectedFiles", count);
+        phase.RecordMetric("ConvertedBeforeCancellation", rewritten);
+        phase.RecordMetric("NotAttempted", untouched);
 
         // Printed on every run, before the checks, so a failing run shows the figures
         // that failed it. This is the margin between cancellation landing and the run
-        // finishing unaided, and the report cannot carry it: this phase records no
-        // before-snapshot, because a thousand hashes would swamp the evidence file for
-        // a phase that compares counts rather than bytes. Reading it from a CI log is
-        // the only way to see a faster machine approaching the point where there is
-        // nothing left to interrupt.
+        // finishing unaided. The same figures are saved in the phase metrics, so a CI
+        // artifact can show whether the cancellation margin is narrowing over time.
         Console.WriteLine(
             $"[INFO] I: cancelled after {rewritten} of {count} file(s) were converted; "
             + $"{untouched} left untouched");
@@ -479,23 +563,23 @@ internal sealed class SmokeSuite
         // window assigns its final status after re-enabling them, so the status read here
         // could still be the previous one. Wait for the figures this phase is about to
         // assert, then read once.
-        gui.WaitForStatus($"{rewritten} converted");
-
-        gui.WaitForStatus($"{untouched} not attempted");
+        var expectedCounts = new StoppedConversionCounts(rewritten, untouched);
+        gui.WaitForStoppedConversionCounts(expectedCounts);
 
         string status = gui.StatusText();
 
         Check(
-            status.Contains($"{rewritten} converted", StringComparison.Ordinal),
-            $"The status line disagrees with the {rewritten} file(s) actually rewritten: {status}");
+            ConversionStatusText.TryReadStoppedCounts(status, out StoppedConversionCounts reported),
+            $"The status line did not contain a complete stopped-conversion summary: {status}");
+
+        Check(
+            reported == expectedCounts,
+            $"The status line disagrees with the files actually rewritten: {status}");
 
         Check(
             status.Contains("Conversion stopped", StringComparison.Ordinal),
             $"An interrupted run was not reported as stopped: {status}");
 
-        Check(
-            status.Contains($"{untouched} not attempted", StringComparison.Ordinal),
-            $"The {untouched} unreached file(s) are missing from the status: {status}");
     }
 
     /// <summary>
@@ -508,7 +592,7 @@ internal sealed class SmokeSuite
     /// cancellation. This phase drives that exact sequence and checks the files rather
     /// than trusting the dialog text alone.
     /// </remarks>
-    private void PhaseJ(PhaseContext phase)
+    private void PhaseJ(SmokePhaseContext phase)
     {
         string scanned = Directory.CreateDirectory(
             Path.Combine(phase.Directory, "scanned")).FullName;
@@ -518,8 +602,8 @@ internal sealed class SmokeSuite
 
         Dictionary<string, string> before = phase.CaptureBefore();
 
-        using var gui = new EcGuiDriver(_app);
-        System.Windows.Automation.AutomationElement review =
+        using var gui = phase.OpenGui(_app);
+        GuiReview review =
             gui.OpenReviewAfterRetarget(scanned, retargeted, 1);
 
         const string outsideFile = @"..\scanned\french.txt";
@@ -714,15 +798,4 @@ internal sealed class SmokeSuite
             throw new InvalidOperationException(message);
     }
 
-    private sealed class PhaseContext(string directory)
-    {
-        internal string Directory { get; } = directory;
-        internal Dictionary<string, string> Before { get; private set; } = [];
-
-        internal Dictionary<string, string> CaptureBefore()
-        {
-            Before = Snapshot(Directory);
-            return Before;
-        }
-    }
 }

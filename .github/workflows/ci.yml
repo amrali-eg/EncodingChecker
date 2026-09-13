@@ -54,9 +54,8 @@ jobs:
       # Drives the ordinary Release build. The published single-file executable is
       # what the release job drives, and only that job can produce one.
       #
-      # Two prerequisites are refused with exit 2 rather than reported as a pass:
-      # an interactive Windows desktop, which a hosted windows-latest runner has,
-      # and a build carrying the review dialog's automation ids.
+      # Exit 2 means the suite could not make a trustworthy verdict, such as when
+      # the interactive desktop is unavailable or the build is too old to drive.
       - name: Drive the GUI smoke suite
         shell: pwsh
         run: |
@@ -64,15 +63,14 @@ jobs:
 
           & $suite --output "$env:RUNNER_TEMP\gui-smoke"
 
-          if ($LASTEXITCODE -ne 0) {
-            throw "GUI smoke suite failed with exit code $LASTEXITCODE."
-          }
+          $suiteExitCode = $LASTEXITCODE
+          & "sources\EncodingChecker.GuiSmoke\Write-GateSummary.ps1" -OutputDirectory "$env:RUNNER_TEMP\gui-smoke" -SuiteExitCode $suiteExitCode
+          exit $LASTEXITCODE
 
-      # Kept on success as well as failure: the report carries each phase's after
-      # hashes and, for the phases that compare bytes, the before hashes too. A run
-      # that passed is the sample that shows whether an intermittent phase has stopped
-      # being intermittent. Phase I's cancellation margin is not in here - it is the
-      # [INFO] line in the step above.
+      # Kept for every outcome: the report carries verdicts, timings, errors, each
+      # phase's after hashes and, where bytes are compared, the before hashes too.
+      # One passing run records only that occurrence; failure-only paths need their
+      # paired controls. Phase I's cancellation margin remains the [INFO] line above.
       #
       # Missing evidence only warns here. When the suite cannot start it has already
       # failed the step above, and erroring again would bury that message.

@@ -8,6 +8,7 @@ taking it on trust.
 
 ```powershell
 dotnet build sources/EncodingChecker.sln -c Release
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 sources/EncodingChecker.GuiSmoke/bin/Release/net10.0-windows/EncodingChecker.GuiSmoke.exe
 ```
 
@@ -18,13 +19,24 @@ sources/EncodingChecker.GuiSmoke/bin/Release/net10.0-windows/EncodingChecker.Gui
 --keep-workspace      keep the fixtures even when the run passes
 ```
 
-Exit `0` when every phase passes, `1` when one fails, `2` for a usage, environment, or
-build-compatibility problem. Each run writes `gui-smoke-report.json` and
-`gui-smoke-report.md`, carrying the EC version, the executable SHA-256, the OS and .NET
-versions, and each phase's before and after file hashes. It also hashes the managed
-assembly beside the executable when there is one, as in an ordinary Release build. A
-single-file publish has none, and the report says so instead of naming a file it could
-not read.
+Exit `0` means every selected phase passed. Exit `1` means a check, the test tool,
+cleanup, or evidence collection failed; it does not by itself identify an EC defect.
+Exit `2` means the run was inconclusive or could not start because of its arguments,
+environment, or an incompatible build.
+
+Once the suite starts, it records all three outcomes and attempts both
+`gui-smoke-report.json` and `gui-smoke-report.md`. Completed results survive a later
+failure. A known startup refusal, such as a missing executable or noninteractive desktop,
+also writes an inconclusive preflight report when its output folder can be created. A disk
+or permission error can still prevent writing one or both formats and exits `1`. Each file
+is installed only after it has been fully written; the two files are not one transaction.
+
+The reports include preflight, phase results, file hashes, cleanup errors, structured
+window observations, timings, and Phase I's selected, converted, and not-attempted counts.
+Build hashes and version are read **before** any GUI
+work, so a later problem reading the executable cannot erase completed results. JSON
+readers should use `Outcome`; the older `Passed` field is retained for compatibility
+and cannot distinguish failure from an inconclusive run.
 
 ## Why this is not an ordinary test
 
@@ -71,8 +83,9 @@ wording a reader sees.
 
 **I** never takes the status line at its word. It counts the files whose byte-order mark
 is actually gone and requires the reported figure to match. Cancellation is timed
-against real progress rather than a sleep, so it does not depend on machine speed, and a
-run short enough to finish first is not a failure — the same assertions hold.
+against real progress rather than a sleep. The 400-file workload must leave both
+converted and untouched files; if it finishes first, the phase fails because it did not
+exercise cancellation.
 
 ## Checking that a phase can fail
 
@@ -84,6 +97,18 @@ fails **I**.
 
 Do this for any phase you add. A green suite is evidence only to the extent its phases
 could have gone red.
+
+The gate itself also has paired controls. A reachable window that never produces an
+expected result must be `FAIL` with exit `1`. A live EC window that Windows confirms is
+on another virtual desktop, with no process window visible through UI Automation, is
+`INCONCLUSIVE` with exit `2`. Missing or unreadable automation data alone is not enough:
+a hung application can look the same. Unknown observations retain the failure and its
+diagnostic rather than inventing an environmental explanation.
+
+Automated tests run the actual phase-recording loop without a GUI. They cover both
+outcomes, earlier results surviving a later problem, preflight refusal, cleanup failing
+during another exception, and report-writing errors. Real GUI controls remain necessary
+for the Windows-specific parts; unit tests do not replace them.
 
 ## What it does not cover
 
@@ -101,8 +126,10 @@ added by the same change that added this suite. **No release up to and including
 v3.11.0 carries them**, so none of those can be driven by it. **v3.11.1 is the first
 release the suite can run against.**
 
-A preflight check enforces this. It opens one review, looks for the five ids, and if
-none are present refuses with exit `2` and says so.
+A preflight check enforces this. It opens one review through the same main-window child
+lookup used by every phase, then looks for the five ids. This also pins the review's
+owned-window relationship that keeps discovery independent of unrelated desktop windows.
+If the ids are absent, the run is `INCONCLUSIVE`, exits `2`, and writes the reason.
 
 This exists because the failure was worse than useless without it. Pointed at v3.11.0
 the suite ran every phase and reported, first line, that *the mixed review did not offer
@@ -113,9 +140,16 @@ direction, about the wrong component.
 
 ## Requirements
 
-An interactive Windows desktop - a real logged-in session with a screen. The automation
-layer cannot click a window that nobody is looking at, so with no desktop the runner
-refuses to start with exit `2` rather than reporting a pass it did not earn.
+An active, unlocked Windows desktop - a real logged-in session with a screen, with EC on
+that desktop. A confirmed move to another desktop makes the phase `INCONCLUSIVE`.
+Other losses of access may remain `FAIL` with an unknown cause; the tool cannot reliably
+identify every desktop, provider, or application fault.
+
+For a confirmed desktop move, cleanup first asks EC to close normally. If it does not
+close, the driver attempts to end its test process. Cleanup errors are recorded alongside
+the original problem and stop later phases, so a leftover process cannot quietly affect
+the next test. A final filesystem snapshot is attempted after cleanup, including on
+failure; a snapshot error is recorded rather than replaced with invented hashes.
 
 A GitHub-hosted `windows-latest` runner **does** provide one. Measured, not assumed:
 `Environment.UserInteractive` is `True` under the `runneradmin` account, and phase A
@@ -139,6 +173,12 @@ drives an unsigned file. And the **self-contained** executable under
 `win-x64-selfcontained` is packaged and shipped without being driven at all; only the
 framework-dependent one is.
 
+The report records each phase's duration and the total duration, so a cleanup cannot
+quietly make the gate much slower. Phase I also preserves its cancellation margin in the
+evidence rather than only in the CI log. The review lookup was measured before it was scoped to
+EC's main window: desktop clutter moved a run from about 19 to 22.5 seconds. Afterward,
+the same runs were about 17.3–17.8 seconds on either desktop.
+
 The report is uploaded as a `gui-smoke-evidence` workflow artifact, which expires on
 GitHub's retention schedule. It is not attached to the release, so it is not permanent
 evidence unless someone attaches it.
@@ -149,12 +189,17 @@ the pull request that introduced it rather than at tag time with a release waiti
 That costs about two minutes of runner time per pull request, which is the price of
 not diagnosing this class of defect mid-release.
 
-The two runs answer different questions, and both upload a report. The pull-request run
+Both workflows use `Write-GateSummary.ps1` to explain the outcome in the job summary.
+A failed check and an inconclusive run **both block approval**, but have different
+messages. A missing report or a mismatch between the report and exit code also blocks
+approval. Making an inconclusive run green would remove the test gate, not fix it.
+
+The two runs answer different questions, and both attempt to upload a report. The pull-request run
 asks whether this change broke the window; the release run asks whether the artifact
 about to be published works. Only the release job can ask the second one, because only it
 produces a published single-file executable.
 
-Evidence is uploaded from the pull-request run whether it passes or fails. A passing
-run is the sample that shows an intermittent phase has stopped being intermittent —
-which is the open question EC-24 records, since the failure that prompted the fix was
-never reproduced.
+Evidence is uploaded from the pull-request run whether it passes, fails, or is
+inconclusive. A passing report is still useful regression evidence, but it does not by
+itself exercise a check that runs only on failure; that requires the paired controls
+described above.

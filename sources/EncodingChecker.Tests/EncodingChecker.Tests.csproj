@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\EncodingChecker\EncodingChecker.csproj" />
+    <ProjectReference Include="..\EncodingChecker.GuiSmoke\EncodingChecker.GuiSmoke.csproj" />
   </ItemGroup>
 
 </Project>
