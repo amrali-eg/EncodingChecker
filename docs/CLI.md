@@ -171,5 +171,8 @@ Prints the version and exits. It takes no other arguments and does not need
 | 4 | Cancelled with Ctrl+C. |
 | 5 | One or more conversions were safely refused and left unchanged. |
 
-When more than one applies, processing failure (3) wins over safe refusal (5),
-which wins over `-FailOnChanges` (2).
+When more than one applies, processing failure (3) wins over cancellation (4),
+which wins over safe refusal (5), which wins over `-FailOnChanges` (2). Both
+cancellable paths - a direct conversion and `-Apply` - use this precedence, so
+a file failure discovered before Ctrl+C landed is reported the same way from
+either command.

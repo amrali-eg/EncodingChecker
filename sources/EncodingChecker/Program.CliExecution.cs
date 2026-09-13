@@ -241,6 +241,15 @@ internal static partial class Program
             entry.NotAttempted = !reached.Contains(entry.FilePath);
     }
 
+    // Internal so tests can pin this against -Apply's precedence without a real Ctrl+C.
+    /// <summary>The exit code for an interrupted scan, given what it found before Ctrl+C.</summary>
+    /// <remarks>
+    /// Mirrors -Apply's precedence: a file this run actually reached and failed on
+    /// outranks the cancellation itself, so both cancellable paths report the same
+    /// condition the same way.
+    /// </remarks>
+    internal static int ScanCancellationExitCode(bool hasError) => hasError ? 3 : 4;
+
     // Internal so tests can pin the published CLI exit-code contract.
     /// <summary>Returns the first output path known to be unusable before the run.</summary>
     /// <remarks>
@@ -518,7 +527,7 @@ internal static partial class Program
         }
 
         if (scanInterrupted)
-            return 4;
+            return ScanCancellationExitCode(entries.Any(e => e.Result == ConversionRowResult.Error));
 
         if (!string.IsNullOrEmpty(options.ReportPath))
         {
