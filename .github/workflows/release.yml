@@ -160,9 +160,9 @@ jobs:
 
           & $suite --app $app --output "$env:RUNNER_TEMP\gui-smoke"
 
-          if ($LASTEXITCODE -ne 0) {
-            throw "GUI smoke suite failed with exit code $LASTEXITCODE; no release will be published."
-          }
+          $suiteExitCode = $LASTEXITCODE
+          & "sources\EncodingChecker.GuiSmoke\Write-GateSummary.ps1" -OutputDirectory "$env:RUNNER_TEMP\gui-smoke" -SuiteExitCode $suiteExitCode
+          exit $LASTEXITCODE
 
       - name: Keep the GUI smoke evidence
         if: always()

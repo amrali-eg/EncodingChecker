@@ -1,8 +1,5 @@
-using System.Diagnostics;
 using System.IO;
-using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 
 namespace EncodingChecker.GuiSmoke;
 
@@ -21,76 +18,76 @@ internal static class Program
                 return 0;
             }
 
-            Options options = Options.Parse(args);
+            Options options;
+            try
+            {
+                options = Options.Parse(args);
+            }
+            catch (ArgumentException ex)
+            {
+                Console.Error.WriteLine(ex.Message);
+                Console.Error.WriteLine(Options.Usage);
+                return 2;
+            }
+
+            try
+            {
+                PrepareOutputDirectory(options.Output);
+            }
+            catch (ArgumentException ex)
+            {
+                Console.Error.WriteLine(ex.Message);
+                return 2;
+            }
+            string workspace = Path.Combine(options.Output, "workspace");
+            Directory.CreateDirectory(workspace);
 
             if (!OperatingSystem.IsWindows() || !Environment.UserInteractive)
             {
-                Console.Error.WriteLine(
+                return WriteStartupInconclusive(
+                    options,
+                    workspace,
                     "The GUI smoke test requires an interactive Windows desktop.");
-                return 2;
             }
 
             if (!File.Exists(options.App))
             {
-                Console.Error.WriteLine($"EncodingChecker was not found: {options.App}");
-                return 2;
+                return WriteStartupInconclusive(
+                    options,
+                    workspace,
+                    $"EncodingChecker was not found: {options.App}");
             }
 
-            PrepareOutputDirectory(options.Output);
-            string workspace = Path.Combine(options.Output, "workspace");
-            Directory.CreateDirectory(workspace);
-
-            // Record the assembly path only when there is one to hash, so the report
-            // never names a file it could not read.
-            string? managedAssembly = ManagedAssemblyPath(options.App);
-            string? managedAssemblySha256 = HashIfPresent(managedAssembly);
-            if (managedAssemblySha256 is null)
-                managedAssembly = null;
-
             var suite = new SmokeSuite(options.App, workspace);
-            SmokeReport report = suite.Run(options.Phase) with
-            {
-                EcVersion = FileVersionInfo.GetVersionInfo(options.App).FileVersion
-                            ?? "unknown",
-                EcManagedAssembly = managedAssembly,
-                EcManagedAssemblySha256 = managedAssemblySha256,
-            };
-
-            WriteReports(options.Output, report);
+            SmokeReport report = suite.Run(options.Phase);
 
             if (report.Passed && !options.KeepWorkspace)
-                Directory.Delete(workspace, recursive: true);
+            {
+                try
+                {
+                    Directory.Delete(workspace, recursive: true);
+                }
+                catch (Exception ex)
+                {
+                    report = report with
+                    {
+                        Outcome = SmokeOutcome.Failed,
+                        Error = "The test workspace could not be removed: " + ex,
+                    };
+                }
+            }
+
+            SmokeReportWriter.Write(options.Output, report);
 
             Console.WriteLine();
-            Console.WriteLine(report.Passed
-                ? "GUI SMOKE TEST: PASS"
-                : "GUI SMOKE TEST: FAIL");
+            Console.WriteLine($"GUI SMOKE TEST: {report.Outcome.Label()}");
             Console.WriteLine($"Evidence: {options.Output}");
-            return report.Passed ? 0 : 1;
-        }
-        catch (IncompatibleBuildException ex)
-        {
-            Console.Error.WriteLine(ex.Message);
-            return 2;
-        }
-        catch (GuiEnvironmentException ex)
-        {
-            // Exit 2, with the other refused prerequisites: the phase could not be
-            // verified, so there is no verdict about EC to report either way.
-            Console.Error.WriteLine(ex.Message);
-            return 2;
-        }
-        catch (ArgumentException ex)
-        {
-            Console.Error.WriteLine(ex.Message);
-            Console.Error.WriteLine();
-            Console.Error.WriteLine(Options.Usage);
-            return 2;
+            return report.Outcome.ExitCode();
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine(ex);
-            return 2;
+            return 1;
         }
     }
 
@@ -106,90 +103,55 @@ internal static class Program
         Directory.CreateDirectory(output);
     }
 
-    private static string ManagedAssemblyPath(string app) =>
-        Path.ChangeExtension(app, ".dll");
-
-    private static string? HashIfPresent(string path)
+    private static int WriteStartupInconclusive(Options options, string workspace, string error)
     {
-        if (!File.Exists(path))
-            return null;
-
-        using FileStream stream = File.OpenRead(path);
-        return Convert.ToHexStringLower(SHA256.HashData(stream));
-    }
-
-    private static void WriteReports(string output, SmokeReport report)
-    {
-        var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
-        File.WriteAllText(
-            Path.Combine(output, "gui-smoke-report.json"),
-            JsonSerializer.Serialize(report, jsonOptions),
-            new UTF8Encoding(false));
-
-        var markdown = new StringBuilder()
-            .AppendLine("# EncodingChecker automated GUI smoke test")
-            .AppendLine()
-            .AppendLine($"- Result: **{(report.Passed ? "PASS" : "FAIL")}**")
-            .AppendLine($"- EC version: `{report.EcVersion}`")
-            .AppendLine($"- Executable SHA-256: `{report.EcSha256}`");
-
-        // Two lines when a loose assembly is there to hash, one sentence when it is not.
-        // Never a path with an empty hash beside it, and never a blank line in the list.
-        if (report.EcManagedAssemblySha256 is { Length: > 0 })
+        string now = DateTime.UtcNow.ToString("O");
+        SmokeBuildEvidence build = SmokeBuildEvidence.Capture(options.App);
+        var report = new SmokeReport
         {
-            markdown
-                .AppendLine($"- Managed assembly: `{report.EcManagedAssembly}`")
-                .AppendLine(
-                    $"- Managed assembly SHA-256: `{report.EcManagedAssemblySha256}`");
-        }
-        else
-        {
-            markdown.AppendLine(
-                "- Managed assembly: none; a single-file publish leaves no loose "
-                + "assembly, so only the executable above is hashed");
-        }
-
-        markdown
-            .AppendLine($"- Started UTC: `{report.StartedUtc}`")
-            .AppendLine($"- Completed UTC: `{report.CompletedUtc}`")
-            .AppendLine($"- Windows: `{report.OS}`")
-            .AppendLine($"- .NET: `{report.DotNet}`")
-            .AppendLine()
-            .AppendLine("| Phase | Result | Check |")
-            .AppendLine("|---|---|---|");
-
-        foreach (SmokePhaseResult phase in report.Phases)
-        {
-            markdown.AppendLine(
-                $"| {phase.Id} | {(phase.Passed ? "PASS" : "FAIL")} | "
-                + $"{EscapeCell(phase.Name)} |");
-        }
-
-        SmokePhaseResult[] failures = [.. report.Phases.Where(phase => !phase.Passed)];
-
-        if (failures.Length > 0)
-        {
-            markdown.AppendLine().AppendLine("## Failures");
-
-            foreach (SmokePhaseResult phase in failures)
+            StartedUtc = now,
+            CompletedUtc = now,
+            EcExecutable = options.App,
+            EcVersion = build.Version,
+            EcSha256 = build.ExecutableSha256,
+            EcManagedAssembly = build.ManagedAssembly,
+            EcManagedAssemblySha256 = build.ManagedAssemblySha256,
+            EvidenceErrors = build.Errors,
+            OS = Environment.OSVersion.VersionString,
+            DotNet = Environment.Version.ToString(),
+            Workspace = workspace,
+            DurationMilliseconds = 0,
+            Outcome = SmokeOutcome.Inconclusive,
+            Error = error,
+            Preflight = new SmokePhaseResult
             {
-                markdown.AppendLine().AppendLine($"### Phase {phase.Id}")
-                    .AppendLine().AppendLine("```text")
-                    .AppendLine(phase.Error)
-                    .AppendLine("```");
-            }
+                Id = "preflight",
+                Name = "Check the GUI smoke test can start",
+                Outcome = SmokeOutcome.Inconclusive,
+                Error = error,
+                DurationMilliseconds = 0,
+                Before = new Dictionary<string, string>(),
+                After = new Dictionary<string, string>(),
+            },
+            Phases = Array.Empty<SmokePhaseResult>(),
+        };
+
+        try
+        {
+            SmokeReportWriter.Write(options.Output, report);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("The startup refusal could not be recorded: " + ex);
+            return 1;
         }
 
-        File.WriteAllText(
-            Path.Combine(output, "gui-smoke-report.md"),
-            markdown.ToString(),
-            new UTF8Encoding(false));
+        Console.Error.WriteLine(error);
+        Console.WriteLine();
+        Console.WriteLine($"GUI SMOKE TEST: {report.Outcome.Label()}");
+        Console.WriteLine($"Evidence: {options.Output}");
+        return report.Outcome.ExitCode();
     }
-
-    private static string EscapeCell(string value) =>
-        value.Replace("|", "\\|", StringComparison.Ordinal)
-             .Replace("\r", " ", StringComparison.Ordinal)
-             .Replace("\n", " ", StringComparison.Ordinal);
 
     private sealed record Options(
         string App,

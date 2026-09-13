@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -11,24 +12,34 @@ internal sealed class EcGuiDriver : IDisposable
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
 
     private readonly Process _process;
+    private readonly Action<Exception> _reportCleanupError;
+    private int _nativeMainWindowHandle;
+    private bool _environmentUnavailable;
 
-    /// <summary>
-    /// Whether the main window has ever been found. Before it has, a window that
-    /// cannot be found is EC failing to show one - which is EC's problem, and must
-    /// keep its own failure. Afterwards, the same answer means the window went away.
-    /// </summary>
-    private readonly bool _windowWasFound;
+    internal AutomationElement MainWindow { get; private set; } = null!;
 
-    internal AutomationElement MainWindow { get; }
-
-    internal EcGuiDriver(string executable)
+    internal EcGuiDriver(string executable, Action<Exception> reportCleanupError)
     {
+        _reportCleanupError = reportCleanupError;
         _process = Process.Start(new ProcessStartInfo(executable)
         {
             UseShellExecute = false,
             WorkingDirectory = Path.GetDirectoryName(executable)!,
         }) ?? throw new GuiDriverException("EncodingChecker did not start.");
 
+        try
+        {
+            InitializeWindow();
+        }
+        catch
+        {
+            Dispose();
+            throw;
+        }
+    }
+
+    private void InitializeWindow()
+    {
         try
         {
             _process.WaitForInputIdle(10_000);
@@ -42,17 +53,17 @@ internal sealed class EcGuiDriver : IDisposable
             () => FindTopLevelWindow("MainForm"),
             "EncodingChecker's main window did not appear.");
 
-        _windowWasFound = true;
+        _nativeMainWindowHandle = MainWindow.Current.NativeWindowHandle;
     }
 
-    internal AutomationElement OpenReview(string directory, int expectedFiles)
+    internal GuiReview OpenReview(string directory, int expectedFiles)
     {
         ConfigureScan(directory);
         Scan(expectedFiles);
         return OpenSelectedReview(expectedFiles);
     }
 
-    internal AutomationElement OpenReviewAfterRetarget(
+    internal GuiReview OpenReviewAfterRetarget(
         string scannedDirectory,
         string reviewDirectory,
         int expectedFiles)
@@ -95,7 +106,9 @@ internal sealed class EcGuiDriver : IDisposable
 
     /// <summary>The target encoding the main window currently shows.</summary>
     internal string TargetEncoding() =>
-        SelectedName(RequireById(MainWindow, "lstConvert"));
+        ReadMainWindow(
+            main => SelectedName(RequireById(main, "lstConvert")),
+            "The target encoding could not be read.");
 
     /// <summary>Sets the target encoding, once a scan has enabled the list.</summary>
     internal void SetTargetEncoding(string value) =>
@@ -109,7 +122,7 @@ internal sealed class EcGuiDriver : IDisposable
             $"View did not finish with {expectedFiles} result row(s).");
     }
 
-    private AutomationElement OpenSelectedReview(int expectedFiles)
+    private GuiReview OpenSelectedReview(int expectedFiles)
     {
         SetToggle(MainWindow, "chkSelectDeselectAll", true);
         WaitUntil(
@@ -123,85 +136,113 @@ internal sealed class EcGuiDriver : IDisposable
     }
 
     internal void TryConfirmSource(
-        AutomationElement review,
+        GuiReview review,
         string sourceEncoding,
         params string[] filesToCheck)
     {
         foreach (string file in filesToCheck)
             SetRefusedFileChecked(review, file, true);
 
-        SelectCombo(review, "lstSourceEncoding", sourceEncoding);
-        Invoke(review, "btnConfirmSourceEncoding");
+        SelectCombo(review.Element, "lstSourceEncoding", sourceEncoding);
+        Invoke(review.Element, "btnConfirmSourceEncoding");
     }
 
-    internal bool ReviewIsOpen(AutomationElement review) =>
-        FindReviewWindow() is { } current &&
-        current.Current.NativeWindowHandle == review.Current.NativeWindowHandle;
+    internal bool ReviewIsOpen(GuiReview review)
+    {
+        GuiWindowIdentity identity = review.Identity;
+        return ReadMainWindow(
+            main => FindReviewWindow(main) is { } current &&
+                    MatchesReview(current, identity),
+            "The conversion review's state could not be read.");
+    }
 
-    internal void WaitForReviewText(AutomationElement review, string expected) =>
-        WaitUntil(
-            () => ReviewIsOpen(review) &&
-                  ReviewText(review).Contains(expected, StringComparison.OrdinalIgnoreCase),
-            $"The review did not show '{expected}'.");
+    internal void WaitForReviewText(GuiReview review, string expected)
+    {
+        GuiWindowIdentity identity = review.Identity;
 
-    internal AutomationElement ConfirmSource(
-        AutomationElement review,
+        if (WaitFor(
+                () =>
+                {
+                    AutomationElement? main = FindTopLevelWindow("MainForm");
+                    AutomationElement? current = main is null ? null : FindReviewWindow(main);
+
+                    return current is not null &&
+                           MatchesReview(current, identity) &&
+                           VisibleText(current).Contains(
+                               expected,
+                               StringComparison.OrdinalIgnoreCase)
+                        ? new object()
+                        : null;
+                },
+                Timeout,
+                out Exception? lastError) is not null)
+        {
+            return;
+        }
+
+        throw Expired($"The review did not show '{expected}'.", lastError);
+    }
+
+    internal GuiReview ConfirmSource(
+        GuiReview review,
         string sourceEncoding,
         params string[] filesToLeaveUnchecked)
     {
-        int oldHandle = review.Current.NativeWindowHandle;
+        GuiWindowIdentity previous = RequireOpenWindowIdentity(
+            review.Element, "source-encoding review");
 
         foreach (string file in filesToLeaveUnchecked)
             SetRefusedFileChecked(review, file, false);
 
-        SelectCombo(review, "lstSourceEncoding", sourceEncoding);
-        Invoke(review, "btnConfirmSourceEncoding");
+        SelectCombo(review.Element, "lstSourceEncoding", sourceEncoding);
+        Invoke(review.Element, "btnConfirmSourceEncoding");
 
-        WaitUntil(
-            () => !WindowExists(oldHandle),
-            "The source-encoding review did not close.");
+        WaitForWindowToClose(previous, "The source-encoding review did not close.");
 
-        return WaitForReview(oldHandle);
+        return WaitForReview(previous);
     }
 
-    internal void CancelReview(AutomationElement review)
+    internal void CancelReview(GuiReview review)
     {
-        int handle = review.Current.NativeWindowHandle;
-        Invoke(review, "btnCancelConversionReview");
-        WaitUntil(() => !WindowExists(handle), "The conversion review did not close.");
+        GuiWindowIdentity identity = RequireOpenWindowIdentity(review.Element, "conversion review");
+        Invoke(review.Element, "btnCancelConversionReview");
+        WaitForWindowToClose(identity, "The conversion review did not close.");
         WaitForMainReady("Conversion cancelled");
     }
 
-    internal void Proceed(AutomationElement review)
+    internal void Proceed(GuiReview review)
     {
-        int handle = review.Current.NativeWindowHandle;
-        Invoke(review, "btnProceedConversion");
-        WaitUntil(() => !WindowExists(handle), "The conversion review did not close.");
+        GuiWindowIdentity identity = RequireOpenWindowIdentity(review.Element, "conversion review");
+        Invoke(review.Element, "btnProceedConversion");
+        WaitForWindowToClose(identity, "The conversion review did not close.");
         WaitForMainReady("Conversion complete");
     }
 
-    internal void ProceedExpectingWarning(AutomationElement review)
+    internal void ProceedExpectingWarning(GuiReview review)
     {
-        int handle = review.Current.NativeWindowHandle;
-        Invoke(review, "btnProceedConversion");
-        WaitUntil(() => !WindowExists(handle), "The conversion review did not close.");
+        GuiWindowIdentity identity = RequireOpenWindowIdentity(review.Element, "conversion review");
+        Invoke(review.Element, "btnProceedConversion");
+        WaitForWindowToClose(identity, "The conversion review did not close.");
 
         AutomationElement warning = WaitForElement(
             () => FindProcessWindowByTitle("Warning"),
             "The expected safety warning did not appear.");
-        int warningHandle = warning.Current.NativeWindowHandle;
+        GuiWindowIdentity warningIdentity = RequireOpenWindowIdentity(warning, "warning");
 
         AutomationElement ok = WaitForElement(
             () => FindNamedControl(warning, ControlType.Button, "OK"),
             "The warning did not expose an OK button.");
         Invoke(ok);
 
-        WaitUntil(() => !WindowExists(warningHandle), "The warning did not close.");
+        WaitForWindowToClose(warningIdentity, "The warning did not close.");
         WaitForMainReady("Conversion did not run");
     }
 
-    internal bool ReviewContainsControl(AutomationElement review, string automationId) =>
-        FindById(review, automationId) is not null;
+    internal bool ReviewContainsControl(GuiReview review, string automationId) =>
+        ReadReview(
+            review,
+            current => FindById(current, automationId) is not null,
+            $"The conversion review could not be read while looking for '{automationId}'.");
 
     /// <summary>Every piece of text the review is showing, joined.</summary>
     /// <remarks>
@@ -209,7 +250,11 @@ internal sealed class EcGuiDriver : IDisposable
     /// prove the label exists. What matters is the wording a reader actually sees, so
     /// this reads the rendered text rather than a control's presence.
     /// </remarks>
-    internal string ReviewText(AutomationElement review) => VisibleText(review);
+    internal string ReviewText(GuiReview review) =>
+        ReadReview(
+            review,
+            VisibleText,
+            "The conversion review's text could not be read.");
 
     /// <summary>Every non-blank name under an element, joined one per line.</summary>
     private static string VisibleText(AutomationElement root) =>
@@ -225,9 +270,10 @@ internal sealed class EcGuiDriver : IDisposable
     /// This is for failure messages, where the whole window is what you want: an
     /// unexpected dialog or an empty result list explains a timeout that the status line
     /// alone would not. Waiting is a different job - see <see cref="StatusLine"/>, which
-    /// reads only the status bar and does not throw.
+    /// reads only the status bar.
     /// </remarks>
-    internal string StatusText() => VisibleText(MainWindow);
+    internal string StatusText() =>
+        ReadMainWindow(VisibleText, "The main window's text could not be read.");
 
     /// <summary>
     /// Starts the conversion and cancels it once the status bar shows progress.
@@ -238,11 +284,11 @@ internal sealed class EcGuiDriver : IDisposable
     /// not assert how many files were written: that is the run's to decide, and the
     /// checks afterwards compare whatever it reports against the bytes on disk.
     /// </remarks>
-    internal void ProceedThenCancel(AutomationElement review, Func<bool> writingHasBegun)
+    internal void ProceedThenCancel(GuiReview review, Func<bool> writingHasBegun)
     {
-        int handle = review.Current.NativeWindowHandle;
-        Invoke(review, "btnProceedConversion");
-        WaitUntil(() => !WindowExists(handle), "The conversion review did not close.");
+        GuiWindowIdentity identity = RequireOpenWindowIdentity(review.Element, "conversion review");
+        Invoke(review.Element, "btnProceedConversion");
+        WaitForWindowToClose(identity, "The conversion review did not close.");
 
         // Cancelling before the first write would exercise the declined-review path
         // instead, which phase A already covers.
@@ -261,7 +307,7 @@ internal sealed class EcGuiDriver : IDisposable
     /// separately - has a button appeared, did the press land, what did the run report -
     /// are only meaningful together. Pressing is not proof of cancelling: the window
     /// hides the button when a run ends, so a press can fail precisely because it
-    /// worked, and an absent button says only that some run is over. The status is the
+    /// worked. A missing button does not tell us why it disappeared. The status is the
     /// single fact that separates a run that was stopped from one that finished on its
     /// own, and EC writes "Conversion stopped" for the first and "Conversion complete"
     /// for the second.
@@ -279,8 +325,7 @@ internal sealed class EcGuiDriver : IDisposable
     /// </remarks>
     private void CancelAndConfirmStopped()
     {
-        bool pressAttempted = false;
-        Exception? uncertainPress = null;
+        var attempt = new CancellationAttempt(PressAttempted: false);
 
         string? finalStatus = WaitFor(
             () =>
@@ -293,7 +338,7 @@ internal sealed class EcGuiDriver : IDisposable
                 if (FinalConversionStatus() is string status)
                     return status;
 
-                if (!pressAttempted)
+                if (!attempt.PressAttempted)
                 {
                     AutomationElement? cancel = FindById(MainWindow, "btnCancel");
 
@@ -302,7 +347,7 @@ internal sealed class EcGuiDriver : IDisposable
                         try
                         {
                             Invoke(cancel);
-                            pressAttempted = true;
+                            attempt = attempt with { PressAttempted = true };
                         }
                         catch (Exception ex) when (
                             ex is not ElementNotEnabledException &&
@@ -310,8 +355,7 @@ internal sealed class EcGuiDriver : IDisposable
                                 or COMException
                                 or InvalidOperationException)
                         {
-                            uncertainPress = ex;
-                            pressAttempted = true;
+                            attempt = new CancellationAttempt(PressAttempted: true, UncertainPress: ex);
                         }
                     }
                 }
@@ -321,78 +365,29 @@ internal sealed class EcGuiDriver : IDisposable
             Timeout,
             out Exception? lastError);
 
-        if (finalStatus is null)
-        {
-            // Only the uncertain press is added here: Expired already names whatever
-            // the wait was still retrying, which is where a refusal shows up.
-            throw Expired(
-                (pressAttempted
-                    ? "A Cancel press was attempted but the run never reported a final status."
-                    : "The driver could not find a Cancel button and the run never "
-                      + "reported a final status.")
-                + Blame(uncertainPress, null),
-                lastError);
-        }
+        CancellationDecision decision = CancellationPolicy.Decide(finalStatus, attempt, lastError);
 
-        // Three outcomes, and only one of them is about cancellation. Collapsing the
-        // rest into "cancellation was not exercised" would report a conversion that
-        // failed - which EC says outright - as a problem with this phase's timing.
-        if (finalStatus.Contains("Conversion stopped", StringComparison.Ordinal))
+        if (decision.Outcome == CancellationOutcome.Stopped)
             return;
 
-        if (finalStatus.Contains("Conversion complete", StringComparison.Ordinal))
-        {
-            throw new GuiDriverException(
-                "Cancellation was not exercised: the run finished before it could be "
-                + "stopped. EC reported: " + finalStatus
-                + Blame(uncertainPress, lastError));
-        }
+        if (decision.Outcome == CancellationOutcome.TimedOut)
+            throw Expired(decision.Message, lastError);
 
-        throw new GuiDriverException(
-            "The conversion neither stopped nor completed, so this phase proved nothing "
-            + "about cancellation. EC reported: " + finalStatus
-            + Blame(uncertainPress, lastError));
+        throw new GuiDriverException(decision.Message);
     }
 
-    /// <summary>
-    /// Names why the press did not stop the run, so a run that finished uncancelled is
-    /// not reported as a machine that was simply too fast.
-    /// </summary>
-    /// <remarks>
-    /// The two are different evidence and read differently. An uncertain press may have
-    /// landed and was deliberately not repeated. A refusal certainly delivered nothing
-    /// and was retried for as long as the run lasted, and arrives as
-    /// <paramref name="lastRefusal"/> - the error the wait was still holding, which it
-    /// keeps only when the refusal was the most recent thing to happen.
-    /// </remarks>
-    private static string Blame(Exception? uncertainPress, Exception? lastRefusal)
-    {
-        if (uncertainPress is not null)
-        {
-            return " The Cancel press failed with an unknown outcome and was not repeated: "
-                   + $"{uncertainPress.GetType().Name}: {uncertainPress.Message}";
-        }
-
-        if (lastRefusal is ElementNotEnabledException)
-        {
-            return " The last attempt to press Cancel was refused: "
-                   + $"{lastRefusal.GetType().Name}: {lastRefusal.Message}";
-        }
-
-        return string.Empty;
-    }
-
-    /// <summary>Waits until the status line contains <paramref name="fragment"/>.</summary>
+    /// <summary>Waits for EC to report these exact stopped-conversion counts.</summary>
     /// <remarks>
     /// The window enables its buttons before it assigns the final status, so a run that
     /// has returned to idle may still be showing the previous message. A phase that reads
     /// the status the moment the buttons come back can therefore read the old one. Waiting
     /// for the text itself closes that window; a sleep would only make it less likely.
     /// </remarks>
-    internal void WaitForStatus(string fragment)
+    internal void WaitForStoppedConversionCounts(StoppedConversionCounts expected)
     {
         if (WaitFor(
-                () => StatusLine()?.Contains(fragment, StringComparison.Ordinal) == true
+                () => ConversionStatusText.TryReadStoppedCounts(StatusLine(), out StoppedConversionCounts actual)
+                      && actual == expected
                     ? new object()
                     : null,
                 Timeout,
@@ -401,13 +396,9 @@ internal sealed class EcGuiDriver : IDisposable
             return;
         }
 
-        // Read once more here rather than in the message passed in, so the failure shows
-        // what was on screen when the wait gave up - and safely, because reading it is
-        // another automation call and must not replace the timeout it is describing.
         throw Expired(
-            $"The status line never showed '{fragment}'."
-            + Safely(() => " It showed: " + StatusText(),
-                     " The status could not be read either"),
+            "The status line never reported exactly "
+            + $"{expected.Converted} converted and {expected.NotAttempted} not attempted.",
             lastError);
     }
 
@@ -419,7 +410,7 @@ internal sealed class EcGuiDriver : IDisposable
     /// any final conversion status. A status outlives the action that wrote it - the
     /// window clears it only when the next action starts - so accepting any of them lets
     /// a wait be satisfied by the previous action's report and return before the current
-    /// one has finished, so each caller names the headline its own action produces.
+    /// one has finished. Each caller therefore names its own expected headline.
     /// </remarks>
     private void WaitForMainReady(string expectedHeadline)
     {
@@ -436,128 +427,154 @@ internal sealed class EcGuiDriver : IDisposable
         }
 
         throw Expired(
-            $"EncodingChecker did not go idle: no '{expectedHeadline}' was reported."
-            + DescribeStatusSafely()
-            + DescribeIdleState(),
+            $"EncodingChecker did not go idle: no '{expectedHeadline}' was reported.",
             lastError);
     }
 
-    /// <summary>
-    /// Refuses the run when EC is alive but its window can no longer be reached.
-    /// </summary>
-    /// <remarks>
-    /// A wait that expires because the window went out of reach has measured nothing
-    /// about EC, and reporting it as a phase failure says the opposite. The check is
-    /// that the window cannot be found from the desktop at all while the process is
-    /// still running: a held element going stale would still leave a fresh lookup
-    /// working, and a genuinely hung EC would still leave the window findable.
-    ///
-    /// IsOffscreen is not the signal - it reads false for a window on another
-    /// virtual desktop.
-    /// </remarks>
-    private void RequireWindowStillReachable()
+    /// <summary>Collects timeout facts once; they are observations, not an atomic snapshot.</summary>
+    private WindowObservation ObserveMainWindow()
     {
-        if (!_windowWasFound)
-            return;
-
-        bool alive;
+        var errors = new List<string>();
+        bool? processAlive = null;
 
         try
         {
-            alive = !_process.HasExited;
+            processAlive = !_process.HasExited;
         }
-        catch (InvalidOperationException)
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
         {
-            return;
+            errors.Add(DescribeError("process state", ex));
         }
 
-        // EC having exited is EC's business, and the ordinary timeout reports it.
-        if (!alive)
-            return;
+        int nativeHandle = _nativeMainWindowHandle;
 
-        string lookupFailure = string.Empty;
-        bool found;
+        if (nativeHandle == 0)
+        {
+            try
+            {
+                _process.Refresh();
+                nativeHandle = _process.MainWindowHandle.ToInt32();
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+            {
+                errors.Add(DescribeError("native window handle", ex));
+            }
+        }
+
+        bool? nativeWindowExists = nativeHandle == 0
+            ? (errors.Count > 0 ? null : false)
+            : WindowBelongsToProcess(nativeHandle);
+        AutomationElement? fresh = null;
+        bool processWindowFound = false;
+        bool lookupFailed = false;
 
         try
         {
-            found = FindTopLevelWindow("MainForm") is not null;
+            fresh = FindTopLevelWindow("MainForm");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (IsAutomationReadFailure(ex))
         {
-            // The lookup is itself an automation call. Letting it throw would turn the
-            // very condition this exists to report back into a phase failure, and a
-            // lookup that cannot run is no basis for a verdict about EC either.
-            found = false;
-            lookupFailure =
-                $" Looking the window up again also failed: {ex.GetType().Name}: {ex.Message}.";
+            lookupFailed = true;
+            errors.Add(DescribeError("fresh window lookup", ex));
         }
 
-        if (found)
-            return;
+        if (fresh is not null)
+            processWindowFound = true;
+        else
+        {
+            try
+            {
+                processWindowFound = FindAnyTopLevelProcessWindow() is not null;
+            }
+            catch (Exception ex) when (IsAutomationReadFailure(ex))
+            {
+                lookupFailed = true;
+                errors.Add(DescribeError("process window lookup", ex));
+            }
+        }
 
-        throw new GuiEnvironmentException(
-            "EncodingChecker is still running, but its window can no longer be reached "
-            + "through UI Automation, so this phase could not be verified and no verdict "
-            + "about EC is reported - it may already have converted files. This is what "
-            + "happens when the window is moved to another virtual desktop, or the "
-            + "interactive session goes away. Run the suite on the active desktop of an "
-            + "interactive Windows session."
-            + lookupFailure
-            + DescribeIdleState());
+        bool? onCurrentDesktop = null;
+        if (nativeWindowExists == true)
+        {
+            try
+            {
+                onCurrentDesktop = DesktopLocation.IsCurrent((nint)nativeHandle);
+            }
+            catch (Exception ex) when (ex is COMException or InvalidCastException)
+            {
+                errors.Add(DescribeError("virtual desktop lookup", ex));
+            }
+        }
+
+        GuiReachability reachability = GuiReachabilityPolicy.Classify(
+            fresh is not null,
+            processWindowFound,
+            processAlive,
+            nativeWindowExists,
+            lookupFailed,
+            onCurrentDesktop);
+
+        bool? reviewPresent = null;
+        bool? statusBarFound = null;
+        bool? statusBarReadable = null;
+        bool? offscreen = null;
+        string? status = null;
+
+        if (fresh is not null)
+        {
+            try
+            {
+                reviewPresent = FindReviewWindow(fresh) is not null;
+            }
+            catch (Exception ex) when (IsAutomationReadFailure(ex))
+            {
+                errors.Add(DescribeError("review lookup", ex));
+            }
+
+            try
+            {
+                AutomationElement? bar = FindById(fresh, "statusBar");
+                statusBarFound = bar is not null;
+
+                if (bar is not null)
+                {
+                    status = VisibleText(bar);
+                    statusBarReadable = true;
+                }
+            }
+            catch (Exception ex) when (IsAutomationReadFailure(ex))
+            {
+                statusBarReadable = false;
+                errors.Add(DescribeError("status-bar read", ex));
+            }
+
+            try
+            {
+                offscreen = fresh.Current.IsOffscreen;
+            }
+            catch (Exception ex) when (IsAutomationReadFailure(ex))
+            {
+                errors.Add(DescribeError("offscreen state", ex));
+            }
+        }
+
+        return new WindowObservation(
+            reachability,
+            processAlive,
+            nativeHandle,
+            nativeWindowExists,
+            processWindowFound,
+            reviewPresent,
+            statusBarFound,
+            statusBarReadable,
+            offscreen,
+            status,
+            errors.AsReadOnly(),
+            onCurrentDesktop);
     }
 
-    /// <summary>
-    /// What could still be established about the window when a wait for idle gave up.
-    /// </summary>
-    /// <remarks>
-    /// A timeout otherwise says only that something expected did not arrive, which is the
-    /// position EC-28 left: a phase A failure whose diagnostic showed window chrome and
-    /// nothing else, with no way to tell afterwards whether the process had died, the
-    /// review was still open, the held main-window element had gone stale while the
-    /// window was healthy, or the status bar simply could not be found. These four
-    /// separate those, and each is gathered on its own so one unreadable answer does not
-    /// cost the others.
-    ///
-    /// The window is also looked up again from the desktop, because the held element
-    /// answering while its subtree holds only chrome has two very different
-    /// explanations: the element went stale and a fresh one would work, or the window
-    /// itself is unreachable - not on the active desktop, or offscreen - in which case a
-    /// fresh lookup fails the same way and retrying anything is pointless.
-    /// </remarks>
-    private string DescribeIdleState() =>
-        " Process alive: " + Ask(() => _process.HasExited ? "no" : "yes")
-        + "; main window handle: " + Ask(() => MainWindow.Current.NativeWindowHandle.ToString())
-        + "; review present: " + Ask(() => FindReviewWindow() is not null ? "yes" : "no")
-        + "; status bar found: "
-        + Ask(() => FindById(MainWindow, "statusBar") is not null ? "yes" : "no")
-        + "; status bar readable: " + Ask(() => StatusLine() is null ? "no" : "yes")
-        + "; window found afresh: " + Ask(() => FindTopLevelWindow("MainForm") is null
-            ? "no"
-            : "yes")
-        + "; handle afresh: " + Ask(() =>
-            FindTopLevelWindow("MainForm") is AutomationElement fresh
-                ? fresh.Current.NativeWindowHandle.ToString()
-                : "n/a")
-        + "; status bar via fresh window: " + Ask(() =>
-            FindTopLevelWindow("MainForm") is AutomationElement fresh
-                && FindById(fresh, "statusBar") is not null
-                    ? "yes"
-                    : "no")
-        + "; window offscreen: " + Ask(() => MainWindow.Current.IsOffscreen ? "yes" : "no")
-        + ".";
-
-    /// <summary>One fact for a diagnostic, or why it could not be had.</summary>
-    private static string Ask(Func<string> fact)
-    {
-        try
-        {
-            return fact();
-        }
-        catch (Exception ex)
-        {
-            return "unknown (" + ex.GetType().Name + ")";
-        }
-    }
+    private static string DescribeError(string operation, Exception error) =>
+        $"{operation}: {error.GetType().Name}: {error.Message}";
 
     /// <summary>
     /// Waits for something the operation itself produced, rather than for a button.
@@ -579,7 +596,7 @@ internal sealed class EcGuiDriver : IDisposable
         }
 
         throw Expired(
-            what + DescribeStatusSafely(),
+            what,
             lastError);
     }
 
@@ -590,33 +607,24 @@ internal sealed class EcGuiDriver : IDisposable
          status.Contains("do not have the correct encoding", StringComparison.Ordinal));
 
     /// <summary>
-    /// The status bar's text, or null when it cannot be read just now.
+    /// The status bar's text, or null while it is not exposed.
     /// </summary>
     /// <remarks>
     /// Only the status bar's own subtree is read. Scanning the whole window means walking
     /// every result row - a thousand of them in the interrupted-run phase, while they
     /// are still being added - which is both slow to repeat every 50 ms and prone to
     /// enumerating an element that disappears mid-walk.
-    ///
-    /// A read that loses that race returns null rather than throwing: not being able to
-    /// see the status is not evidence that an operation finished, so a caller waits on.
+    /// Automation failures flow to the wait, which retries them and keeps their cause.
+    /// Turning them into null would make a failed read indistinguishable from no status.
     /// </remarks>
     private string? StatusLine()
     {
-        try
-        {
-            AutomationElement? bar = FindById(MainWindow, "statusBar");
+        AutomationElement? bar = FindById(MainWindow, "statusBar");
 
-            if (bar is null)
-                return null;
-
-            return VisibleText(bar);
-        }
-        catch (Exception ex) when (
-            ex is ElementNotAvailableException or InvalidOperationException or COMException)
-        {
+        if (bar is null)
             return null;
-        }
+
+        return VisibleText(bar);
     }
 
     private bool ConversionHasFinished() => FinalConversionStatus() is not null;
@@ -641,15 +649,15 @@ internal sealed class EcGuiDriver : IDisposable
         status.Contains("Preview complete", StringComparison.Ordinal) ||
         status.Contains("Preview cancelled", StringComparison.Ordinal);
 
-    private AutomationElement WaitForReview(int previousHandle = 0)
+    private GuiReview WaitForReview(GuiWindowIdentity? previous = null)
     {
-        AutomationElement? review = WaitFor(
+        GuiReview? review = WaitFor(
             () =>
             {
                 AutomationElement? candidate = FindReviewWindow();
                 return candidate is not null &&
-                       candidate.Current.NativeWindowHandle != previousHandle
-                    ? candidate
+                       GuiWindowIdentity.IsReplacement(candidate, previous)
+                    ? new GuiReview(candidate, CaptureIdentity(candidate))
                     : null;
             },
             Timeout,
@@ -658,25 +666,8 @@ internal sealed class EcGuiDriver : IDisposable
         if (review is not null)
             return review;
 
-        throw Expired(
-            "The conversion review did not appear." + DescribeWindowsSafely(),
-            lastError);
+        throw Expired("The conversion review did not appear.", lastError);
     }
-
-    /// <summary>
-    /// The window list explains an unexpected modal dialog; the retried error explains why
-    /// normal discovery failed. Both are wanted, so listing the windows must never throw:
-    /// it is itself an automation call, and the failure it would replace is the more
-    /// important one. A listing that fails says why, alongside that error rather than
-    /// instead of it.
-    /// </summary>
-    private string DescribeStatusSafely() =>
-        Safely(() => " The status showed: " + StatusText(),
-               " The status could not be read");
-
-    private string DescribeWindowsSafely() =>
-        Safely(() => " EC exposed these windows: " + DescribeTopLevelWindows(),
-               " The windows could not be listed either");
 
     /// <summary>
     /// Builds a piece of a failure message that is itself an automation call, and never
@@ -696,19 +687,62 @@ internal sealed class EcGuiDriver : IDisposable
         }
     }
 
+    /// <summary>Reads through a freshly found main window.</summary>
+    private T ReadMainWindow<T>(Func<AutomationElement, T> read, string timeoutMessage)
+    {
+        ReadResult<T>? result = WaitFor(
+            () => FindTopLevelWindow("MainForm") is { } main
+                ? new ReadResult<T>(read(main))
+                : null,
+            Timeout,
+            out Exception? lastError);
+
+        return result is not null
+            ? result.Value
+            : throw Expired(timeoutMessage, lastError);
+    }
+
+    /// <summary>Reads an expected review only after finding it again.</summary>
+    private T ReadReview<T>(
+        GuiReview review,
+        Func<AutomationElement, T> read,
+        string timeoutMessage)
+    {
+        GuiWindowIdentity identity = review.Identity;
+        ReadResult<T>? result = WaitFor(
+            () =>
+            {
+                AutomationElement? main = FindTopLevelWindow("MainForm");
+                AutomationElement? current = main is null ? null : FindReviewWindow(main);
+
+                return current is not null &&
+                       MatchesReview(current, identity)
+                    ? new ReadResult<T>(read(current))
+                    : null;
+            },
+            Timeout,
+            out Exception? lastError);
+
+        return result is not null
+            ? result.Value
+            : throw Expired(timeoutMessage, lastError);
+    }
+
     /// <summary>The conversion review, if EC currently has one open.</summary>
     /// <remarks>
-    /// The review is an immediate child of the main window, so it is looked for there.
-    /// Searching the desktop instead means repeatedly walking unrelated applications, on
-    /// every poll of several waits.
+    /// The review is an owned child of the main window, so it is looked for there rather
+    /// than by walking every application on the desktop. Preflight opens a real review
+    /// through this method before any phase runs, making that ownership a checked contract.
     ///
     /// Automation errors are deliberately not caught: returning null for one would say
     /// the review is absent when the truth is that nothing could be read, and the waits
     /// that call this already retry and keep the error.
     /// </remarks>
-    private AutomationElement? FindReviewWindow()
+    private AutomationElement? FindReviewWindow() => FindReviewWindow(MainWindow);
+
+    private AutomationElement? FindReviewWindow(AutomationElement main)
     {
-        var condition = new AndCondition(
+        var reviewCondition = new AndCondition(
             new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window),
             new OrCondition(
                 new PropertyCondition(
@@ -718,8 +752,16 @@ internal sealed class EcGuiDriver : IDisposable
                     AutomationElement.NameProperty,
                     "Review conversion")));
 
-        return MainWindow.FindFirst(TreeScope.Children, condition);
+        return main.FindFirst(TreeScope.Children, reviewCondition);
     }
+
+    private sealed record ReadResult<T>(T Value);
+
+    private GuiWindowIdentity CaptureIdentity(AutomationElement window) =>
+        new(window.Current.NativeWindowHandle, window.Current.ProcessId, window.GetRuntimeId());
+
+    private static bool MatchesReview(AutomationElement window, GuiWindowIdentity identity) =>
+        identity.Matches(window);
 
     private int ResultCount() =>
         FindById(MainWindow, "lstResults") is AutomationElement list
@@ -727,11 +769,11 @@ internal sealed class EcGuiDriver : IDisposable
             : 0;
 
     private void SetRefusedFileChecked(
-        AutomationElement review,
+        GuiReview review,
         string fileName,
         bool value)
     {
-        AutomationElement list = RequireById(review, "lstRefusedFiles");
+        AutomationElement list = RequireById(review.Element, "lstRefusedFiles");
         AutomationElement item = WaitForElement(
             () => FindItem(list, fileName),
             $"The refused-file row '{fileName}' was not found.");
@@ -898,6 +940,9 @@ internal sealed class EcGuiDriver : IDisposable
                 AutomationElement.AutomationIdProperty,
                 automationId));
 
+    private static bool IsAutomationReadFailure(Exception error) =>
+        error is ElementNotAvailableException or InvalidOperationException or COMException;
+
     private AutomationElement? FindTopLevelWindow(string automationId)
     {
         var condition = new AndCondition(
@@ -913,6 +958,11 @@ internal sealed class EcGuiDriver : IDisposable
 
         return AutomationElement.RootElement.FindFirst(TreeScope.Children, condition);
     }
+
+    private AutomationElement? FindAnyTopLevelProcessWindow() =>
+        AutomationElement.RootElement.FindFirst(
+            TreeScope.Children,
+            new PropertyCondition(AutomationElement.ProcessIdProperty, _process.Id));
 
     private AutomationElement? FindProcessWindowByTitle(string title)
     {
@@ -976,23 +1026,6 @@ internal sealed class EcGuiDriver : IDisposable
             ? ((TogglePattern)rawToggle).Current.ToggleState.ToString()
             : "no TogglePattern";
 
-    private string DescribeTopLevelWindows()
-    {
-        AutomationElementCollection windows = AutomationElement.RootElement.FindAll(
-            TreeScope.Children,
-            new PropertyCondition(
-                AutomationElement.ProcessIdProperty,
-                _process.Id));
-
-        string[] descriptions =
-        [
-            .. windows.Cast<AutomationElement>().Select(window =>
-                $"'{window.Current.Name}' (id '{window.Current.AutomationId}')")
-        ];
-
-        return descriptions.Length == 0 ? "none" : string.Join(", ", descriptions);
-    }
-
     private static AutomationElement? FindNamedControl(
         AutomationElement root,
         ControlType type,
@@ -1007,19 +1040,26 @@ internal sealed class EcGuiDriver : IDisposable
                     AutomationElement.NameProperty,
                     name)));
 
-    private AutomationElement? FindWindow(int handle)
+    private GuiWindowIdentity RequireOpenWindowIdentity(AutomationElement window, string description)
     {
-        AutomationElementCollection windows = AutomationElement.RootElement.FindAll(
-            TreeScope.Children,
-            new PropertyCondition(
-                AutomationElement.ProcessIdProperty,
-                _process.Id));
+        GuiWindowIdentity identity = CaptureIdentity(window);
 
-        return windows.Cast<AutomationElement>().FirstOrDefault(window =>
-            window.Current.NativeWindowHandle == handle);
+        if (identity.Handle == 0 || !WindowBelongsToProcess(identity.Handle))
+            throw new GuiDriverException($"The {description} was not open before the action.");
+
+        return identity;
     }
 
-    private bool WindowExists(int handle) => FindWindow(handle) is not null;
+    private void WaitForWindowToClose(GuiWindowIdentity identity, string timeoutMessage) =>
+        WaitUntil(() => !WindowStillMatches(identity), timeoutMessage);
+
+    private bool WindowStillMatches(GuiWindowIdentity identity)
+    {
+        if (!WindowBelongsToProcess(identity.Handle))
+            return false;
+
+        return identity.Matches(AutomationElement.FromHandle((nint)identity.Handle));
+    }
 
     private AutomationElement WaitForElement(
         Func<AutomationElement?> probe,
@@ -1028,10 +1068,8 @@ internal sealed class EcGuiDriver : IDisposable
         ?? throw Expired(timeoutMessage, lastError);
 
     /// <param name="lastError">
-    /// The last error retried, when the probe was still failing at the end. A poll that
-    /// answers cleanly clears it, so this reports the cause of a wait that kept throwing
-    /// rather than one that simply never became true - which is the case a bare timeout
-    /// cannot explain by itself.
+    /// The latest automation error seen while waiting. A later empty read does not erase
+    /// it: both facts matter when the expected result never appears.
     /// There is deliberately no overload without it, so a wait that reports a timeout
     /// cannot leave the cause out by accident. Only a caller with nothing to report
     /// discards it, and no wait in this driver currently does.
@@ -1050,8 +1088,6 @@ internal sealed class EcGuiDriver : IDisposable
 
                 if (value is not null)
                     return value;
-
-                lastError = null;
             }
             catch (ElementNotAvailableException ex)
             {
@@ -1107,20 +1143,29 @@ internal sealed class EcGuiDriver : IDisposable
     /// A timeout that names the error it kept retrying. A probe that threw every time is
     /// the likeliest reason a wait expired, and every wait in this class reports it.
     /// </summary>
-    private TimeoutException Expired(string message, Exception? lastError)
+    private Exception Expired(string message, Exception? lastError)
     {
-        // Every timeout in this driver is built here, which makes it the one place that
-        // can ask whether EC's window was still reachable when the wait gave up. Asking
-        // only in the idle wait was not enough: a desktop excursion during phase C timed
-        // out in a control lookup instead, so the check never ran and the phase blamed EC.
-        RequireWindowStillReachable();
+        WindowObservation observation = WindowObservation.Capture(ObserveMainWindow);
+        string fullMessage = message
+            + (lastError is null
+                ? string.Empty
+                : " Last observed automation error: "
+                  + $"{lastError.GetType().Name}: {lastError.Message}.")
+            + observation.Describe();
+        var timeout = new GuiWaitException(fullMessage, observation, lastError);
 
-        return lastError is null
-            ? new TimeoutException(message)
-            : new TimeoutException(
-                $"{message} Last retried automation error: "
-                + $"{lastError.GetType().Name}: {lastError.Message}",
-                lastError);
+        if (observation.Reachability != GuiReachability.EnvironmentUnavailable)
+            return timeout;
+
+        _environmentUnavailable = true;
+        return new GuiEnvironmentException(
+            "The test could not observe EncodingChecker. Windows confirms its live window "
+            + "is on another virtual desktop, and UI Automation cannot see that process. "
+            + "The phase is inconclusive. Keep the EC window "
+            + "on the active, unlocked Windows desktop and run the phase again. "
+            + "Original wait: " + fullMessage,
+            observation,
+            timeout);
     }
 
     /// <summary>
@@ -1144,19 +1189,51 @@ internal sealed class EcGuiDriver : IDisposable
         mouse_event(MouseLeftUp, 0, 0, 0, UIntPtr.Zero);
     }
 
-    public void Dispose()
-    {
-        if (!_process.HasExited)
+    public void Dispose() => GuiCleanup.Run(
+        () =>
         {
-            _process.Kill(entireProcessTree: true);
-            _process.WaitForExit(5_000);
-        }
+            if (_process.HasExited)
+                return;
 
-        _process.Dispose();
+            // A handle may have been reused by another process since we recorded it.
+            if (_environmentUnavailable &&
+                WindowBelongsToProcess(_nativeMainWindowHandle) &&
+                PostMessage((nint)_nativeMainWindowHandle, WindowClose, 0, 0) &&
+                _process.WaitForExit((int)Timeout.TotalMilliseconds))
+            {
+                return;
+            }
+
+            _process.Kill(entireProcessTree: true);
+            if (!_process.WaitForExit(5_000))
+                throw new TimeoutException("EncodingChecker did not exit during cleanup.");
+        },
+        _process.Dispose,
+        _reportCleanupError);
+
+    private bool WindowBelongsToProcess(int handle)
+    {
+        if (handle == 0 || !IsWindow((nint)handle))
+            return false;
+
+        uint thread = GetWindowThreadProcessId((nint)handle, out uint owner);
+        return GuiWindowIdentity.BelongsToProcess(thread, owner, _process.Id);
     }
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
 
     private const uint MouseLeftDown = 0x0002;
     private const uint MouseLeftUp = 0x0004;
+    private const uint WindowClose = 0x0010;
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindow(nint window);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PostMessage(nint window, uint message, nint wParam, nint lParam);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

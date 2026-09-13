@@ -105,15 +105,22 @@ resulting bytes.
 
 ```powershell
 dotnet build sources/EncodingChecker.sln -c Release
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 sources/EncodingChecker.GuiSmoke/bin/Release/net10.0-windows/EncodingChecker.GuiSmoke.exe
 ```
 
-Exit 0 is a pass. Each run writes `gui-smoke-report.json` and `gui-smoke-report.md`
-carrying the EC version, the executable hash, and every phase's before and after file
-hashes. Driven against an ordinary Release build it also hashes the managed assembly
-beside the executable; driven against a single-file publish there is none, and it says so.
-Either way the executable is the artifact, and reproducing its hash from the tagged commit
-is what ties a release to its source.
+Exit `0` is a pass. Exit `1` means a check, the test tool, cleanup, or evidence collection
+failed. Exit `2` means an inconclusive run or a startup refusal. Neither nonzero result
+permits a release; the job summary explains which occurred.
+
+After the suite starts, all three outcomes are recorded and both report formats are
+attempted. A known startup refusal also records an inconclusive preflight report when its
+output folder is available. Storage failures may still prevent reports from being written;
+do not interpret missing evidence as a pass. The reports carry preflight and phase results,
+before and after file hashes, errors, window observations, and timings. Executable and
+managed-assembly hashes are captured before testing. A single-file publish has no loose
+assembly and says so. JSON readers should inspect `Outcome`, not only the compatibility
+field `Passed`.
 
 **[What each of the ten phases proves, and what it would catch →](GUI-SMOKE-TEST.md)**
 
@@ -121,8 +128,8 @@ is what ties a release to its source.
 and push to master, against an ordinary Release build, as a required `gui-smoke` check.
 `release.yml` runs them again against the published framework-dependent executable —
 a file that ships, not a rebuild of the same commit — after the signing step and before
-packaging, and uploads the report as a `gui-smoke-evidence` artifact. A failure there
-stops the release.
+packaging, and uploads the report as a `gui-smoke-evidence` artifact. A failure or an
+inconclusive result stops the release.
 
 Be precise about what that second run covers. Signing is conditional on the certificate
 secrets: when they are absent the step is skipped and the suite drives an **unsigned**
@@ -134,10 +141,11 @@ So a regression should be caught on the pull request. The release run remains th
 one that drives a file users receive. Run it locally while developing if you like;
 neither gate depends on your remembering to.
 
-Two prerequisites, each refused with exit 2 rather than reported as a pass: an
-interactive Windows desktop, which a hosted `windows-latest` runner provides, and a
-build carrying the review dialog's automation ids — no release up to and including
-v3.11.0 has them.
+The suite exits `2` for a build without the review dialog's automation ids — no release
+up to and including v3.11.0 has them — or when Windows confirms the live EC window is on
+another virtual desktop and automation cannot see the process. A failed lookup alone
+does not establish an environmental cause. Reports keep earlier results, attempt the
+affected phase's final snapshot, and record cleanup or snapshot errors separately.
 
 Status messages are never evidence on their own. Every phase checks files, and phase I
 checks the status line *against* the bytes on disk rather than trusting it.
@@ -154,9 +162,9 @@ checks the status line *against* the bytes on disk rather than trusting it.
 ### Record
 
 The ten phases record themselves. `gui-smoke-report.md` and `gui-smoke-report.json`
-already carry the EC version, the executable hash, the OS and .NET versions, and every
-phase's before and after file hashes — better evidence than a transcribed letter, and not
-subject to a typo.
+already carry the EC version, executable hash, OS and .NET versions, phase outcomes,
+before and after file hashes, and timings — better evidence than a transcribed letter,
+and not subject to a typo.
 
 They are uploaded as a workflow artifact and expire on GitHub's retention schedule. If a
 release needs them permanently, attach both files to the GitHub release; nothing does

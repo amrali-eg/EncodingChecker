@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=67 fixed=56 open=7 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
+<!-- backlog-counts total=70 fixed=59 open=7 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 67 findings — 56 fixed, 7 open, 1 not reproduced, 1 withdrawn,
+**Derived count: 70 findings — 59 fixed, 7 open, 1 not reproduced, 1 withdrawn,
 1 intentional behavior, and 1 design decision.** Recompute and check these
 figures with:
 
@@ -72,7 +72,10 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | EC-25 | The smoke suite never set the main window's target encoding | Fixed | — | — | [EC-25](#ec-25) |
 | EC-26 | The smoke driver trusted an enabled flag that had been seen stale | Fixed | — | — | [EC-26](#ec-26) |
 | EC-27 | The smoke driver read a status line the window had not written yet | Fixed | — | — | [EC-27](#ec-27) |
-| EC-28 | The smoke driver blamed EC when its idle wait lost access to the window | Fixed | — | — | [EC-28](#ec-28) |
+| EC-28 | The smoke driver's false blame is contained; the original access loss remains unexplained | Fixed | — | — | [EC-28](#ec-28) |
+| EC-29 | An unreadable review could be mistaken for a missing control | Fixed | — | — | [EC-29](#ec-29) |
+| EC-30 | An inconclusive GUI run discarded the evidence it had already gathered | Fixed | — | — | [EC-30](#ec-30) |
+| EC-31 | The driver did not really wait for owned dialogs to close | Fixed | — | — | [EC-31](#ec-31) |
 | EC-18 | EC repeated a BOM-less UTF-16 safety check unnecessarily | Fixed | — | — | [EC-18](#ec-18) |
 | EC-23 | Plan application assumed a required path existed instead of checking it | Fixed | — | — | [EC-23](#ec-23) |
 | BL-27 | GUI smoke reports could show an empty or misleading build hash | Fixed | — | — | [BL-27](#bl-27) |
@@ -1052,80 +1055,112 @@ itself.
 
 ### EC-28
 
-**Before:** a wait could expire because the driver had lost access to EC's
-controls, and the suite reported that as a phase failure - which reads as EC
-failing to finish work it had in fact finished.
+**Before:** when the driver lost access to EC's controls, it blamed EC for not
+finishing work that had in fact completed. The first correction was incomplete:
+it treated any failed fresh lookup as proof that the desktop was unavailable.
+That could hide a genuinely hung EC, whose UI Automation provider may itself fail
+to answer.
 
-**Now:** when the wait for the window to go idle expires, the driver first asks
-whether EC is still running and whether its window can be found from the desktop
-at all. If the process lives and the window cannot be reached, the run is refused
-rather than failed: `GuiEnvironmentException` says the phase could not be verified
-and that no verdict about EC is reported - it may already have converted files -
-and names the likely reasons. `Program` reports it with exit 2 alongside the other
-refused prerequisites, and no phase verdict is printed. A phase deliberately does
-not absorb it, because a phase result would be a verdict the run never earned.
+**Status:** the false-blame behavior is fixed. The original one-in-thirteen
+occurrence remains unexplained, so this is contained rather than fully
+root-caused.
 
-**The check began on the idle wait alone, and that was not enough.** A desktop
-excursion timed during phase C's source confirmation expired in a control lookup
-instead, so the check never ran and the phase blamed EC exactly as before. Every
-timeout in the driver is constructed in one place, so the question is asked there
-now and covers every wait.
+**Now:** one observation separates five answers. Finding the main window means it
+is reachable. Finding another window from the process means the desktop is
+reachable but the expected window is absent. A lookup that throws stays a test
+failure and keeps the original timeout and automation error. Unknown process or
+window information is recorded as unknown, not as absence. `INCONCLUSIVE` with
+exit `2` requires a live process, a native window owned by that process, no process
+window visible through UI Automation, and Windows itself confirming the window is
+on another virtual desktop. A hung provider alone must not satisfy that rule.
 
-The exception is startup: before the main window has ever been found, a window
-that cannot be found means EC failed to show one, which is EC's failure and keeps
-its own message. A flag set once the window is first seen separates the two.
+The diagnostic gathers its facts once rather than repeating the classification
+while composing the message. These queries are not an atomic snapshot: Windows
+can change between them. It includes exception messages, not only types. Status-reading
+errors flow through the normal retry path and are retained even if a later poll
+returns no text. The per-driver “window was once found” flag is gone, so losing
+the desktop before a later phase is handled by the same evidence.
 
-**What this does not do.** It does not stop access being lost. The suite still
-cannot drive a window it cannot see; it just no longer reports that as EC
-failing.
+The earlier desktop-moving experiment reproduced the unavailable state.
+That experiment proves the mechanism is possible, but not that it caused the
+original one-in-thirteen occurrence. The correction does not need that claim: it
+uses observable window and process facts rather than guessing the trigger.
 
-The lookup the check depends on is itself an automation call, and it is wrapped:
-a lookup that throws is reported inside the refusal rather than escaping to become
-the phase failure this exists to prevent.
+**Setup this settles:** the suite must run on the active, unlocked desktop of an
+interactive Windows session. A visible, reachable EC that times out is still a
+failure; an unobservable desktop is not a verdict about EC.
 
-**Reproduced on purpose, which is what closed it.** Sending EC's window to a
-non-active virtual desktop produces the fingerprint exactly. The excursion was
-verified with `IVirtualDesktopManager::IsWindowOnCurrentVirtualDesktop` rather
-than assumed - an early attempt read the state too soon after the hotkey and got
-the pre-switch answer, which would have made the whole experiment a control that
-could not fail.
+**Earlier controls:** an impossible completion message with a reachable EC produced
+`FAIL` and exit `1`. Forcing the final observation to lose the UIA window while
+the native window remained alive produced `INCONCLUSIVE` and exit `2` under the
+earlier, less strict rule. The current rule additionally requires the shell's
+desktop answer; automated classifier tests pin that distinction. Forcing
+the fresh lookup itself to throw a `COMException` stayed `FAIL` and retained that
+exception. Pointing the suite at Notepad kept the original “main window did not
+appear” failure instead of blaming the desktop.
 
-Hidden for longer than the thirty-second wait, phase C failed with the status
-showing only `File Encoding Checker | System Menu Bar | System | Minimize |
-Maximize | Close` and `status bar found: no`. Hidden briefly and returned inside
-the wait, the same phase passed - so access comes back when the window does.
+### EC-29
 
-**It is not a stale automation object.** The held element answered
-`NativeWindowHandle` without throwing, and looking the window up again from the
-desktop found nothing either: `window found afresh: no`. Reacquiring the element,
-which was the standing theory, would not have helped. `IsOffscreen` is no use as
-a signal either - it reads false for a window on another desktop, which is why
-the check is that the window cannot be found from the desktop while the process
-is alive.
+**Before:** some assertions read a held UI Automation object directly. When EC
+was on another desktop, looking for a control could return `null` without
+throwing. Phase B negated that answer and could therefore pass because the driver
+was blind, not because the control was truly absent.
 
-**EC is unchanged, and was never at fault.** The workspace preserved from the
-first spontaneous failure shows the conversion completed correctly: `french.txt`
-converted with a backup and a sidecar, `russian.txt` left in its legacy encoding
-exactly as the phase requires. The application did its work; the instrument went
-blind and blamed it.
+**Now:** every direct assertion first finds the current main window and, when
+needed, the current review, then performs the read on that fresh object. A missing
+control is accepted only after the review itself was positively found. The expected
+review's process, native handle and automation runtime identity are captured when
+it opens. A failed identity read cannot become “any review will do.” A confirmed
+desktop move is inconclusive; missing or failed observations otherwise keep the
+failure and its cause.
 
-**What remains unproven.** The original occurrence, one full-suite run in
-thirteen on 2026-09-10, happened with nobody switching desktops. A deliberate
-desktop excursion reproduces the fingerprint, but that does not establish it was
-the trigger that time; a locked session or a lost interactive desktop would look
-the same. The fix does not depend on knowing which: any occurrence now becomes a
-refusal rather than a false accusation, which is the harm that mattered on a
-required gate.
+The load-bearing control disabled fresh review discovery. Preflight then failed
+with a report saying the review could not be read; it did not accept the missing
+control as proof that a safe review was shown.
 
-**Controls.** With the window hidden past the timeout, the suite exits 2, prints
-the environment message, and prints no phase verdict at all - where the previous
-build printed `[FAIL] C`. On the active desktop, six consecutive full runs passed
-with no spurious refusal, so the check does not fire when the window is simply
-slow.
+### EC-30
 
-**Setup this settles:** the suite drives a real window and must run on the active
-desktop of an interactive Windows session. Unattended runs need a dedicated
-interactive session, not a background one.
+**Before:** an unavailable desktop escaped from the phase. No JSON or Markdown
+report was written, earlier passing phases disappeared, the affected phase's file
+snapshot was skipped, and cleanup could kill EC while it was still writing.
+
+**Now:** `PASS`, `FAIL`, and `INCONCLUSIVE` are separate recorded outcomes. An
+inconclusive phase stops later phases but keeps earlier results and attempts its
+final file snapshot. Cleanup failures cannot replace an earlier exception; they
+are recorded separately, fail the run and stop later phases. For a confirmed
+desktop move, cleanup first asks EC to close normally, then attempts to end the
+test process if needed. A failed snapshot is reported, not silently omitted.
+
+Build identity is captured before testing, so an unreadable executable after the
+phases cannot erase their results. Both report formats are attempted independently
+and each is written atomically. Storage failure can still prevent either report;
+it exits `1`. The CI and release summaries distinguish failure from an inconclusive
+run while blocking both. An earlier failed check remains a failure even if a later
+phase loses the desktop.
+
+The report format is version 2 and includes phase and total durations, making a
+performance regression visible in the evidence rather than only in a commit
+message. Automated tests exercise the actual phase loop for failed, inconclusive,
+cleanup and preflight paths, including snapshots and preserved earlier results.
+
+### EC-31
+
+**Before:** six waits looked for a review or warning only among the desktop's
+top-level windows. These dialogs are owned by EC's main window, so the lookup
+could not find them and each “wait for close” succeeded immediately.
+
+**Now:** closure is checked with the dialog's full automation identity: native
+handle, owning process, and runtime identity. This works for both owned and
+top-level windows and across virtual desktops. The identity is verified before
+the action, and the wait ends when it no longer identifies that same dialog. A
+new same-process dialog may reuse the old handle without being mistaken for the
+old one. This does not make checking an identity and acting on it atomic.
+Preflight also opens the owned review through the same
+main-window child lookup used by every phase, pinning the fast discovery path.
+
+Forcing the close predicate to stay false made preflight wait and fail with “the
+conversion review did not close.” That control would have returned immediately
+through the old desktop-child lookup.
 
 
 ## Decisions and mistakes that must remain visible
