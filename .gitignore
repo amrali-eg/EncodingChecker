@@ -445,3 +445,6 @@ MigrationBackup/
 # Safe to delete; kept ignored so a stale run does not dirty the tree.
 tools/smoke-state-*.json
 
+# Claude Code local settings: machine-specific permission overrides, never shared.
+**/.claude/settings.local.json
+
