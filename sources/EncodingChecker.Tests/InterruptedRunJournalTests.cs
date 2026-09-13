@@ -126,6 +126,41 @@ public sealed class InterruptedRunJournalTests : IDisposable
     }
 
     [Fact]
+    public void AppliedPlanCancellationMarksUnreachedPreviewRowsBeforeJournaling()
+    {
+        // -Apply starts from a plan, whose Convert actions are preview decisions until
+        // their write callbacks arrive. The CLI must make the same distinction as the
+        // GUI before writing a cancellation journal.
+        List<ConversionReportEntry> entries =
+        [
+            new()
+            {
+                FilePath = Path.Combine(_root, "reached.txt"),
+                SourceEncoding = "utf-8",
+                TargetEncoding = "utf-8",
+                Result = ConversionRowResult.Converted,
+            },
+            new()
+            {
+                FilePath = Path.Combine(_root, "unreached.txt"),
+                SourceEncoding = "utf-8",
+                TargetEncoding = "utf-8",
+                Result = ConversionRowResult.Converted,
+            },
+        ];
+
+        Program.MarkUnattemptedEntries(entries, [entries[0].FilePath]);
+
+        ConversionJournal journal = ConversionJournal.FromRun(
+            entries, _root, "utf-8", targetHasBom: false, backupEnabled: false,
+            explicitSource: null, surface: "CommandLine", DateTime.UtcNow,
+            appliedPlan: "plan.json");
+
+        Assert.Equal(ConversionStatus.Converted, journal.Entries[0].Status);
+        Assert.Equal(ConversionStatus.NotAttempted, journal.Entries[1].Status);
+    }
+
+    [Fact]
     public void FilesTheRunNeverReachedAreNotReportedAsConverted()
     {
         // The trap. Every entry arrives at the write pass already marked Converted by

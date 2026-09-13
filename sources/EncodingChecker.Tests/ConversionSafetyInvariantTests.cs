@@ -75,19 +75,23 @@ public sealed class ConversionSafetyInvariantTests : IDisposable
     }
 
     [Fact]
-    public void PostWriteVerificationFailure_RefusesAndLeavesTheSourceUnchanged()
+    public void DamagedTemporaryOutput_IsRefusedAndLeavesTheSourceUnchanged()
     {
-        // An encoding whose code page cannot be rebuilt keeps its own codecs, so
-        // strict reconstruction must fail before a substituting codec can write.
+        // Simulate the failure this test is named for: output is altered after the
+        // streaming writer closes it, but before EC verifies or installs it.
         string path = Path.Combine(_root, "verify.txt");
         byte[] original = Encoding.UTF8.GetBytes("Привет мир");
         File.WriteAllBytes(path, original);
 
         ConversionResult result = EncodingConverter.Convert(
-            path, path, Encoding.UTF8, new SubstitutingEncoding(), new ConversionOptions());
+            path, path, Encoding.UTF8, new UTF8Encoding(false), new ConversionOptions
+            {
+                BeforeVerifyTemporaryOutput = temporaryOutput =>
+                    File.AppendAllText(temporaryOutput, "!", Encoding.UTF8),
+            });
 
         Assert.False(result.Success);
-        Assert.Equal(ConversionErrorCode.SourceDecodeError, result.ErrorCode);
+        Assert.Equal(ConversionErrorCode.VerificationFailed, result.ErrorCode);
         Assert.Equal(original, File.ReadAllBytes(path));
     }
 

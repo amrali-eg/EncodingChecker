@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=70 fixed=59 open=7 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
+<!-- backlog-counts total=73 fixed=62 open=7 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 70 findings — 59 fixed, 7 open, 1 not reproduced, 1 withdrawn,
+**Derived count: 73 findings — 62 fixed, 7 open, 1 not reproduced, 1 withdrawn,
 1 intentional behavior, and 1 design decision.** Recompute and check these
 figures with:
 
@@ -79,6 +79,9 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | EC-18 | EC repeated a BOM-less UTF-16 safety check unnecessarily | Fixed | — | — | [EC-18](#ec-18) |
 | EC-23 | Plan application assumed a required path existed instead of checking it | Fixed | — | — | [EC-23](#ec-23) |
 | BL-27 | GUI smoke reports could show an empty or misleading build hash | Fixed | — | — | [BL-27](#bl-27) |
+| BL-28 | The GUI CSV report could name detection instead of the source actually used | Fixed | — | — | [BL-28](#bl-28) |
+| BL-29 | Ctrl+C could skip a requested CLI journal | Fixed | — | — | [BL-29](#bl-29) |
+| BL-30 | A verification test stopped before reaching output verification | Fixed | — | — | [BL-30](#bl-30) |
 | EC-15 | Plans and journals showed fixed safety flags as if they recorded checks | Fixed | — | — | [EC-15](#ec-15) |
 | BL-18 | BOM-less UTF-16 could be detected and converted as UTF-32 | Fixed | — | — | [BL-18](#bl-18) |
 | EC-05 | An unreadable skipped or refused entry blocked the whole plan | Fixed | — | — | [EC-05](#ec-05) |
@@ -1161,6 +1164,38 @@ main-window child lookup used by every phase, pinning the fast discovery path.
 Forcing the close predicate to stay false made preflight wait and fail with “the
 conversion review did not close.” That control would have returned immediately
 through the old desktop-child lookup.
+
+### BL-28
+
+**The GUI CSV report now names the source encoding actually used.** A user can
+override automatic detection for a refused file. Conversion and the journal used
+that chosen encoding, but the CSV kept printing the older detected encoding. The
+file was converted correctly; the exported record was wrong.
+
+The CSV writer now uses the source label captured when conversion opened the
+file. A regression test covers a detected `windows-1250` file converted with an
+explicit `iso-8859-1` choice.
+
+### BL-29
+
+**Ctrl+C now finishes a requested CLI journal before returning.** Previously the
+direct and saved-plan command paths returned as soon as cancellation was seen.
+Some files could already have been converted, but no requested journal was
+written. For a saved plan, rows not reached by the write pass are now marked
+`NotAttempted` before the journal is saved, so a preview result is never reported
+as a completed conversion.
+
+The command still exits `4` for a successful cancellation. If the requested
+journal itself cannot be saved, it exits `3` and explains that the audit record
+could not be written.
+
+### BL-30
+
+**The output-verification test now reaches output verification.** Its old name
+claimed to test a damaged temporary output, but its custom encoding was rejected
+before EC wrote anything. The replacement test alters the completed temporary
+output immediately before verification. EC returns `VerificationFailed` and the
+original source bytes remain unchanged.
 
 
 ## Decisions and mistakes that must remain visible

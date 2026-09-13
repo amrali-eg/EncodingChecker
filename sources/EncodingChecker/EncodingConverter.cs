@@ -85,6 +85,12 @@ internal sealed record ConversionOptions
     /// Used by an approved plan to ensure the file has not changed since it was reviewed.
     /// </remarks>
     internal string? ExpectedSourceSha256 { get; init; }
+
+    /// <summary>
+    /// Test-only hook invoked after the temporary output is complete and before it is
+    /// verified. It lets regression tests prove a damaged output is never installed.
+    /// </summary>
+    internal Action<string>? BeforeVerifyTemporaryOutput { get; init; }
 }
 
 /// <summary>
@@ -396,6 +402,10 @@ internal static partial class EncodingConverter
                     TargetBytes = targetBytesWritten,
                 };
             }
+
+            // The test hook simulates storage corruption at the only point where it
+            // matters: after writing has finished, before verification and installation.
+            options.BeforeVerifyTemporaryOutput?.Invoke(tempPath);
 
             // Verify length, BOM, and decoded content before installation.
             VerificationOutcome verification = VerifyTarget(
