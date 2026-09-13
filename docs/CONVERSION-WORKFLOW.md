@@ -21,8 +21,9 @@ For a file that needs conversion, EC applies this policy:
 | ASCII, Unicode with a BOM, or text whose encoding EC can prove from its bytes | Convert automatically |
 | Legacy text or BOM-less Unicode whose encoding cannot be proven safely | Do not convert; ask you to choose the original encoding |
 
-A file that already matches the target encoding and BOM is reported as **Unchanged** and
-is not decoded or rewritten. No source choice is needed because no conversion occurs.
+A file that already matches the target encoding and BOM is still strictly validated in
+full. A valid file is reported as **Unchanged** and is not rewritten; an invalid file is
+reported as an error instead. No source choice is needed because no conversion occurs.
 
 If you choose a source encoding, EC uses it only to read the original bytes. It does not
 disable strict decoding, output verification, backup verification, or safe installation.

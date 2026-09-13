@@ -248,6 +248,11 @@ public sealed class ConversionSafetyInvariantTests : IDisposable
             SourceHasBom = false,
             TargetEncoding = "windows-1252",
             TargetHasBom = false,
+
+            // Without this, policy refuses the file before the dry-run branch is even
+            // reached (windows-1252 needs an explicit source), and the assertions below
+            // would hold trivially without exercising -WhatIf at all.
+            SourceEncodingWasSpecified = true,
         };
 
         var completed = new EntrySink();
@@ -256,6 +261,9 @@ public sealed class ConversionSafetyInvariantTests : IDisposable
             ScanEngine.DefaultMaxParallelism,
             whatIf: true, backup: false, completed.Add, CancellationToken.None);
 
+        // Confirms the file was actually eligible to convert, so preservation below is
+        // proof of dry-run behavior rather than an artifact of an earlier refusal.
+        Assert.Equal(ConversionRowResult.Converted, Assert.Single(completed).Result);
         Assert.Equal(original, File.ReadAllBytes(path));
         Assert.False(File.Exists(path + ".bak"));
     }

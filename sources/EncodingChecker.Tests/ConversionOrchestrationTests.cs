@@ -426,8 +426,9 @@ public sealed class ConversionOrchestrationTests : IDisposable
         byte[] jpBefore = File.ReadAllBytes(jp);
         byte[] plainBefore = File.ReadAllBytes(plain);
 
+        List<ConversionReportEntry> entries = View();
         OrchestrationResult result = Convert(
-            View(), _ => ConfirmationResponse.Cancel, backup: true);
+            entries, _ => ConfirmationResponse.Cancel, backup: true);
 
         Assert.Equal(OrchestrationOutcome.Cancelled, result.Outcome);
         Assert.Equal(jpBefore, File.ReadAllBytes(jp));
@@ -435,6 +436,14 @@ public sealed class ConversionOrchestrationTests : IDisposable
 
         // Not even a backup, which would be a modification of the directory.
         Assert.Empty(Directory.GetFiles(_root, "*.bak"));
+
+        // The decide pass marks plain.txt "would convert" before the user is even asked.
+        // Cancelling must not let that leak into the exported report as completed work.
+        Assert.All(entries, entry => Assert.True(entry.NotAttempted));
+
+        using var csv = new StringWriter();
+        ConversionReport.WriteCsv(entries, csv);
+        Assert.DoesNotContain("Converted", csv.ToString());
     }
 
     [Fact]
@@ -447,8 +456,9 @@ public sealed class ConversionOrchestrationTests : IDisposable
 
         byte[] stableBefore = File.ReadAllBytes(stable);
 
+        List<ConversionReportEntry> entries = View();
         OrchestrationResult result = Convert(
-            View(),
+            entries,
             Proceed,
             betweenPlanAndWrite: plan =>
             {
@@ -466,6 +476,14 @@ public sealed class ConversionOrchestrationTests : IDisposable
         // Neither file, not just the one that moved.
         Assert.Equal(stableBefore, File.ReadAllBytes(stable));
         Assert.Equal("changed underneath", File.ReadAllText(moving));
+
+        // Both entries were marked "would convert" by the decide pass before the plan was
+        // shown; going stale must not let that leak into the exported report as done work.
+        Assert.All(entries, entry => Assert.True(entry.NotAttempted));
+
+        using var csv = new StringWriter();
+        ConversionReport.WriteCsv(entries, csv);
+        Assert.DoesNotContain("Converted", csv.ToString());
     }
 
     [Fact]

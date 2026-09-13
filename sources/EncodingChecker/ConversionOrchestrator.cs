@@ -158,6 +158,10 @@ internal sealed class ConversionOrchestrator
             catch (InvalidOperationException ex)
             {
                 // An undecided entry means the caller failed to provide a complete plan.
+                // The decide pass above already marked some entries "would convert"; no
+                // write pass will ever reach them now.
+                ConversionReportEntry.MarkUnattempted(entries, []);
+
                 return new OrchestrationResult
                 {
                     Outcome = OrchestrationOutcome.CouldNotPlan,
@@ -169,6 +173,10 @@ internal sealed class ConversionOrchestrator
 
             if (response.Choice == ConfirmationChoice.Cancel)
             {
+                // The decide pass already marked some entries "would convert"; the write
+                // pass that would have made that true is never going to run.
+                ConversionReportEntry.MarkUnattempted(entries, []);
+
                 return new OrchestrationResult
                 {
                     Outcome = OrchestrationOutcome.Cancelled,
@@ -182,6 +190,8 @@ internal sealed class ConversionOrchestrator
                 if (!ApplyChosenSource(
                         response.SourceEncoding, response.Files, entries))
                 {
+                    ConversionReportEntry.MarkUnattempted(entries, []);
+
                     return new OrchestrationResult
                     {
                         Outcome = OrchestrationOutcome.Cancelled,
@@ -201,6 +211,10 @@ internal sealed class ConversionOrchestrator
 
             if (stale.Count > 0)
             {
+                // The decide pass already marked some entries "would convert"; the write
+                // pass that would have made that true is never going to run.
+                ConversionReportEntry.MarkUnattempted(entries, []);
+
                 return new OrchestrationResult
                 {
                     Outcome = OrchestrationOutcome.PlanWentStale,

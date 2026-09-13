@@ -34,7 +34,9 @@ both the output and backup have verified.
 | ASCII, Unicode with a BOM, or text whose encoding EC can prove from its bytes | Convert automatically. |
 | Legacy text or BOM-less Unicode whose encoding cannot be proven safely | Do not convert; ask you to choose the original encoding. |
 
-An unchanged file is reported as `Unchanged` and is not decoded or rewritten.
+A file already matching the target is strictly validated in full. A valid file
+is reported as `Unchanged` and is not rewritten; an invalid file is reported as
+an error instead.
 
 A source encoding chosen by the user controls only how EC reads the original
 bytes. It does not bypass any safety check.
