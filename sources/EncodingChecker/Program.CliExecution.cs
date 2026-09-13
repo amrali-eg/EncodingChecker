@@ -9,7 +9,8 @@ namespace EncodingChecker;
 
 internal static partial class Program
 {
-    private static int ApplyPlan(CliOptions options)
+    private static int ApplyPlan(CliOptions options, CancellationToken cancellationToken,
+        Action<ConversionReportEntry>? onEntry)
     {
         ConversionPlan? plan = ConversionPlan.Load(options.ApplyPath!, out string? loadError);
 
@@ -122,7 +123,7 @@ internal static partial class Program
                 })
         ];
 
-        using var cancellation = new CancellationTokenSource();
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var reached = new ConcurrentDictionary<string, byte>(
             StringComparer.OrdinalIgnoreCase);
         bool interrupted = false;
@@ -145,7 +146,11 @@ internal static partial class Program
                 options.MaxParallelism ?? ScanEngine.DefaultMaxParallelism,
                 whatIf: false,
                 backup: plan.BackupEnabled,
-                entry => reached.TryAdd(entry.FilePath, 0),
+                entry =>
+                {
+                    reached.TryAdd(entry.FilePath, 0);
+                    onEntry?.Invoke(entry);
+                },
                 cancellation.Token);
         }
         catch (OperationCanceledException)
@@ -153,7 +158,7 @@ internal static partial class Program
             // Planned rows retain their preview result until the write pass reaches
             // them. Mark the remainder explicitly so the journal never claims work
             // that Ctrl+C prevented.
-            MarkUnattemptedEntries(entries, reached.Keys);
+            ConversionReportEntry.MarkUnattempted(entries, reached.Keys);
 
             Console.Error.WriteLine("Cancelled.");
             interrupted = true;
@@ -175,7 +180,8 @@ internal static partial class Program
         }
 
         Dictionary<ConversionRowResult, int> byResult =
-            completed.GroupBy(e => e.Result).ToDictionary(g => g.Key, g => g.Count());
+            completed.Where(e => !e.NotAttempted)
+                .GroupBy(e => e.Result).ToDictionary(g => g.Key, g => g.Count());
 
         int Count(ConversionRowResult result) => byResult.GetValueOrDefault(result);
 
@@ -194,7 +200,8 @@ internal static partial class Program
                     plan.ExplicitSourceEncoding,
                     surface: "CommandLine",
                     startedUtc,
-                    appliedPlan: options.ApplyPath)
+                    appliedPlan: options.ApplyPath,
+                    interrupted: interrupted)
                 .Save(options.JournalPath!);
 
             if (journalError != null)
@@ -214,7 +221,8 @@ internal static partial class Program
                 + $"{Count(ConversionRowResult.Unchanged)} unchanged, "
                 + $"{Count(ConversionRowResult.Skipped)} skipped, "
                 + $"{Count(ConversionRowResult.Refused)} refused, "
-                + $"{failed} failed.");
+                + $"{failed} failed, "
+                + $"{completed.Count(e => e.NotAttempted)} not attempted.");
         }
 
         return runFailed
@@ -222,33 +230,6 @@ internal static partial class Program
             : interrupted ? 4
             : completed.Any(e => e.Result == ConversionRowResult.Refused) ? 5 : 0;
     }
-
-    /// <summary>
-    /// Marks planned rows the cancelled write pass did not report as completed.
-    /// </summary>
-    /// <remarks>
-    /// A plan stores preview results, including <c>Converted</c>. Without this marker,
-    /// a journal written after Ctrl+C would present an unreached preview as a completed
-    /// conversion.
-    /// </remarks>
-    internal static void MarkUnattemptedEntries(
-        IEnumerable<ConversionReportEntry> entries,
-        IEnumerable<string> reachedPaths)
-    {
-        var reached = new HashSet<string>(reachedPaths, StringComparer.OrdinalIgnoreCase);
-
-        foreach (ConversionReportEntry entry in entries)
-            entry.NotAttempted = !reached.Contains(entry.FilePath);
-    }
-
-    // Internal so tests can pin this against -Apply's precedence without a real Ctrl+C.
-    /// <summary>The exit code for an interrupted scan, given what it found before Ctrl+C.</summary>
-    /// <remarks>
-    /// Mirrors -Apply's precedence: a file this run actually reached and failed on
-    /// outranks the cancellation itself, so both cancellable paths report the same
-    /// condition the same way.
-    /// </remarks>
-    internal static int ScanCancellationExitCode(bool hasError) => hasError ? 3 : 4;
 
     // Internal so tests can pin the published CLI exit-code contract.
     /// <summary>Returns the first output path known to be unusable before the run.</summary>
@@ -297,7 +278,9 @@ internal static partial class Program
         return null;
     }
 
-    internal static int RunConsoleMode(string[] args)
+    internal static int RunConsoleMode(string[] args,
+        CancellationToken cancellationToken = default,
+        Action<ConversionReportEntry>? onEntry = null)
     {
         if (args is ["--version"])
         {
@@ -336,7 +319,7 @@ internal static partial class Program
         }
 
         if (!string.IsNullOrWhiteSpace(options.ApplyPath))
-            return ApplyPlan(options);
+            return ApplyPlan(options, cancellationToken, onEntry);
 
         // A plan is a written preview, so it must never modify files.
         if (!string.IsNullOrWhiteSpace(options.PlanPath))
@@ -404,7 +387,7 @@ internal static partial class Program
 
         DateTime startedUtc = DateTime.UtcNow;
 
-        using var cancellation = new CancellationTokenSource();
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
         ConsoleCancelEventHandler cancelHandler = (_, e) =>
         {
@@ -421,7 +404,11 @@ internal static partial class Program
         {
             ScanEngine.ScanDirectory(
                 scanOptions,
-                collectedEntries.Add,
+                entry =>
+                {
+                    collectedEntries.Add(entry);
+                    onEntry?.Invoke(entry);
+                },
                 cancellation.Token,
                 onWarning: Console.Error.WriteLine);
         }
@@ -515,7 +502,8 @@ internal static partial class Program
                     surface: "CommandLine",
                     startedUtc,
                     appliedPlan: null,
-                    preview: options.WhatIf)
+                    preview: options.WhatIf,
+                    interrupted: scanInterrupted)
                 .Save(options.JournalPath!);
 
             if (journalError != null)
@@ -525,9 +513,6 @@ internal static partial class Program
                 return 3;
             }
         }
-
-        if (scanInterrupted)
-            return ScanCancellationExitCode(entries.Any(e => e.Result == ConversionRowResult.Error));
 
         if (!string.IsNullOrEmpty(options.ReportPath))
         {
@@ -543,6 +528,14 @@ internal static partial class Program
                 Console.Error.WriteLine($"Failed to write report file: {reportError}");
                 return 3;
             }
+        }
+
+        if (scanInterrupted)
+        {
+            if (!string.IsNullOrWhiteSpace(options.PlanPath))
+                Console.Error.WriteLine("The scan was interrupted. No new plan was written; any previous plan is unchanged.");
+
+            return entries.Any(e => e.Result == ConversionRowResult.Error) ? 3 : 4;
         }
 
         if (!string.IsNullOrWhiteSpace(options.PlanPath))

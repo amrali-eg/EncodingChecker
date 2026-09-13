@@ -278,11 +278,32 @@ public sealed class StaleConversionStateTests : IDisposable
     {
         // Detection and a user's source choice can disagree. The CSV must report the
         // codec that conversion actually used, not the older scan result.
-        ConversionReportEntry entry = Entry(
-            Path.Combine(_root, "explicit-report.txt"), "windows-1250");
-        entry.SourceEncodingWasSpecified = true;
-        entry.ResolvedSourceLabel = "iso-8859-1";
-        entry.Result = ConversionRowResult.Converted;
+        string path = Path.Combine(_root, "explicit-report.txt");
+        byte[] original = Encoding.GetEncoding("windows-1252").GetBytes(
+            "Le café coûte 80 € et le déjeuner est déjà prêt.");
+        File.WriteAllBytes(path, original);
+        var sink = new EntrySink();
+        ScanEngine.ScanDirectory(new ScanDirectoryOptions
+        {
+            BaseDirectory = _root,
+            Action = ScanAction.Detect,
+        }, sink.Add, CancellationToken.None);
+        ConversionReportEntry entry = Assert.Single(sink);
+        int reviews = 0;
+        var orchestrator = new ConversionOrchestrator(_ => reviews++ == 0
+            ? new ConfirmationResponse(ConfirmationChoice.ChooseSourceEncoding, "iso-8859-1", [path])
+            : ConfirmationResponse.Proceed);
+        OrchestrationResult result = orchestrator.Run(
+            [entry], _root, "utf-8", targetWriteBom: false, backup: false,
+            preview: false, maxParallelism: 1, onEntry: _ => { }, CancellationToken.None);
+        Assert.Equal(OrchestrationOutcome.Converted, result.Outcome);
+        Assert.Equal(ConversionRowResult.Converted, entry.Result);
+        Assert.False(string.IsNullOrWhiteSpace(entry.DetectedEncodingLabel));
+        Assert.NotEqual("iso-8859-1", entry.DetectedEncodingLabel);
+        string output = new UTF8Encoding(false, true).GetString(File.ReadAllBytes(path));
+        Assert.Equal(Encoding.Latin1.GetString(original), output);
+        Assert.Contains('\u0080', output);
+        Assert.DoesNotContain('\u20ac', output);
 
         string csv = ConversionReport.ToCsvString([entry]);
         string[] values = csv.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)[1]

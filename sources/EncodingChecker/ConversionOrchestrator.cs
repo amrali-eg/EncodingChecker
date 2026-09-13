@@ -236,8 +236,7 @@ internal sealed class ConversionOrchestrator
             catch (OperationCanceledException)
             {
                 // The preview result remains on files the write pass never reached.
-                foreach (ConversionReportEntry entry in entries)
-                    entry.NotAttempted = !reached.ContainsKey(entry.FilePath);
+                ConversionReportEntry.MarkUnattempted(entries, reached.Keys);
 
                 return new OrchestrationResult
                 {
@@ -256,7 +255,8 @@ internal sealed class ConversionOrchestrator
                         SingleExplicitSource(
                             entries, e => e.ResolvedSourceLabel ?? e.EffectiveSourceLabel),
                         surface: "Gui",
-                        startedUtc),
+                        startedUtc,
+                        interrupted: true),
                 };
             }
 

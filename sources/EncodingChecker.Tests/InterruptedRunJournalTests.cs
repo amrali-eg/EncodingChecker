@@ -117,6 +117,7 @@ public sealed class InterruptedRunJournalTests : IDisposable
 
         // The point of the fix: the record of the writes survives the cancellation.
         Assert.NotNull(result.Journal);
+        Assert.True(result.Journal.Interrupted);
         Assert.Equal(entries.Count, result.Journal!.Entries.Count);
 
         Assert.All(
@@ -149,7 +150,7 @@ public sealed class InterruptedRunJournalTests : IDisposable
             },
         ];
 
-        Program.MarkUnattemptedEntries(entries, [entries[0].FilePath]);
+        ConversionReportEntry.MarkUnattempted(entries, [entries[0].FilePath]);
 
         ConversionJournal journal = ConversionJournal.FromRun(
             entries, _root, "utf-8", targetHasBom: false, backupEnabled: false,
@@ -181,6 +182,11 @@ public sealed class InterruptedRunJournalTests : IDisposable
 
         int reportedNotAttempted = journal.Entries.Count(
             e => e.Status == ConversionStatus.NotAttempted);
+
+        using var csv = new StringWriter();
+        ConversionReport.WriteCsv(entries, csv);
+        Assert.Equal(reportedNotAttempted,
+            csv.ToString().Split('\n').Count(line => line.Contains(",NotAttempted,")));
 
         Assert.Equal(converted.Count, reportedConverted);
         Assert.Equal(entries.Count - converted.Count, reportedNotAttempted);
@@ -251,6 +257,7 @@ public sealed class InterruptedRunJournalTests : IDisposable
             preview: false, maxParallelism: 1, onEntry: _ => { }, cancellation.Token);
 
         Assert.Equal(OrchestrationOutcome.Converted, result.Outcome);
+        Assert.False(result.Journal!.Interrupted);
 
         JournalEntry recorded = Assert.Single(result.Journal!.Entries);
 

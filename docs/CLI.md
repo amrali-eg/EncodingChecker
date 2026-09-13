@@ -119,9 +119,19 @@ combined with conversion options.
 
 `-Quiet` and `-Verbose` cannot be combined.
 
-If a GUI conversion is interrupted after writing starts, its journal records
-completed and not-attempted files separately. A command-line Ctrl+C returns
-exit code 4; command-line interruption journals are not yet guaranteed.
+After cancellation, a requested journal is still saved with `Interrupted: true`
+(journal schema 6). GUI and saved-plan runs record known files not reached as
+`NotAttempted`. A direct scan records only the files it reached; its journal is
+not a complete list of the folder. Earlier journals lack this interruption flag.
+
+A requested CSV report is also saved for the files reached. Its `Result` column
+uses `NotAttempted` for unprocessed GUI rows, rather than claiming conversion.
+`Encoding` names the source used or attempted; for refused or unprocessed rows,
+it retains the scan result. It is not proof of the original encoding.
+
+An interrupted preflight does not write a new plan. Any existing plan is left
+unchanged, and stderr explains this. Ctrl+C returns 4 unless a processing or
+output-writing error requires 3.
 
 ## Examples
 
@@ -173,6 +183,6 @@ Prints the version and exits. It takes no other arguments and does not need
 
 When more than one applies, processing failure (3) wins over cancellation (4),
 which wins over safe refusal (5), which wins over `-FailOnChanges` (2). Both
-cancellable paths - a direct conversion and `-Apply` - use this precedence, so
-a file failure discovered before Ctrl+C landed is reported the same way from
-either command.
+cancellable paths - scans (conversion, detection, validation, and preflight)
+and `-Apply` - use this precedence. A file failure discovered before Ctrl+C
+is reported consistently across these modes.

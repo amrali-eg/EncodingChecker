@@ -36,6 +36,8 @@ public sealed class GuiSmokeSafetyTests : IDisposable
     [InlineData(false, false, true, false, false, "Absent")]
     [InlineData(false, false, null, true, false, "Unknown")]
     [InlineData(false, false, true, null, false, "Unknown")]
+    [InlineData(false, false, false, null, false, "Unknown")]
+    [InlineData(false, false, null, false, false, "Unknown")]
     [InlineData(false, true, null, null, false, "Absent")]
     [InlineData(false, true, true, true, true, "LookupFailed")]
     public void ReachabilityRequiresPositiveEvidenceForAnEnvironmentRefusal(
@@ -213,6 +215,15 @@ public sealed class GuiSmokeSafetyTests : IDisposable
         yield return ["Conversion complete: 400 converted, 0 unchanged, 0 skipped, 0 refused, 0 failed", false, null, false, "Completed", "finished before"];
         yield return ["Conversion failed.", false, null, false, "OtherFinalStatus", "neither stopped nor completed"];
         yield return [null, false, null, false, "TimedOut", "could not find a Cancel button"];
+        yield return [null, false, null, true, "TimedOut", "Cancel was disabled"];
+        yield return [null, true, "RPC timeout", false, "TimedOut", "RPC timeout"];
+        yield return [null, true, null, false, "TimedOut", "press was attempted"];
+    }
+
+    [Fact]
+    public void NoPhasesCannotEstablishSuccess()
+    {
+        Assert.Equal(SmokeOutcome.Inconclusive, Array.Empty<SmokeOutcome>().Overall());
     }
 
     [Theory]

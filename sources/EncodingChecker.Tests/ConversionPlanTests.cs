@@ -472,7 +472,7 @@ public sealed class ConversionPlanTests : IDisposable
         Assert.Equal(5, exitCode);
         Assert.Contains(
             "Applied plan: 2 selected, 1 converted, 0 unchanged, 0 skipped, "
-            + "1 refused, 0 failed.",
+            + "1 refused, 0 failed, 0 not attempted.",
             output);
     }
 

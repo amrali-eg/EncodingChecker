@@ -31,10 +31,12 @@ internal static class CancellationPolicy
         {
             string message = attempt.PressAttempted
                 ? "A Cancel press was attempted but the run never reported a final status."
-                : "The driver could not find a Cancel button and the run never reported a final status.";
+                : lastRefusal is ElementNotEnabledException
+                    ? "Cancel presses were refused and the run never reported a final status."
+                    : "The driver could not find a Cancel button and the run never reported a final status.";
             return new CancellationDecision(
                 CancellationOutcome.TimedOut,
-                message + DescribePressEvidence(attempt.UncertainPress, null));
+                message + DescribePressEvidence(attempt.UncertainPress, lastRefusal));
         }
 
         if (finalStatus.Contains("Conversion stopped", StringComparison.Ordinal))

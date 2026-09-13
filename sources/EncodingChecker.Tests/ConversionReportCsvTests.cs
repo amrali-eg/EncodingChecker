@@ -3,6 +3,17 @@ namespace EncodingChecker.Tests;
 /// <summary>ConversionReport.WriteCsv/ToCsvString — header shape, field quoting, and escaping.</summary>
 public sealed class ConversionReportCsvTests
 {
+    [Theory]
+    [InlineData("Refused", "utf-8")]
+    [InlineData("Error", "windows-1252")]
+    public void SourceLabelDistinguishesRefusalFromAnAttempt(string result, string expected)
+    {
+        var entry = Entry(result: Enum.Parse<ConversionRowResult>(result));
+        entry.ResolvedSourceLabel = "windows-1252";
+        string row = ConversionReport.ToCsvString([entry]).Split(Environment.NewLine)[1];
+        Assert.Equal(expected, row.Split(',')[1]);
+    }
+
     [Fact]
     public void CsvFileEncoding_IsExplicitUtf8WithBom()
     {
