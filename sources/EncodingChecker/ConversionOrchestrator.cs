@@ -123,6 +123,39 @@ internal sealed class ConversionOrchestrator
         foreach (ConversionReportEntry entry in entries)
             entry.ResetAttemptEvidence();
 
+        try
+        {
+            return DecideConfirmAndRun(
+                entries, baseDirectory, targetCharset, targetWriteBom, backup, preview,
+                maxParallelism, onEntry, cancellationToken, startedUtc);
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation anywhere before a write pass starts can leave entries the
+            // decide pass already marked "would convert". The write pass below has its
+            // own cancellation handling that returns normally instead of throwing, so it
+            // never reaches this catch; only a decide-phase cancellation does.
+            ConversionReportEntry.MarkUnattempted(entries, []);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// The decide/confirm/write sequence, split out so <see cref="Run"/> can wrap all of
+    /// it in one cancellation handler.
+    /// </summary>
+    private OrchestrationResult DecideConfirmAndRun(
+        IReadOnlyList<ConversionReportEntry> entries,
+        string baseDirectory,
+        string targetCharset,
+        bool targetWriteBom,
+        bool backup,
+        bool preview,
+        int maxParallelism,
+        Action<ConversionReportEntry> onEntry,
+        CancellationToken cancellationToken,
+        DateTime startedUtc)
+    {
         // Detection and hashing share one read, so the plan cannot mix different bytes.
         // Detection still runs for explicit choices to preserve provenance and safety vetoes.
         ScanEngine.RefreshSourceSnapshots(
@@ -158,6 +191,10 @@ internal sealed class ConversionOrchestrator
             catch (InvalidOperationException ex)
             {
                 // An undecided entry means the caller failed to provide a complete plan.
+                // The decide pass above already marked some entries "would convert"; no
+                // write pass will ever reach them now.
+                ConversionReportEntry.MarkUnattempted(entries, []);
+
                 return new OrchestrationResult
                 {
                     Outcome = OrchestrationOutcome.CouldNotPlan,
@@ -169,6 +206,10 @@ internal sealed class ConversionOrchestrator
 
             if (response.Choice == ConfirmationChoice.Cancel)
             {
+                // The decide pass already marked some entries "would convert"; the write
+                // pass that would have made that true is never going to run.
+                ConversionReportEntry.MarkUnattempted(entries, []);
+
                 return new OrchestrationResult
                 {
                     Outcome = OrchestrationOutcome.Cancelled,
@@ -182,6 +223,8 @@ internal sealed class ConversionOrchestrator
                 if (!ApplyChosenSource(
                         response.SourceEncoding, response.Files, entries))
                 {
+                    ConversionReportEntry.MarkUnattempted(entries, []);
+
                     return new OrchestrationResult
                     {
                         Outcome = OrchestrationOutcome.Cancelled,
@@ -201,6 +244,10 @@ internal sealed class ConversionOrchestrator
 
             if (stale.Count > 0)
             {
+                // The decide pass already marked some entries "would convert"; the write
+                // pass that would have made that true is never going to run.
+                ConversionReportEntry.MarkUnattempted(entries, []);
+
                 return new OrchestrationResult
                 {
                     Outcome = OrchestrationOutcome.PlanWentStale,

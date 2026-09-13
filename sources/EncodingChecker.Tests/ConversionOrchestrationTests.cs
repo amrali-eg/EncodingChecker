@@ -415,6 +415,33 @@ public sealed class ConversionOrchestrationTests : IDisposable
         Assert.Equal(before, File.ReadAllBytes(path));
     }
 
+    [Fact]
+    public void ChoosingAnEncodingForNoFilesChangesNothing_EvenForFilesAlreadyMarkedConverted()
+    {
+        // The scope check above uses a batch where the only file is ambiguous, so its
+        // Result was never "would convert" to begin with. A mixed batch is needed to
+        // prove this same no-op scope doesn't leak a stale Converted for an eligible
+        // file the decide pass already marked before this response was scripted.
+        string ambiguous = Write("ambiguous.txt", "Le café était déjà prêt", "windows-1252");
+        string eligible = Write("eligible.txt", "plain ascii here", "ascii");
+        byte[] ambiguousBefore = File.ReadAllBytes(ambiguous);
+        byte[] eligibleBefore = File.ReadAllBytes(eligible);
+
+        List<ConversionReportEntry> entries = View();
+        OrchestrationResult result = Convert(entries, _ => new ConfirmationResponse(
+            ConfirmationChoice.ChooseSourceEncoding, "windows-1252", []));
+
+        Assert.Equal(OrchestrationOutcome.Cancelled, result.Outcome);
+        Assert.Equal(ambiguousBefore, File.ReadAllBytes(ambiguous));
+        Assert.Equal(eligibleBefore, File.ReadAllBytes(eligible));
+
+        Assert.All(entries, entry => Assert.True(entry.NotAttempted));
+
+        using var csv = new StringWriter();
+        ConversionReport.WriteCsv(entries, csv);
+        Assert.DoesNotContain("Converted", csv.ToString());
+    }
+
     // ------------------------------------------------------- nothing gets modified
 
     [Fact]
@@ -426,8 +453,9 @@ public sealed class ConversionOrchestrationTests : IDisposable
         byte[] jpBefore = File.ReadAllBytes(jp);
         byte[] plainBefore = File.ReadAllBytes(plain);
 
+        List<ConversionReportEntry> entries = View();
         OrchestrationResult result = Convert(
-            View(), _ => ConfirmationResponse.Cancel, backup: true);
+            entries, _ => ConfirmationResponse.Cancel, backup: true);
 
         Assert.Equal(OrchestrationOutcome.Cancelled, result.Outcome);
         Assert.Equal(jpBefore, File.ReadAllBytes(jp));
@@ -435,6 +463,41 @@ public sealed class ConversionOrchestrationTests : IDisposable
 
         // Not even a backup, which would be a modification of the directory.
         Assert.Empty(Directory.GetFiles(_root, "*.bak"));
+
+        // The decide pass marks plain.txt "would convert" before the user is even asked.
+        // Cancelling must not let that leak into the exported report as completed work.
+        Assert.All(entries, entry => Assert.True(entry.NotAttempted));
+
+        using var csv = new StringWriter();
+        ConversionReport.WriteCsv(entries, csv);
+        Assert.DoesNotContain("Converted", csv.ToString());
+    }
+
+    [Fact]
+    public void CancellingDuringTheDecidePass_MarksEntriesUnattemptedBeforePropagating()
+    {
+        // The decide pass runs before the user is ever asked and can itself be
+        // cancelled. Whatever it already marked "would convert" must not be left
+        // looking like completed work once the exception propagates.
+        Write("plain.txt", "plain ascii here", "ascii");
+
+        List<ConversionReportEntry> entries = View();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        Assert.ThrowsAny<OperationCanceledException>(() =>
+            new ConversionOrchestrator(Proceed).Run(
+                entries, _root, "utf-8", targetWriteBom: false,
+                backup: false, preview: false,
+                ScanEngine.DefaultMaxParallelism,
+                _ => { },
+                cts.Token));
+
+        Assert.All(entries, entry => Assert.True(entry.NotAttempted));
+
+        using var csv = new StringWriter();
+        ConversionReport.WriteCsv(entries, csv);
+        Assert.DoesNotContain("Converted", csv.ToString());
     }
 
     [Fact]
@@ -447,8 +510,9 @@ public sealed class ConversionOrchestrationTests : IDisposable
 
         byte[] stableBefore = File.ReadAllBytes(stable);
 
+        List<ConversionReportEntry> entries = View();
         OrchestrationResult result = Convert(
-            View(),
+            entries,
             Proceed,
             betweenPlanAndWrite: plan =>
             {
@@ -466,6 +530,14 @@ public sealed class ConversionOrchestrationTests : IDisposable
         // Neither file, not just the one that moved.
         Assert.Equal(stableBefore, File.ReadAllBytes(stable));
         Assert.Equal("changed underneath", File.ReadAllText(moving));
+
+        // Both entries were marked "would convert" by the decide pass before the plan was
+        // shown; going stale must not let that leak into the exported report as done work.
+        Assert.All(entries, entry => Assert.True(entry.NotAttempted));
+
+        using var csv = new StringWriter();
+        ConversionReport.WriteCsv(entries, csv);
+        Assert.DoesNotContain("Converted", csv.ToString());
     }
 
     [Fact]
