@@ -123,6 +123,39 @@ internal sealed class ConversionOrchestrator
         foreach (ConversionReportEntry entry in entries)
             entry.ResetAttemptEvidence();
 
+        try
+        {
+            return DecideConfirmAndRun(
+                entries, baseDirectory, targetCharset, targetWriteBom, backup, preview,
+                maxParallelism, onEntry, cancellationToken, startedUtc);
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation anywhere before a write pass starts can leave entries the
+            // decide pass already marked "would convert". The write pass below has its
+            // own cancellation handling that returns normally instead of throwing, so it
+            // never reaches this catch; only a decide-phase cancellation does.
+            ConversionReportEntry.MarkUnattempted(entries, []);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// The decide/confirm/write sequence, split out so <see cref="Run"/> can wrap all of
+    /// it in one cancellation handler.
+    /// </summary>
+    private OrchestrationResult DecideConfirmAndRun(
+        IReadOnlyList<ConversionReportEntry> entries,
+        string baseDirectory,
+        string targetCharset,
+        bool targetWriteBom,
+        bool backup,
+        bool preview,
+        int maxParallelism,
+        Action<ConversionReportEntry> onEntry,
+        CancellationToken cancellationToken,
+        DateTime startedUtc)
+    {
         // Detection and hashing share one read, so the plan cannot mix different bytes.
         // Detection still runs for explicit choices to preserve provenance and safety vetoes.
         ScanEngine.RefreshSourceSnapshots(
