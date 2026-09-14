@@ -2,10 +2,10 @@ namespace EncodingChecker.Tests;
 
 /// <summary>
 /// Pins the exact precedence and diagnostics of <c>-Apply</c>'s option-conflict check
-/// (<c>Program.ApplyConflict</c>) before any refactor of its implementation. A plan
-/// already records its own scope and conversion settings, so twelve other options may
-/// not be combined with <c>-Apply</c>; this fixture proves both each individual
-/// rejection and which one wins when several are set at once.
+/// (<c>Program.ApplyConflict</c>). A plan already records its own scope and conversion
+/// settings, so twelve other options may not be combined with <c>-Apply</c>; this
+/// fixture proves both each individual rejection and which one wins when several are
+/// set at once, so a future change to that check cannot silently reorder it.
 /// </summary>
 public sealed class ApplyConflictPrecedenceTests : IDisposable
 {
