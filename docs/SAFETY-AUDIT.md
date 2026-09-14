@@ -988,6 +988,91 @@ fix restored and the test confirmed passing again.
   visible at 100% display scaling — but 125%/150% scaling and the high-contrast check were
   not reached, so the checklist's three-part check is still not completed for any release.
 
+### v3.14.3 — `88bda0985192d0c448e56fcdd8c8f79896a63d2b`, not re-audited
+
+**It was not measured against the four corpora, and none is required.** This release
+changes neither detection nor conversion policy, nor any behavior a user can observe.
+It is a controlled internal simplification pass over code that already shipped in
+v3.14.2 — nested conditionals rewritten as `if`/`else` chains, duplicate helper methods
+collapsed to one implementation, a CLI validation check restructured — verified to be
+behavior-preserving rather than justified by any defect it closes. What EC does for a
+valid input, an invalid one, a cancelled run, or anything else is exactly what v3.14.2
+did.
+
+**The v3.12.0 gap is still open.** That build changed `ConversionPolicy` and shipped
+without a corpus run. Nothing here re-audits it, and six records in a row saying "none
+required" must not be read as the requirement having been met.
+
+#### The shipped build reproduces from the tagged commit, on a matching runtime
+
+```
+commit      88bda0985192d0c448e56fcdd8c8f79896a63d2b   (annotated tag v3.14.3)
+worktree    clean checkout (fresh git clone into a scratch directory, not the primary clone)
+runner      windows-2025-vs2026, image version 20260907.229.1 - .NET SDK 10.0.401, runtime 10.0.12
+local       Windows 10.0.26200 - .NET SDK 10.0.401, runtime 10.0.12
+executable  EncodingChecker.exe (framework-dependent and self-contained, single-file)
+  framework-dependent  published and driven  a95729e8f0ff3c80da78911c312d7a833b1e7a82f4558e4a4659eb91901050b0
+                       rebuilt locally        a95729e8f0ff3c80da78911c312d7a833b1e7a82f4558e4a4659eb91901050b0
+  self-contained       published             7d186e7c41d9955d71546a4789bd920c54c9943872b3a20564cdb594255b5831
+                       rebuilt locally        7d186e7c41d9955d71546a4789bd920c54c9943872b3a20564cdb594255b5831
+```
+
+Both hashes match exactly, for both build flavors. As with v3.14.2, this is a matching
+runtime by circumstance rather than by a pin: both workflows still resolve
+`dotnet-version: "10.0.x"`, and this record covers this pair of machines on this day.
+
+The published archives, each downloaded and hashed rather than trusting GitHub's own
+report of them — and confirmed to equal what GitHub itself reports as each asset's digest:
+
+```
+EncodingChecker-3.14.3-framework-dependent.zip
+  aad409c8ebfe4c8c317cdb3fe971da029bd034dfdf38d820b6582574feebaa69
+EncodingChecker-3.14.3-win-x64-self-contained.zip
+  cf75b48d856aa2b9d3f3f5af3c16dba3a632d98d7d807037e7e86415596a9389
+```
+
+#### What changed in v3.14.3
+
+| | |
+|---|---|
+| CLI exit-code and mode selection, journal status computation, GUI-smoke reachability and cancellation classification | Nested ternary chains rewritten as `if`/`else` chains or `switch` expressions. Every branch and its result is unchanged. |
+| Code-page resolution (`ScanEngine`, `ConversionJournal`, `ConversionPlan`) | Four near-duplicate spellings collapsed to two named resolvers (`TextEncoding.ResolveCodePageOrNull`, `ResolveCodePageOrZero`), kept separate on purpose: they back different persisted fields with different "unresolved" conventions (nullable vs. non-nullable), and merging them would have changed which value a stale plan or journal entry records. |
+| `-Apply`'s twelve-option conflict check | Nested ternary rewritten as a plain `if` sequence. 25 new tests added, pinning the exact precedence when several conflicting options are set at once — a coverage gap the simplification review found, not a behavior change. |
+| GUI export dialogs (`MainForm.Export.cs`) | The text and CSV exports, whose failure handling is exception-based, now share one helper. The JSON journal export was deliberately left separate: its failure reporting returns an error string instead of throwing, an incompatible convention. |
+| GUI smoke suite's own Phase J | Two diagnostic strings reworded so a failure report can tell which of two checks failed. Read only by whoever investigates a release-gate failure; `EncodingChecker.exe` prints neither string. |
+| ~18 duplicate CLI console-redirect test helpers, several duplicated test fixtures | Consolidated into shared test-project utilities. Internal to the test project; nothing that ships is affected. |
+
+#### What this release says about these records
+
+Every prior entry in this file describes a defect closed and a regression test
+mutation-checked against it. This one has neither: no defect motivated any of the above,
+and none of it is testable as "the bug is gone" because there was no bug. What stands in
+for that here is a different kind of evidence — the full test suite run and compared
+before and after each change (826 tests before, 851 after, all passing throughout), a
+build with zero warnings at every step, and an independent review pass (the
+code-simplifier tool) on each diff before it was kept. Several proposed simplifications
+were considered and rejected specifically because that standard could not be met: a
+20-field manual equality check whose replacement with generated record equality would
+have silently widened what "matches" means, and a rollback path whose broader exception
+handling turned out to be a deliberate contract rather than an oversight. Recorded here
+because a release with zero behavior change is still worth being honest about what kind
+of confidence backs it, and "no bug, so nothing to verify" is not the same claim as "the
+behavior did not change" — this record is evidence for the latter.
+
+#### Known limits specific to this release
+
+- **No corpus measurement backs this release**, and none is required. What supports it is
+  851 unit tests (was 826), the ten-phase GUI smoke suite (run twice: once locally against
+  the pre-release build, once inside the release job against the published executable),
+  and the detector parity check.
+- **Code signing did not run.** The signing secrets are still not configured, so the step
+  was skipped and the archives above are **unsigned**. This is the **eighth** release to
+  carry the limit unchanged — v3.11.2, v3.12.0, v3.12.1, v3.13.0, v3.14.0, v3.14.1,
+  v3.14.2, v3.14.3.
+- **No accessibility spot check is recorded.** This is the **seventh** release without
+  one. The checklist's three-part check (display scaling, keyboard-only navigation,
+  high-contrast theme) is still not completed for any release.
+
 ## Known limits
 
 - No detector can recover an author's historical legacy encoding when the same bytes admit multiple plausible readings. EC refuses automatic legacy conversion instead of guessing.
