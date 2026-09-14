@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Nodes;
+using static EncodingChecker.Tests.CliRunner;
 
 namespace EncodingChecker.Tests;
 
@@ -25,25 +26,6 @@ public sealed class PlanEnumValidationTests : IDisposable
         catch (IOException)
         {
             // Best-effort cleanup.
-        }
-    }
-
-    private static int Run(params string[] args)
-    {
-        TextWriter originalOut = Console.Out;
-        TextWriter originalError = Console.Error;
-
-        try
-        {
-            Console.SetOut(new StringWriter());
-            Console.SetError(new StringWriter());
-
-            return Program.RunConsoleMode(args);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-            Console.SetError(originalError);
         }
     }
 

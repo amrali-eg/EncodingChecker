@@ -21,28 +21,31 @@ internal static partial class Program
         {
             string flag = args[i].TrimStart('-');
 
+            bool TakeValue(
+                string optionName,
+                [NotNullWhen(true)] out string? v,
+                [NotNullWhen(false)] out string? err)
+            {
+                if (TryTakeValue(args, ref i, out v))
+                {
+                    err = null;
+                    return true;
+                }
+
+                err = $"{optionName} requires a value.";
+                return false;
+            }
+
             switch (flag.ToLowerInvariant())
             {
                 case "basepath":
-                    if (!TryTakeValue(
-                            args,
-                            ref i,
-                            out options.BasePath))
-                    {
-                        error = "-BasePath requires a value.";
+                    if (!TakeValue("-BasePath", out options.BasePath, out error))
                         return false;
-                    }
                     break;
 
                 case "include":
-                    if (!TryTakeValue(
-                            args,
-                            ref i,
-                            out string? include))
-                    {
-                        error = "-Include requires a value.";
+                    if (!TakeValue("-Include", out string? include, out error))
                         return false;
-                    }
 
                     // Repeated options accumulate patterns.
                     options.IncludeSpecified = true;
@@ -50,14 +53,8 @@ internal static partial class Program
                     break;
 
                 case "exclude":
-                    if (!TryTakeValue(
-                            args,
-                            ref i,
-                            out string? exclude))
-                    {
-                        error = "-Exclude requires a value.";
+                    if (!TakeValue("-Exclude", out string? exclude, out error))
                         return false;
-                    }
 
                     // Repeated options accumulate patterns.
                     options.ExcludeSpecified = true;
@@ -65,60 +62,33 @@ internal static partial class Program
                     break;
 
                 case "target":
-                    if (!TryTakeValue(
-                            args,
-                            ref i,
-                            out options.Target))
-                    {
-                        error = "-Target requires a value.";
+                    if (!TakeValue("-Target", out options.Target, out error))
                         return false;
-                    }
                     break;
 
                 case "from":
-                    if (!TryTakeValue(
-                            args,
-                            ref i,
-                            out options.From))
-                    {
-                        error = "-From requires a value.";
+                    if (!TakeValue("-From", out options.From, out error))
                         return false;
-                    }
                     break;
 
                 case "plan":
-                    if (!TryTakeValue(args, ref i, out options.PlanPath))
-                    {
-                        error = "-Plan requires a value.";
+                    if (!TakeValue("-Plan", out options.PlanPath, out error))
                         return false;
-                    }
                     break;
 
                 case "journal":
-                    if (!TryTakeValue(args, ref i, out options.JournalPath))
-                    {
-                        error = "-Journal requires a value.";
+                    if (!TakeValue("-Journal", out options.JournalPath, out error))
                         return false;
-                    }
                     break;
 
                 case "apply":
-                    if (!TryTakeValue(args, ref i, out options.ApplyPath))
-                    {
-                        error = "-Apply requires a value.";
+                    if (!TakeValue("-Apply", out options.ApplyPath, out error))
                         return false;
-                    }
                     break;
 
                 case "validate":
-                    if (!TryTakeValue(
-                            args,
-                            ref i,
-                            out options.ValidateCharsets))
-                    {
-                        error = "-Validate requires a value.";
+                    if (!TakeValue("-Validate", out options.ValidateCharsets, out error))
                         return false;
-                    }
                     break;
 
                 case "detectonly":
@@ -126,14 +96,8 @@ internal static partial class Program
                     break;
 
                 case "report":
-                    if (!TryTakeValue(
-                            args,
-                            ref i,
-                            out options.ReportPath))
-                    {
-                        error = "-Report requires a value.";
+                    if (!TakeValue("-Report", out options.ReportPath, out error))
                         return false;
-                    }
                     break;
 
                 case "maxparallelism":
@@ -534,18 +498,20 @@ internal static partial class Program
     /// Returns the first option that an applied plan cannot honor. Journal output,
     /// parallelism, and quiet output remain valid apply-time controls.
     /// </summary>
-    private static string? ApplyConflict(CliOptions options) =>
-        options.BasePath != null ? "-BasePath"
-        : options.Include.Count > 0 ? "-Include"
-        : options.Exclude.Count > 0 ? "-Exclude"
-        : options.Target != null ? "-Target"
-        : options.From != null ? "-From"
-        : options.Backup ? "-Backup"
-        : options.WhatIf ? "-WhatIf"
-        : options.DetectOnly ? "-DetectOnly"
-        : options.ValidateCharsets != null ? "-Validate"
-        : options.ReportPath != null ? "-Report"
-        : options.FailOnChanges ? "-FailOnChanges"
-        : options.Verbose ? "-Verbose"
-        : null;
+    private static string? ApplyConflict(CliOptions options)
+    {
+        if (options.BasePath != null) return "-BasePath";
+        if (options.Include.Count > 0) return "-Include";
+        if (options.Exclude.Count > 0) return "-Exclude";
+        if (options.Target != null) return "-Target";
+        if (options.From != null) return "-From";
+        if (options.Backup) return "-Backup";
+        if (options.WhatIf) return "-WhatIf";
+        if (options.DetectOnly) return "-DetectOnly";
+        if (options.ValidateCharsets != null) return "-Validate";
+        if (options.ReportPath != null) return "-Report";
+        if (options.FailOnChanges) return "-FailOnChanges";
+        if (options.Verbose) return "-Verbose";
+        return null;
+    }
 }

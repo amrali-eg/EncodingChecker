@@ -38,14 +38,14 @@ internal static class StrictFileValidation
 
         diagnostic = null;
         long originalPosition = stream.Position;
+        Encoding strict = TextEncoding.Strict(encoding);
         byte[] bytes = ArrayPool<byte>.Shared.Rent(64 * 1024);
-        char[] chars = ArrayPool<char>.Shared.Rent(
-            TextEncoding.Strict(encoding).GetMaxCharCount(bytes.Length));
+        char[] chars = ArrayPool<char>.Shared.Rent(strict.GetMaxCharCount(bytes.Length));
 
         try
         {
             stream.Position = 0;
-            Decoder decoder = TextEncoding.Strict(encoding).GetDecoder();
+            Decoder decoder = strict.GetDecoder();
 
             int read;
             while ((read = stream.Read(bytes, 0, bytes.Length)) > 0)

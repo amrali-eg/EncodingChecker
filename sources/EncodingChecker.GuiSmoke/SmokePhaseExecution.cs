@@ -33,12 +33,14 @@ internal sealed class SmokePhaseContext(string directory)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
                 path => Path.GetRelativePath(directory, path),
-                path =>
-                {
-                    using FileStream stream = File.OpenRead(path);
-                    return Convert.ToHexStringLower(SHA256.HashData(stream));
-                },
+                Hash,
                 StringComparer.OrdinalIgnoreCase);
+
+    internal static string Hash(string path)
+    {
+        using FileStream stream = File.OpenRead(path);
+        return Convert.ToHexStringLower(SHA256.HashData(stream));
+    }
 
     internal static IReadOnlyDictionary<string, string> Freeze(
         IReadOnlyDictionary<string, string> values) =>

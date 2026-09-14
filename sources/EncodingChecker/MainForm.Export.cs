@@ -16,11 +16,44 @@ public partial class MainForm
             return;
         }
 
+        ExportToFile(
+            title: @"Export to a Text File",
+            filter: @"Text files (*.txt)|*.txt",
+            defaultFileName: "Encoding.txt",
+            encoding: new UTF8Encoding(true),
+            failureMessage: "Failed to export the report: {0}",
+            write: writer =>
+            {
+                foreach (ListViewItem item in lstResults.CheckedItems)
+                {
+                    string charset = item.SubItems[ResultsColumnCharset].Text;
+                    string fileName = item.SubItems[ResultsColumnFileName].Text;
+                    string directory = item.SubItems[ResultsColumnDirectory].Text;
+
+                    writer.WriteLine("{0}\t{1}\\{2}", charset, directory, fileName);
+                }
+            });
+    }
+
+    /// <summary>
+    /// Shared shape for the two exports whose failure is an I/O exception. The journal
+    /// export is deliberately not routed through this: its Save method reports failure
+    /// by returning an error string, and forcing that into a thrown exception here would
+    /// manufacture one that was never raised.
+    /// </summary>
+    private void ExportToFile(
+        string title,
+        string filter,
+        string defaultFileName,
+        Encoding encoding,
+        string failureMessage,
+        Action<StreamWriter> write)
+    {
         using var saveFileDialog = new SaveFileDialog
         {
-            Title = @"Export to a Text File",
-            Filter = @"Text files (*.txt)|*.txt",
-            FileName = "Encoding.txt",
+            Title = title,
+            Filter = filter,
+            FileName = defaultFileName,
             RestoreDirectory = true,
         };
 
@@ -29,21 +62,12 @@ public partial class MainForm
 
         try
         {
-            using var writer = new StreamWriter(
-                saveFileDialog.FileName, false, new UTF8Encoding(true));
-
-            foreach (ListViewItem item in lstResults.CheckedItems)
-            {
-                string charset = item.SubItems[ResultsColumnCharset].Text;
-                string fileName = item.SubItems[ResultsColumnFileName].Text;
-                string directory = item.SubItems[ResultsColumnDirectory].Text;
-
-                writer.WriteLine("{0}\t{1}\\{2}", charset, directory, fileName);
-            }
+            using var writer = new StreamWriter(saveFileDialog.FileName, false, encoding);
+            write(writer);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            ShowWarning("Failed to export the report: {0}", ex.Message);
+            ShowWarning(failureMessage, ex.Message);
         }
     }
 
@@ -75,27 +99,13 @@ public partial class MainForm
             return;
         }
 
-        using var saveFileDialog = new SaveFileDialog
-        {
-            Title = @"Export Results as CSV",
-            Filter = @"CSV files (*.csv)|*.csv",
-            FileName = "EncodingChecker report.csv",
-            RestoreDirectory = true,
-        };
-
-        if (saveFileDialog.ShowDialog(this) != DialogResult.OK)
-            return;
-
-        try
-        {
-            using var writer = new StreamWriter(
-                saveFileDialog.FileName, false, ConversionReport.CsvFileEncoding);
-            ConversionReport.WriteCsv(ResultEntries(), writer);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            ShowWarning("Failed to export the csv report: {0}", ex.Message);
-        }
+        ExportToFile(
+            title: @"Export Results as CSV",
+            filter: @"CSV files (*.csv)|*.csv",
+            defaultFileName: "EncodingChecker report.csv",
+            encoding: ConversionReport.CsvFileEncoding,
+            failureMessage: "Failed to export the csv report: {0}",
+            write: writer => ConversionReport.WriteCsv(ResultEntries(), writer));
     }
 
     private void OnExportJournal(object? sender, EventArgs e)

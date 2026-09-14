@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Text;
+using static EncodingChecker.Tests.CliRunner;
+using static EncodingChecker.Tests.ExpectedExitCode;
 
 namespace EncodingChecker.Tests;
 
@@ -25,9 +27,6 @@ namespace EncodingChecker.Tests;
 /// </remarks>
 public sealed class AppliedPlanPathIntegrityTests : IDisposable
 {
-    private const int ExpectedClean = 0;
-    private const int ExpectedProcessingErrors = 3;
-
     private readonly string _root =
         Directory.CreateTempSubdirectory("ec_planpath_").FullName;
 
@@ -75,30 +74,10 @@ public sealed class AppliedPlanPathIntegrityTests : IDisposable
     private static bool TryCreateJunction(string link, string target) =>
         RunCmd($"mklink /J \"{link}\" \"{target}\"") && Directory.Exists(link);
 
-    private static int Run(params string[] args)
-    {
-        TextWriter originalOut = Console.Out;
-        TextWriter originalError = Console.Error;
-
-        try
-        {
-            Console.SetOut(new StringWriter());
-            Console.SetError(new StringWriter());
-
-            return Program.RunConsoleMode(args);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-            Console.SetError(originalError);
-        }
-    }
-
     private static void WriteWithBom(string path) =>
         File.WriteAllText(path, "identical bytes", new UTF8Encoding(true));
 
-    private static bool StillHasBom(string path) =>
-        File.ReadAllBytes(path).Take(3).SequenceEqual(Encoding.UTF8.GetPreamble());
+    private static bool StillHasBom(string path) => TestContent.StillHasBom(path);
 
     [Fact]
     public void PlanRootReplacedByAJunction_IsRefusedRatherThanFollowed()

@@ -398,21 +398,9 @@ public partial class MainForm : Form
                 string firstValidCharset =
                     (string)lstValidCharsets.CheckedItems[0]!;
 
-                for (int i = 0;
-                     i < lstConvert.Items.Count;
-                     i++)
-                {
-                    string convertCharset =
-                        (string)lstConvert.Items[i]!;
-
-                    if (firstValidCharset.Equals(
-                        convertCharset,
-                        StringComparison.OrdinalIgnoreCase))
-                    {
-                        lstConvert.SelectedIndex = i;
-                        break;
-                    }
-                }
+                int index = lstConvert.FindStringExact(firstValidCharset);
+                if (index >= 0)
+                    lstConvert.SelectedIndex = index;
             }
         }
 

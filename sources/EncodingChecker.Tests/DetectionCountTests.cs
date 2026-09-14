@@ -213,22 +213,5 @@ public sealed class DetectionCountTests : IDisposable
         Assert.Equal(0, read.Classifications);
     }
 
-    private static int Cli(params string[] args)
-    {
-        TextWriter originalOut = Console.Out;
-        TextWriter originalError = Console.Error;
-
-        try
-        {
-            Console.SetOut(new StringWriter());
-            Console.SetError(new StringWriter());
-
-            return Program.RunConsoleMode(args);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-            Console.SetError(originalError);
-        }
-    }
+    private static int Cli(params string[] args) => CliRunner.Run(args);
 }

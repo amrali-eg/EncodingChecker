@@ -32,12 +32,8 @@ public sealed class ConversionPolicyTests : IDisposable
         }
     }
 
-    private string Write(string name, string text, string charset)
-    {
-        string path = Path.Combine(_root, name);
-        File.WriteAllBytes(path, Encoding.GetEncoding(charset).GetBytes(text));
-        return path;
-    }
+    private string Write(string name, string text, string charset) =>
+        TestContent.Write(_root, name, text, charset);
 
     /// <summary>Detect-mode scan then convert the rows: what the GUI's buttons do.</summary>
     private List<ConversionReportEntry> ViewThenConvert(

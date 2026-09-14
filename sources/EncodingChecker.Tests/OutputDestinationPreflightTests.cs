@@ -1,4 +1,6 @@
 using System.Text;
+using static EncodingChecker.Tests.CliRunner;
+using static EncodingChecker.Tests.ExpectedExitCode;
 
 namespace EncodingChecker.Tests;
 
@@ -12,8 +14,6 @@ namespace EncodingChecker.Tests;
 /// </remarks>
 public sealed class OutputDestinationPreflightTests : IDisposable
 {
-    private const int ExpectedProcessingErrors = 3;
-
     private readonly string _root =
         Directory.CreateTempSubdirectory("ec_preflight_").FullName;
 
@@ -26,25 +26,6 @@ public sealed class OutputDestinationPreflightTests : IDisposable
         catch (IOException)
         {
             // Best-effort cleanup.
-        }
-    }
-
-    private static int Run(params string[] args)
-    {
-        TextWriter originalOut = Console.Out;
-        TextWriter originalError = Console.Error;
-
-        try
-        {
-            Console.SetOut(new StringWriter());
-            Console.SetError(new StringWriter());
-
-            return Program.RunConsoleMode(args);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-            Console.SetError(originalError);
         }
     }
 

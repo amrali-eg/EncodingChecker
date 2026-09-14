@@ -1,4 +1,6 @@
 using System.Text;
+using static EncodingChecker.Tests.CliRunner;
+using static EncodingChecker.Tests.ExpectedExitCode;
 
 namespace EncodingChecker.Tests;
 
@@ -17,12 +19,6 @@ namespace EncodingChecker.Tests;
 /// </summary>
 public sealed class ExitCodeContractTests : IDisposable
 {
-    private const int ExpectedClean = 0;
-    private const int ExpectedUsageError = 1;
-    private const int ExpectedChangesNeeded = 2;
-    private const int ExpectedProcessingErrors = 3;
-    private const int ExpectedSafeRefusal = 5;
-
     private readonly string _root =
         Directory.CreateTempSubdirectory("ec_exitcodes_").FullName;
 
@@ -35,25 +31,6 @@ public sealed class ExitCodeContractTests : IDisposable
         catch (IOException)
         {
             // Best-effort cleanup.
-        }
-    }
-
-    private static int Run(params string[] args)
-    {
-        TextWriter originalOut = Console.Out;
-        TextWriter originalError = Console.Error;
-
-        try
-        {
-            Console.SetOut(new StringWriter());
-            Console.SetError(new StringWriter());
-
-            return Program.RunConsoleMode(args);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-            Console.SetError(originalError);
         }
     }
 
@@ -74,23 +51,10 @@ public sealed class ExitCodeContractTests : IDisposable
     [Fact]
     public void Version_PrintsTheAssemblyVersionAndExitsZero()
     {
-        TextWriter originalOut = Console.Out;
-        TextWriter originalError = Console.Error;
+        (int exit, string output, _) = RunCaptured("--version");
 
-        try
-        {
-            using var output = new StringWriter();
-            Console.SetOut(output);
-            Console.SetError(new StringWriter());
-
-            Assert.Equal(ExpectedClean, Program.RunConsoleMode(["--version"]));
-            Assert.Equal(Program.GetDisplayVersion() + Environment.NewLine, output.ToString());
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-            Console.SetError(originalError);
-        }
+        Assert.Equal(ExpectedClean, exit);
+        Assert.Equal(Program.GetDisplayVersion() + Environment.NewLine, output);
     }
 
     [Fact]

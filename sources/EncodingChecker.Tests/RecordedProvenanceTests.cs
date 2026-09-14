@@ -24,13 +24,8 @@ public sealed class RecordedProvenanceTests : IDisposable
         }
     }
 
-    private string Write(string name, string text, string charset)
-    {
-        string path = Path.Combine(_root, name);
-        File.WriteAllBytes(path, Encoding.GetEncoding(charset).GetBytes(text));
-
-        return path;
-    }
+    private string Write(string name, string text, string charset) =>
+        TestContent.Write(_root, name, text, charset);
 
     private List<ConversionReportEntry> Scan()
     {

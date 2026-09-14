@@ -35,12 +35,8 @@ public sealed class ConversionOrchestrationTests : IDisposable
         }
     }
 
-    private string Write(string name, string text, string charset)
-    {
-        string path = Path.Combine(_root, name);
-        File.WriteAllBytes(path, Encoding.GetEncoding(charset).GetBytes(text));
-        return path;
-    }
+    private string Write(string name, string text, string charset) =>
+        TestContent.Write(_root, name, text, charset);
 
     /// <summary>The rows the GUI's View button produces, which Convert then acts on.</summary>
     private List<ConversionReportEntry> View()

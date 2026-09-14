@@ -322,9 +322,8 @@ internal sealed class ConversionConfirmationForm : Form
     [
         .. (_refusedList?.CheckedItems.Cast<ListViewItem>()
             ?? [])
-            .Select(i => i.Tag as string)
-            .Where(p => p is not null)
-            .Select(p => p!)
+            .Select(i => i.Tag)
+            .OfType<string>()
     ];
 
     /// <summary>
@@ -396,15 +395,18 @@ internal sealed class ConversionConfirmationForm : Form
         int convert = _plan.Summary.ReadyToConvert;
         int refused = Refused.Count;
 
+        string caption = (convert, refused) switch
+        {
+            (0, _) => "Nothing ready to convert",
+            (_, 0) => $"Convert {convert} file(s)",
+            _ => $"Convert {convert} ready file(s)",
+        };
+
         var proceed = new Button
         {
             Name = "btnProceedConversion",
             AccessibleDescription = "Convert only the files marked ready in this review.",
-            Text = convert == 0
-                ? "Nothing ready to convert"
-                : refused == 0
-                    ? $"Convert {convert} file(s)"
-                    : $"Convert {convert} ready file(s)",
+            Text = caption,
             DialogResult = DialogResult.OK,
             AutoSize = true,
             Enabled = convert > 0,

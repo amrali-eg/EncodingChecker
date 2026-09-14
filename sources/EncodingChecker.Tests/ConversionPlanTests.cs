@@ -35,53 +35,13 @@ public sealed class ConversionPlanTests : IDisposable
         }
     }
 
-    private static int Run(params string[] args)
-    {
-        TextWriter originalOut = Console.Out;
-        TextWriter originalError = Console.Error;
-
-        try
-        {
-            Console.SetOut(new StringWriter());
-            Console.SetError(new StringWriter());
-
-            return Program.RunConsoleMode(args);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-            Console.SetError(originalError);
-        }
-    }
+    private static int Run(params string[] args) => CliRunner.Run(args);
 
     private static (int ExitCode, string Output, string Error) RunCaptured(
-        params string[] args)
-    {
-        TextWriter originalOut = Console.Out;
-        TextWriter originalError = Console.Error;
-        using var output = new StringWriter();
-        using var error = new StringWriter();
+        params string[] args) => CliRunner.RunCaptured(args);
 
-        try
-        {
-            Console.SetOut(output);
-            Console.SetError(error);
-            int exitCode = Program.RunConsoleMode(args);
-            return (exitCode, output.ToString(), error.ToString());
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-            Console.SetError(originalError);
-        }
-    }
-
-    private string Write(string name, string text, string charset)
-    {
-        string path = Path.Combine(_root, name);
-        File.WriteAllBytes(path, Encoding.GetEncoding(charset).GetBytes(text));
-        return path;
-    }
+    private string Write(string name, string text, string charset) =>
+        TestContent.Write(_root, name, text, charset);
 
     private static Dictionary<string, byte[]> Snapshot(string directory) =>
         Directory

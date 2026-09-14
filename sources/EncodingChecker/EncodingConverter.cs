@@ -254,11 +254,11 @@ internal static partial class EncodingConverter
         long sourceBytesProcessed = 0;
         long targetBytesWritten = 0;
 
-        // Captured for the conversion record after the source stream is closed.
-
         try
         {
             bool sameFile = IsSameFile(sourcePath, destinationPath);
+
+            // Captured for the conversion record after the source stream is closed.
             long capturedLength;
             DateTime capturedLastWriteUtc;
             DateTime capturedCreationTimeUtc;
