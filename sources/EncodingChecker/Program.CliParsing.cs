@@ -498,18 +498,20 @@ internal static partial class Program
     /// Returns the first option that an applied plan cannot honor. Journal output,
     /// parallelism, and quiet output remain valid apply-time controls.
     /// </summary>
-    private static string? ApplyConflict(CliOptions options) =>
-        options.BasePath != null ? "-BasePath"
-        : options.Include.Count > 0 ? "-Include"
-        : options.Exclude.Count > 0 ? "-Exclude"
-        : options.Target != null ? "-Target"
-        : options.From != null ? "-From"
-        : options.Backup ? "-Backup"
-        : options.WhatIf ? "-WhatIf"
-        : options.DetectOnly ? "-DetectOnly"
-        : options.ValidateCharsets != null ? "-Validate"
-        : options.ReportPath != null ? "-Report"
-        : options.FailOnChanges ? "-FailOnChanges"
-        : options.Verbose ? "-Verbose"
-        : null;
+    private static string? ApplyConflict(CliOptions options)
+    {
+        if (options.BasePath != null) return "-BasePath";
+        if (options.Include.Count > 0) return "-Include";
+        if (options.Exclude.Count > 0) return "-Exclude";
+        if (options.Target != null) return "-Target";
+        if (options.From != null) return "-From";
+        if (options.Backup) return "-Backup";
+        if (options.WhatIf) return "-WhatIf";
+        if (options.DetectOnly) return "-DetectOnly";
+        if (options.ValidateCharsets != null) return "-Validate";
+        if (options.ReportPath != null) return "-Report";
+        if (options.FailOnChanges) return "-FailOnChanges";
+        if (options.Verbose) return "-Verbose";
+        return null;
+    }
 }
