@@ -222,15 +222,8 @@ internal sealed record ConversionPlan
                 out string sourceCharset,
                 out bool sourceHasBom);
 
-            int codePage = 0;
-
-            if (TextEncoding.TryResolve(sourceCharset, out Encoding? encoding))
-                codePage = encoding.CodePage;
-
-            int? detectedCodePage = null;
-
-            if (TextEncoding.TryResolve(entry.DetectedEncodingLabel, out Encoding? detected))
-                detectedCodePage = detected.CodePage;
+            int codePage = TextEncoding.ResolveCodePageOrZero(sourceCharset);
+            int? detectedCodePage = TextEncoding.ResolveCodePageOrNull(entry.DetectedEncodingLabel);
 
             files.Add(new PlannedFile
             {

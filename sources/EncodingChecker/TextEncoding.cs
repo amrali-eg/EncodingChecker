@@ -292,6 +292,23 @@ internal static class TextEncoding
         }
     }
 
+    /// <summary>The canonical code page for a label, or null when it cannot be resolved.</summary>
+    /// <remarks>
+    /// For provenance fields that are themselves nullable: detection may not have run,
+    /// or the label it produced may no longer resolve.
+    /// </remarks>
+    internal static int? ResolveCodePageOrNull(string? label) =>
+        TryResolve(label, out Encoding? encoding) ? encoding.CodePage : null;
+
+    /// <summary>The canonical code page for a label, or 0 when it cannot be resolved.</summary>
+    /// <remarks>
+    /// For non-nullable <c>int</c> storage fields (e.g. a plan's or journal's recorded
+    /// source code page), where 0 is not a real code page and records "the label did
+    /// not resolve." This is a storage convention, not itself a conversion decision.
+    /// </remarks>
+    internal static int ResolveCodePageOrZero(string? label) =>
+        TryResolve(label, out Encoding? encoding) ? encoding.CodePage : 0;
+
 
     private static IReadOnlyList<Encoding> ResolveSupportedEncodings()
     {

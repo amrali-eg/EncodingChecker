@@ -1156,7 +1156,7 @@ internal static class ScanEngine
             SourceHasBom = record.SourceHasBom,
 
             // Provenance is null when detection did not run.
-            DetectedEncodingId = ResolveCodePage(entry.DetectedEncodingLabel),
+            DetectedEncodingId = TextEncoding.ResolveCodePageOrNull(entry.DetectedEncodingLabel),
             DetectedEncodingName = entry.DetectedEncodingLabel,
 
             TargetEncodingId = record.TargetCodePage,
@@ -1173,14 +1173,6 @@ internal static class ScanEngine
             metadata = prepared;
 
         return error;
-    }
-
-    /// <summary>The code page for a charset label, or null when it cannot be resolved.</summary>
-    private static int? ResolveCodePage(string? label)
-    {
-        return TextEncoding.TryResolve(label, out Encoding? encoding)
-            ? encoding.CodePage
-            : null;
     }
 
     /// <summary>Detects a repeated leading BOM before a backup is created.</summary>

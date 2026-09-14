@@ -249,12 +249,8 @@ internal sealed record ConversionJournal
             string sourceLabel = entry.ResolvedSourceLabel ?? entry.EffectiveSourceLabel;
             ScanEngine.ParseCharsetLabel(sourceLabel, out string sourceCharset, out bool sourceHasBom);
 
-            int codePage = 0;
-
-            if (TextEncoding.TryResolve(sourceCharset, out Encoding? sourceEncoding))
-                codePage = sourceEncoding.CodePage;
-
-            int? detectedCodePage = ResolveCodePage(entry.DetectedEncodingLabel);
+            int codePage = TextEncoding.ResolveCodePageOrZero(sourceCharset);
+            int? detectedCodePage = TextEncoding.ResolveCodePageOrNull(entry.DetectedEncodingLabel);
 
             lines.Add(new JournalEntry
             {
@@ -318,14 +314,6 @@ internal sealed record ConversionJournal
             Interrupted = interrupted,
             Entries = [.. lines.OrderBy(l => l.RelativePath, StringComparer.OrdinalIgnoreCase)],
         };
-    }
-
-    /// <summary>The canonical code page for a label, or null when unresolved.</summary>
-    private static int? ResolveCodePage(string? label)
-    {
-        return TextEncoding.TryResolve(label, out Encoding? encoding)
-            ? encoding.CodePage
-            : null;
     }
 
     /// <summary>Returns a journal-safe path even when an entry is malformed.</summary>
