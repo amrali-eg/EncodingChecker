@@ -1,4 +1,6 @@
 using System.Text;
+using static EncodingChecker.Tests.CliRunner;
+using static EncodingChecker.Tests.ExpectedExitCode;
 
 namespace EncodingChecker.Tests;
 
@@ -25,9 +27,6 @@ namespace EncodingChecker.Tests;
 /// </remarks>
 public sealed class AppliedPlanFidelityTests : IDisposable
 {
-    private const int ExpectedClean = 0;
-    private const int ExpectedSafeRefusal = 5;
-
     private readonly string _root =
         Directory.CreateTempSubdirectory("ec_planfidelity_").FullName;
 
@@ -40,25 +39,6 @@ public sealed class AppliedPlanFidelityTests : IDisposable
         catch (IOException)
         {
             // Best-effort cleanup.
-        }
-    }
-
-    private static int Run(params string[] args)
-    {
-        TextWriter originalOut = Console.Out;
-        TextWriter originalError = Console.Error;
-
-        try
-        {
-            Console.SetOut(new StringWriter());
-            Console.SetError(new StringWriter());
-
-            return Program.RunConsoleMode(args);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-            Console.SetError(originalError);
         }
     }
 

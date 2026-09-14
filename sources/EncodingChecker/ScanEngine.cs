@@ -252,7 +252,7 @@ internal static class ScanEngine
                 nameof(targetCharset));
         }
 
-        Encoding targetEncoding = resolvedTarget!;
+        Encoding targetEncoding = resolvedTarget;
 
         RunParallel(
             entries,
@@ -302,7 +302,7 @@ internal static class ScanEngine
                     return entry;
                 }
 
-                sourceEncoding = resolvedSource!;
+                sourceEncoding = resolvedSource;
 
                 if (!string.IsNullOrWhiteSpace(entry.DetectedEncodingLabel))
                     TextEncoding.TryResolve(entry.DetectedEncodingLabel, out automaticallyDetected);
@@ -363,21 +363,24 @@ internal static class ScanEngine
                     entry.BomlessUnicodeDoubt = snapshot.BomlessUnicodeDoubt;
                     entry.ExpectedSourceSha256 = snapshot.Sha256;
                     entry.ExpectedSourceSize = snapshot.Size;
-                    entry.Action = snapshot.SourceEncoding is null
-                        ? PlannedAction.Skip
-                        : null;
-                    entry.SourceInterpretation = snapshot.SourceEncoding is null
-                        ? SourceInterpretation.NotApplicable
-                        : null;
-                    entry.Result = snapshot.SourceEncoding is null
-                        ? ConversionRowResult.Skipped
-                        : ConversionRowResult.Unchanged;
-                    entry.ReasonCode = snapshot.SourceEncoding is null
-                        ? ConversionReasonCodes.UnknownEncoding
-                        : null;
-                    entry.Diagnostic = snapshot.SourceEncoding is null
-                        ? "The file's encoding could not be identified from its contents."
-                        : null;
+
+                    if (snapshot.SourceEncoding is null)
+                    {
+                        entry.Action = PlannedAction.Skip;
+                        entry.SourceInterpretation = SourceInterpretation.NotApplicable;
+                        entry.Result = ConversionRowResult.Skipped;
+                        entry.ReasonCode = ConversionReasonCodes.UnknownEncoding;
+                        entry.Diagnostic =
+                            "The file's encoding could not be identified from its contents.";
+                    }
+                    else
+                    {
+                        entry.Action = null;
+                        entry.SourceInterpretation = null;
+                        entry.Result = ConversionRowResult.Unchanged;
+                        entry.ReasonCode = null;
+                        entry.Diagnostic = null;
+                    }
                 }
                 catch (Exception ex) when (
                     ex is IOException or UnauthorizedAccessException or
@@ -760,12 +763,7 @@ internal static class ScanEngine
             preamble.Length,
             FileOptions.SequentialScan);
 
-        if (stream.Length < preamble.Length)
-            return false;
-
-        Span<byte> prefix = stackalloc byte[preamble.Length];
-        stream.ReadExactly(prefix);
-        return prefix.SequenceEqual(preamble);
+        return HasPreamble(stream, encoding);
     }
 
     private static bool HasPreamble(Stream stream, Encoding encoding)
@@ -1181,7 +1179,7 @@ internal static class ScanEngine
     private static int? ResolveCodePage(string? label)
     {
         return TextEncoding.TryResolve(label, out Encoding? encoding)
-            ? encoding!.CodePage
+            ? encoding.CodePage
             : null;
     }
 

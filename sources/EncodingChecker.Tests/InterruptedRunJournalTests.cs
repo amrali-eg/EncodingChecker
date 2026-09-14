@@ -43,8 +43,7 @@ public sealed class InterruptedRunJournalTests : IDisposable
         return path;
     }
 
-    private static bool StillHasBom(string path) =>
-        File.ReadAllBytes(path).Take(3).SequenceEqual(Encoding.UTF8.GetPreamble());
+    private static bool StillHasBom(string path) => TestContent.StillHasBom(path);
 
     private List<ConversionReportEntry> Scan()
     {

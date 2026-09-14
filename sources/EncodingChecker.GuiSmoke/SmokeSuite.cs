@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.IO;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -191,10 +190,18 @@ internal sealed class SmokeSuite
             runError = "The smoke runner failed: " + ex;
         }
 
-        SmokeOutcome outcome = build.Errors.Count > 0 || runError is not null
-            ? SmokeOutcome.Failed
-            : results.Select(result => result.Outcome)
+        SmokeOutcome outcome;
+        if (build.Errors.Count > 0 || runError is not null)
+        {
+            outcome = SmokeOutcome.Failed;
+        }
+        else
+        {
+            // Reached only when build evidence and the run itself both succeeded, so the
+            // preflight phase was run and preparation was assigned.
+            outcome = results.Select(result => result.Outcome)
                 .Prepend(preparation!.Outcome).Overall();
+        }
 
         return new SmokeReport
         {
@@ -613,11 +620,11 @@ internal sealed class SmokeSuite
 
         gui.TryConfirmSource(review, "windows-1252", outsideFile);
         Check(gui.ReviewIsOpen(review),
-            "The review closed after refusing an unusable source choice.");
+            "The review closed immediately after confirming an unusable source choice.");
         gui.WaitForReviewText(review, "no longer inside this review");
 
         Check(gui.ReviewIsOpen(review),
-            "The review closed after refusing an unusable source choice.");
+            "The review closed while reporting that the file is outside the review directory.");
         Check(
             gui.ReviewText(review).Contains(outsideFile, StringComparison.OrdinalIgnoreCase),
             "The refusal no longer named the file outside the review directory.");
@@ -663,11 +670,7 @@ internal sealed class SmokeSuite
             return stream.ReadAtLeast(head, 3, throwOnEndOfStream: false) == 3 &&
                    head.SequenceEqual(Encoding.UTF8.GetPreamble());
         }
-        catch (IOException)
-        {
-            return true;
-        }
-        catch (UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return true;
         }
@@ -779,18 +782,9 @@ internal sealed class SmokeSuite
     }
 
     private static Dictionary<string, string> Snapshot(string directory) =>
-        Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(
-                path => Path.GetRelativePath(directory, path),
-                Hash,
-                StringComparer.OrdinalIgnoreCase);
+        SmokePhaseContext.Snapshot(directory);
 
-    private static string Hash(string path)
-    {
-        using FileStream stream = File.OpenRead(path);
-        return Convert.ToHexStringLower(SHA256.HashData(stream));
-    }
+    private static string Hash(string path) => SmokePhaseContext.Hash(path);
 
     private static void Check(bool condition, string message)
     {

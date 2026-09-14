@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Buffers;
 using System.IO;
@@ -272,7 +273,7 @@ internal static class TextEncoding
 
 
     /// <summary>Resolves a codec without allowing an unsupported name to escape.</summary>
-    internal static bool TryResolve(string? name, out Encoding? encoding)
+    internal static bool TryResolve(string? name, [NotNullWhen(true)] out Encoding? encoding)
     {
         encoding = null;
 
@@ -300,7 +301,7 @@ internal static class TextEncoding
         foreach (string name in CharsetNames)
         {
             if (TryResolve(name, out Encoding? encoding) &&
-                codePages.Add(encoding!.CodePage))
+                codePages.Add(encoding.CodePage))
             {
                 encodings.Add(encoding);
             }

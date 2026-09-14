@@ -225,10 +225,13 @@ internal static partial class Program
                 + $"{completed.Count(e => e.NotAttempted)} not attempted.");
         }
 
-        return runFailed
-            ? 3
-            : interrupted ? 4
-            : completed.Any(e => e.Result == ConversionRowResult.Refused) ? 5 : 0;
+        if (runFailed)
+            return 3;
+        if (interrupted)
+            return 4;
+        if (completed.Any(e => e.Result == ConversionRowResult.Refused))
+            return 5;
+        return 0;
     }
 
     // Internal so tests can pin the published CLI exit-code contract.
@@ -325,11 +328,13 @@ internal static partial class Program
         if (!string.IsNullOrWhiteSpace(options.PlanPath))
             options.WhatIf = true;
 
-        ScanAction action = options.DetectOnly
-            ? ScanAction.Detect
-            : options.ValidateCharsets != null
-                ? ScanAction.Validate
-                : ScanAction.Convert;
+        ScanAction action;
+        if (options.DetectOnly)
+            action = ScanAction.Detect;
+        else if (options.ValidateCharsets != null)
+            action = ScanAction.Validate;
+        else
+            action = ScanAction.Convert;
 
         List<string>? validCharsets = null;
         if (action == ScanAction.Validate)

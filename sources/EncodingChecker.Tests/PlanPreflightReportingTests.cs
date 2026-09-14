@@ -1,4 +1,6 @@
 using System.Text;
+using static EncodingChecker.Tests.CliRunner;
+using static EncodingChecker.Tests.ExpectedExitCode;
 
 namespace EncodingChecker.Tests;
 
@@ -23,12 +25,6 @@ namespace EncodingChecker.Tests;
 /// </remarks>
 public sealed class PlanPreflightReportingTests : IDisposable
 {
-    private const int ExpectedClean = 0;
-    private const int ExpectedUsageError = 1;
-    private const int ExpectedChangesNeeded = 2;
-    private const int ExpectedProcessingErrors = 3;
-    private const int ExpectedSafeRefusal = 5;
-
     private readonly string _root =
         Directory.CreateTempSubdirectory("ec_planpreflight_").FullName;
 
@@ -44,31 +40,6 @@ public sealed class PlanPreflightReportingTests : IDisposable
         }
     }
 
-    private static int Run(out string stderr, params string[] args)
-    {
-        TextWriter originalOut = Console.Out;
-        TextWriter originalError = Console.Error;
-
-        try
-        {
-            using var errors = new StringWriter();
-            Console.SetOut(new StringWriter());
-            Console.SetError(errors);
-
-            int exitCode = Program.RunConsoleMode(args);
-            stderr = errors.ToString();
-
-            return exitCode;
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-            Console.SetError(originalError);
-        }
-    }
-
-    private static int Run(params string[] args) => Run(out _, args);
-
     /// <summary>A UTF-8 file with a BOM, so converting to utf-8 rewrites it.</summary>
     private string Write(string name)
     {
@@ -82,8 +53,7 @@ public sealed class PlanPreflightReportingTests : IDisposable
     private static FileStream HoldExclusively(string path) =>
         new(path, FileMode.Open, FileAccess.Read, FileShare.None);
 
-    private static bool StillHasBom(string path) =>
-        File.ReadAllBytes(path).Take(3).SequenceEqual(Encoding.UTF8.GetPreamble());
+    private static bool StillHasBom(string path) => TestContent.StillHasBom(path);
 
     [Fact]
     public void PlanOverAnUnreadableFile_ExitsThreeLikeTheSameScanWithoutPlan()

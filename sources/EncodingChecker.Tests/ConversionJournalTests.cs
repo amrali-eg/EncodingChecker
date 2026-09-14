@@ -38,31 +38,10 @@ public sealed class ConversionJournalTests : IDisposable
         }
     }
 
-    private string Write(string name, string text, string charset)
-    {
-        string path = Path.Combine(_root, name);
-        File.WriteAllBytes(path, Encoding.GetEncoding(charset).GetBytes(text));
-        return path;
-    }
+    private string Write(string name, string text, string charset) =>
+        TestContent.Write(_root, name, text, charset);
 
-    private static int Cli(params string[] args)
-    {
-        TextWriter originalOut = Console.Out;
-        TextWriter originalError = Console.Error;
-
-        try
-        {
-            Console.SetOut(new StringWriter());
-            Console.SetError(new StringWriter());
-
-            return Program.RunConsoleMode(args);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-            Console.SetError(originalError);
-        }
-    }
+    private static int Cli(params string[] args) => CliRunner.Run(args);
 
     private ConversionJournal Load()
     {

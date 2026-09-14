@@ -1,4 +1,5 @@
 using System.Text.Json;
+using static EncodingChecker.Tests.CliRunner;
 
 namespace EncodingChecker.Tests;
 
@@ -33,25 +34,6 @@ public sealed class SemanticsArtifactShapeTests : IDisposable
         catch (IOException)
         {
             // Best-effort cleanup.
-        }
-    }
-
-    private static int Run(params string[] args)
-    {
-        TextWriter outWriter = Console.Out;
-        TextWriter errWriter = Console.Error;
-
-        try
-        {
-            Console.SetOut(new StringWriter());
-            Console.SetError(new StringWriter());
-
-            return Program.RunConsoleMode(args);
-        }
-        finally
-        {
-            Console.SetOut(outWriter);
-            Console.SetError(errWriter);
         }
     }
 

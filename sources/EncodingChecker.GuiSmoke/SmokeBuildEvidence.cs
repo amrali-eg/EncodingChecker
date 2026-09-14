@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.IO;
-using System.Security.Cryptography;
 
 namespace EncodingChecker.GuiSmoke;
 
@@ -34,8 +33,10 @@ internal sealed record SmokeBuildEvidence
         string? assemblyHash = Read("Managed assembly SHA-256", () =>
         {
             try { return Hash(assembly); }
-            catch (FileNotFoundException) { return null; }
-            catch (DirectoryNotFoundException) { return null; }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                return null;
+            }
         });
 
         return new SmokeBuildEvidence
@@ -48,9 +49,5 @@ internal sealed record SmokeBuildEvidence
         };
     }
 
-    private static string Hash(string path)
-    {
-        using FileStream stream = File.OpenRead(path);
-        return Convert.ToHexStringLower(SHA256.HashData(stream));
-    }
+    private static string Hash(string path) => SmokePhaseContext.Hash(path);
 }

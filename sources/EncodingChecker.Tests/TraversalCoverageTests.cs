@@ -46,22 +46,8 @@ public sealed class TraversalCoverageTests
 
     private static (int ExitCode, string Error) RunCli(params string[] args)
     {
-        TextWriter originalOut = Console.Out;
-        TextWriter originalError = Console.Error;
-        using var output = new StringWriter();
-        using var error = new StringWriter();
-
-        try
-        {
-            Console.SetOut(output);
-            Console.SetError(error);
-            return (Program.RunConsoleMode(args), error.ToString());
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-            Console.SetError(originalError);
-        }
+        (int exit, _, string error) = CliRunner.RunCaptured(args);
+        return (exit, error);
     }
 
     [Fact]

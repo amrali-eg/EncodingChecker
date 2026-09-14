@@ -10,10 +10,14 @@ public sealed class ListViewColumnSorterTests
 {
     private static ListViewItem Row(params string[] columns) => new(columns);
 
+    private static ListViewColumnSorter Sorter(
+        int column = 0, SortOrder order = SortOrder.Ascending) =>
+        new() { SortColumn = column, Order = order };
+
     [Fact]
     public void Ascending_OrdersLowerValueFirst()
     {
-        var sorter = new ListViewColumnSorter { SortColumn = 0, Order = SortOrder.Ascending };
+        var sorter = Sorter();
 
         ListViewItem a = Row("apple");
         ListViewItem b = Row("banana");
@@ -25,8 +29,8 @@ public sealed class ListViewColumnSorterTests
     [Fact]
     public void Descending_InvertsAscendingResult()
     {
-        var ascending = new ListViewColumnSorter { SortColumn = 0, Order = SortOrder.Ascending };
-        var descending = new ListViewColumnSorter { SortColumn = 0, Order = SortOrder.Descending };
+        var ascending = Sorter();
+        var descending = Sorter(order: SortOrder.Descending);
 
         ListViewItem a = Row("apple");
         ListViewItem b = Row("banana");
@@ -42,7 +46,7 @@ public sealed class ListViewColumnSorterTests
     [Fact]
     public void TieOnSortColumn_BreaksOnFirstDifferingSubsequentColumn()
     {
-        var sorter = new ListViewColumnSorter { SortColumn = 0, Order = SortOrder.Ascending };
+        var sorter = Sorter();
 
         // Column 0 ties ("same"); column 1 differs and must decide the order.
         ListViewItem x = Row("same", "aaa");
@@ -55,7 +59,7 @@ public sealed class ListViewColumnSorterTests
     [Fact]
     public void AllColumnsEqual_ReturnsZero()
     {
-        var sorter = new ListViewColumnSorter { SortColumn = 0, Order = SortOrder.Ascending };
+        var sorter = Sorter();
 
         ListViewItem x = Row("same", "also-same", "still-same");
         ListViewItem y = Row("same", "also-same", "still-same");
@@ -69,7 +73,7 @@ public sealed class ListViewColumnSorterTests
         // The primary comparison is case-insensitive, so "Apple"/"apple" tie on column 0.
         // The tiebreak must skip column 0 (already compared), not redundantly re-compare
         // it ordinally - otherwise a case-only difference would decide the order.
-        var sorter = new ListViewColumnSorter { SortColumn = 0, Order = SortOrder.Ascending };
+        var sorter = Sorter();
 
         ListViewItem x = Row("Apple", "same");
         ListViewItem y = Row("apple", "same");
@@ -80,7 +84,7 @@ public sealed class ListViewColumnSorterTests
     [Fact]
     public void PrimaryColumnCaseOnlyDifference_FallsThroughToRealDifferenceInLaterColumn()
     {
-        var sorter = new ListViewColumnSorter { SortColumn = 0, Order = SortOrder.Ascending };
+        var sorter = Sorter();
 
         // Column 0 ties (case-insensitive); column 1 genuinely differs and must decide.
         ListViewItem x = Row("Apple", "aaa");
@@ -95,7 +99,7 @@ public sealed class ListViewColumnSorterTests
     {
         // Same case-only-tie check with SortColumn = 1, to confirm the tiebreak skips
         // whichever column was already compared, not always index 0.
-        var sorter = new ListViewColumnSorter { SortColumn = 1, Order = SortOrder.Ascending };
+        var sorter = Sorter(1);
 
         ListViewItem x = Row("same", "Apple");
         ListViewItem y = Row("same", "apple");
@@ -106,7 +110,7 @@ public sealed class ListViewColumnSorterTests
     [Fact]
     public void NonListViewItemArguments_Throw()
     {
-        var sorter = new ListViewColumnSorter { SortColumn = 0, Order = SortOrder.Ascending };
+        var sorter = Sorter();
 
         Assert.Throws<ArgumentNullException>(() => sorter.Compare("not a ListViewItem", Row("x")));
         Assert.Throws<ArgumentNullException>(() => sorter.Compare(Row("x"), "not a ListViewItem"));

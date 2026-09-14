@@ -1,4 +1,6 @@
 using System.Text;
+using static EncodingChecker.Tests.CliRunner;
+using static EncodingChecker.Tests.ExpectedExitCode;
 
 namespace EncodingChecker.Tests;
 
@@ -20,9 +22,6 @@ namespace EncodingChecker.Tests;
 /// </remarks>
 public sealed class DocumentedOptionContractTests : IDisposable
 {
-    private const int ExpectedClean = 0;
-    private const int ExpectedUsageError = 1;
-
     private readonly string _root =
         Directory.CreateTempSubdirectory("ec_optioncontract_").FullName;
 
@@ -41,31 +40,6 @@ public sealed class DocumentedOptionContractTests : IDisposable
             // Best-effort cleanup.
         }
     }
-
-    private static int Run(out string stderr, params string[] args)
-    {
-        TextWriter originalOut = Console.Out;
-        TextWriter originalError = Console.Error;
-
-        try
-        {
-            using var errors = new StringWriter();
-            Console.SetOut(new StringWriter());
-            Console.SetError(errors);
-
-            int exitCode = Program.RunConsoleMode(args);
-            stderr = errors.ToString();
-
-            return exitCode;
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-            Console.SetError(originalError);
-        }
-    }
-
-    private static int Run(params string[] args) => Run(out _, args);
 
     [Theory]
     [InlineData("-Validate", "us-ascii")]

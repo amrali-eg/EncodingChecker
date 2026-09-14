@@ -220,33 +220,30 @@ internal sealed record ConversionJournal
 
         foreach (ConversionReportEntry entry in entries)
         {
-            ConversionStatus status = entry switch
-            {
-                // This overrides the preview result left by the deciding pass.
-                { NotAttempted: true } => ConversionStatus.NotAttempted,
+            // This overrides the preview result left by the deciding pass.
+            ConversionStatus status = entry.NotAttempted
+                ? ConversionStatus.NotAttempted
+                : entry.Result switch
+                {
+                    // A preview records the decision, not a conversion that happened.
+                    ConversionRowResult.Converted when preview
+                        => ConversionStatus.NotAttempted,
+                    ConversionRowResult.Converted => ConversionStatus.Converted,
+                    ConversionRowResult.Unchanged => ConversionStatus.Unchanged,
+                    ConversionRowResult.Skipped => ConversionStatus.Skipped,
+                    ConversionRowResult.Refused => ConversionStatus.Refused,
 
-                _ => entry.Result switch
-            {
-                // A preview records the decision, not a conversion that happened.
-                ConversionRowResult.Converted when preview
-                    => ConversionStatus.NotAttempted,
-                ConversionRowResult.Converted => ConversionStatus.Converted,
-                ConversionRowResult.Unchanged => ConversionStatus.Unchanged,
-                ConversionRowResult.Skipped => ConversionStatus.Skipped,
-                ConversionRowResult.Refused => ConversionStatus.Refused,
+                    // Replacement state outranks the general error result.
+                    ConversionRowResult.Error when entry.ReplacementCommitted == true
+                        => ConversionStatus.ConvertedWithWarning,
+                    ConversionRowResult.Error when entry.ReplacementCommitted is null &&
+                                                   entry.Action == PlannedAction.Convert
+                        => ConversionStatus.InstallationUnknown,
 
-                // Replacement state outranks the general error result.
-                ConversionRowResult.Error when entry.ReplacementCommitted == true
-                    => ConversionStatus.ConvertedWithWarning,
-                ConversionRowResult.Error when entry.ReplacementCommitted is null &&
-                                               entry.Action == PlannedAction.Convert
-                    => ConversionStatus.InstallationUnknown,
-
-                // Read failures are processing errors, not policy refusals.
-                ConversionRowResult.Error => ConversionStatus.Failed,
-                _ => ConversionStatus.NotAttempted,
-            },
-            };
+                    // Read failures are processing errors, not policy refusals.
+                    ConversionRowResult.Error => ConversionStatus.Failed,
+                    _ => ConversionStatus.NotAttempted,
+                };
 
             // Record the encoding actually used to read the source file.
             string sourceLabel = entry.ResolvedSourceLabel ?? entry.EffectiveSourceLabel;
@@ -255,7 +252,7 @@ internal sealed record ConversionJournal
             int codePage = 0;
 
             if (TextEncoding.TryResolve(sourceCharset, out Encoding? sourceEncoding))
-                codePage = sourceEncoding!.CodePage;
+                codePage = sourceEncoding.CodePage;
 
             int? detectedCodePage = ResolveCodePage(entry.DetectedEncodingLabel);
 
@@ -327,7 +324,7 @@ internal sealed record ConversionJournal
     private static int? ResolveCodePage(string? label)
     {
         return TextEncoding.TryResolve(label, out Encoding? encoding)
-            ? encoding!.CodePage
+            ? encoding.CodePage
             : null;
     }
 

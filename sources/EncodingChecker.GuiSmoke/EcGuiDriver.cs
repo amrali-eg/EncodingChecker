@@ -152,7 +152,7 @@ internal sealed class EcGuiDriver : IDisposable
         GuiWindowIdentity identity = review.Identity;
         return ReadMainWindow(
             main => FindReviewWindow(main) is { } current &&
-                    MatchesReview(current, identity),
+                    identity.Matches(current),
             "The conversion review's state could not be read.");
     }
 
@@ -161,19 +161,12 @@ internal sealed class EcGuiDriver : IDisposable
         GuiWindowIdentity identity = review.Identity;
 
         if (WaitFor(
-                () =>
-                {
-                    AutomationElement? main = FindTopLevelWindow("MainForm");
-                    AutomationElement? current = main is null ? null : FindReviewWindow(main);
-
-                    return current is not null &&
-                           MatchesReview(current, identity) &&
-                           VisibleText(current).Contains(
-                               expected,
-                               StringComparison.OrdinalIgnoreCase)
-                        ? new object()
-                        : null;
-                },
+                () => ProbeReview(identity) is { } current &&
+                      VisibleText(current).Contains(
+                          expected,
+                          StringComparison.OrdinalIgnoreCase)
+                    ? new object()
+                    : null,
                 Timeout,
                 out Exception? lastError) is not null)
         {
@@ -181,6 +174,14 @@ internal sealed class EcGuiDriver : IDisposable
         }
 
         throw Expired($"The review did not show '{expected}'.", lastError);
+    }
+
+    /// <summary>Only trust the review originally opened, reacquired by identity.</summary>
+    private AutomationElement? ProbeReview(GuiWindowIdentity identity)
+    {
+        AutomationElement? main = FindTopLevelWindow("MainForm");
+        AutomationElement? current = main is null ? null : FindReviewWindow(main);
+        return current is not null && identity.Matches(current) ? current : null;
     }
 
     internal GuiReview ConfirmSource(
@@ -461,9 +462,23 @@ internal sealed class EcGuiDriver : IDisposable
             }
         }
 
-        bool? nativeWindowExists = nativeHandle == 0
-            ? (errors.Count > 0 ? null : false)
-            : WindowBelongsToProcess(nativeHandle);
+        bool? nativeWindowExists;
+        if (nativeHandle != 0)
+        {
+            // We have a handle: check it directly.
+            nativeWindowExists = WindowBelongsToProcess(nativeHandle);
+        }
+        else if (errors.Count > 0)
+        {
+            // No handle, and a lookup already failed: the environment is unreadable, not
+            // definitely absent.
+            nativeWindowExists = null;
+        }
+        else
+        {
+            // No handle, and nothing failed reading for one: the window is definitely gone.
+            nativeWindowExists = false;
+        }
         AutomationElement? fresh = null;
         bool processWindowFound = false;
         bool lookupFailed = false;
@@ -709,16 +724,9 @@ internal sealed class EcGuiDriver : IDisposable
     {
         GuiWindowIdentity identity = review.Identity;
         ReadResult<T>? result = WaitFor(
-            () =>
-            {
-                AutomationElement? main = FindTopLevelWindow("MainForm");
-                AutomationElement? current = main is null ? null : FindReviewWindow(main);
-
-                return current is not null &&
-                       MatchesReview(current, identity)
-                    ? new ReadResult<T>(read(current))
-                    : null;
-            },
+            () => ProbeReview(identity) is { } current
+                ? new ReadResult<T>(read(current))
+                : null,
             Timeout,
             out Exception? lastError);
 
@@ -756,11 +764,8 @@ internal sealed class EcGuiDriver : IDisposable
 
     private sealed record ReadResult<T>(T Value);
 
-    private GuiWindowIdentity CaptureIdentity(AutomationElement window) =>
+    private static GuiWindowIdentity CaptureIdentity(AutomationElement window) =>
         new(window.Current.NativeWindowHandle, window.Current.ProcessId, window.GetRuntimeId());
-
-    private static bool MatchesReview(AutomationElement window, GuiWindowIdentity identity) =>
-        identity.Matches(window);
 
     private int ResultCount() =>
         FindById(MainWindow, "lstResults") is AutomationElement list

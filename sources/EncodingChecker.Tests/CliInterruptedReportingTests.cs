@@ -20,24 +20,8 @@ public sealed class CliInterruptedReportingTests : IDisposable
 
     private static (int Exit, string Output, string Error) Run(
         string[] args, CancellationToken token = default,
-        Action<ConversionReportEntry>? completed = null)
-    {
-        TextWriter originalOut = Console.Out, originalError = Console.Error;
-        using var output = new StringWriter();
-        using var error = new StringWriter();
-        try
-        {
-            Console.SetOut(output);
-            Console.SetError(error);
-            int exit = Program.RunConsoleMode(args, token, completed);
-            return (exit, output.ToString(), error.ToString());
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-            Console.SetError(originalError);
-        }
-    }
+        Action<ConversionReportEntry>? completed = null) =>
+        CliRunner.RunCapturedWithCancellation(args, token, completed);
 
     [Theory]
     [InlineData(false, 4)]

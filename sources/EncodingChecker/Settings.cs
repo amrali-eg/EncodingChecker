@@ -44,11 +44,7 @@ public sealed class Settings
     /// </summary>
     public void AddRecentDirectory(string directory)
     {
-        for (int i = RecentDirectories.Count - 1; i >= 0; i--)
-        {
-            if (RecentDirectories[i].Equals(directory, StringComparison.OrdinalIgnoreCase))
-                RecentDirectories.RemoveAt(i);
-        }
+        RecentDirectories.RemoveAll(d => d.Equals(directory, StringComparison.OrdinalIgnoreCase));
 
         RecentDirectories.Insert(0, directory);
 
