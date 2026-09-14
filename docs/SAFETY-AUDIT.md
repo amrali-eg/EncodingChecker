@@ -898,6 +898,96 @@ The observation about pinning stands and is the part worth keeping. Both workflo
 happening to hold the same patch, and nothing reports the moment it does not. The failure
 mode here was a false negative; the same looseness could as easily hide a real one.
 
+### v3.14.2 — `24d8bb629ff37d92a31417634f50b39f81cb3cc2`, not re-audited
+
+**It was not measured against the four corpora, and none is required.** This release
+changes neither detection nor conversion policy. Every fix is about the record EC leaves
+behind when a run is cancelled or interrupted — the CSV, the console summary, the journal,
+the exit code — not about what EC detects, converts, or refuses. What EC does for a valid
+input is what v3.14.1 did.
+
+**The v3.12.0 gap is still open.** That build changed `ConversionPolicy` and shipped
+without a corpus run. Nothing here re-audits it, and five records in a row saying "none
+required" must not be read as the requirement having been met.
+
+#### The shipped build reproduces from the tagged commit, on a matching runtime
+
+```
+commit      24d8bb629ff37d92a31417634f50b39f81cb3cc2   (annotated tag v3.14.2)
+worktree    clean detached checkout (git worktree, not the primary clone)
+runner      Windows 10.0.26100 - .NET SDK 10.0.401, runtime 10.0.12
+local       Windows 10.0.26200 - .NET SDK 10.0.401, runtime 10.0.12
+executable  EncodingChecker.exe (framework-dependent and self-contained, single-file)
+  framework-dependent  published and driven  95599e5bb68e1e5009421f3fb841c1b6fd9dcfa9c21a83ccfb48bcd657c920c1
+                       rebuilt locally        95599e5bb68e1e5009421f3fb841c1b6fd9dcfa9c21a83ccfb48bcd657c920c1
+  self-contained       published             f2e2db06f6555c25e3bfff1b1007db8d9df7b18b19a021f0ffc017146f349e3e
+                       rebuilt locally        f2e2db06f6555c25e3bfff1b1007db8d9df7b18b19a021f0ffc017146f349e3e
+```
+
+Both hashes match exactly. This is the runtime-pinning gap the v3.14.1 record named —
+"nothing reports the moment" the checking machine and the runner disagree — resolved by
+coincidence rather than by fixing it: the local machine happened to hold the same 10.0.12
+runtime the runner installed. The workflows still resolve `dotnet-version: "10.0.x"`, so
+this record is evidence for this pair of machines on this day, not a durable guarantee.
+
+The published archives, each downloaded and hashed rather than trusting GitHub's own
+report of them — and confirmed to equal what GitHub itself reports as each asset's digest:
+
+```
+EncodingChecker-3.14.2-framework-dependent.zip
+  7c9ff645b8028b2366c075d091603ff0b11925312989df51ba4087074da457a4
+EncodingChecker-3.14.2-win-x64-self-contained.zip
+  34d8cb7d06be4b41130257548940994479ff4439c4523b977200a7a194c47742
+```
+
+#### What changed in v3.14.2
+
+| | |
+|---|---|
+| GUI CSV export after cancelling, a stale plan, or a plan that couldn't be built | Could report untouched files as `Converted`, because the confirmation dialog's decide pass marks eligible files that way before the write pass ever runs, and nothing corrected the label when the write pass never started. The gap reached further than the dialog: cancelling while the decide pass itself was still running escaped uncaught. Every such row is now marked `NotAttempted`. **BL-31, BL-32, BL-33.** |
+| CLI `-Apply` and direct-scan cancellation | Called unreached rows "unchanged" in the console summary and export instead of `NotAttempted`; a cancelled scan discarded its partial CSV instead of saving it; a cancelled preflight could silently leave no plan with no explanation. Journal schema moves 5 to 6, adding an `Interrupted` flag. |
+| The CSV source-encoding column | Named the encoding EC originally detected, not the encoding actually used when an explicit choice overrode detection. Refused rows are the deliberate exception, still naming the detected source, because nothing converted and the diagnostic on that row is about detection. |
+| Direct-scan cancellation exit code | Returned 4 even with a reached file failure, while `-Apply` already returned 3 for the same case. Both cancellable paths now agree, matching the precedence sentence added to `docs/CLI.md` in the same change. |
+| A cancellation timeout | Could drop the last button-press refusal and report no button found. Now names the refusal. **EC-32.** This affects only the GUI smoke suite's own diagnosis of a stuck run, not `EncodingChecker.exe`. |
+
+#### What this release says about these records
+
+The false-success shape recurred after v3.14.1's own predecessor (BL-31, EC-32) had just
+closed the write-pass half of it. The decide pass — the part that runs *before* the write
+pass, to build the plan the user reviews — used the same `Converted` label for "would
+convert" and never had its own reconciliation step. Closing the write-pass case did not
+close the decide-pass case; they are different code paths that happen to share a label.
+The fix here (`ConversionOrchestrator.Run` wrapping the whole decide/confirm/write
+sequence in one cancellation handler) is the first version of this fix aimed at the
+mechanism — one label reused for two meanings — rather than at another code path where it
+leaked.
+
+Each new regression test was mutation-checked against the exact defect it targets: the fix
+reverted, the assertion confirmed to fail with the described behavior — for the decide-pass
+cancellation gap, this surfaced that `RefreshSourceSnapshots` was cancellable before the
+decide pass proper even begins, which the first draft of the fix did not cover — then the
+fix restored and the test confirmed passing again.
+
+#### Known limits specific to this release
+
+- **No corpus measurement backs this release**, and none is required. What supports it is
+  826 unit tests (was 756), the ten-phase GUI smoke suite, the detector parity check, and a
+  mutation check on every added regression test.
+- **The GUI suite ran locally, not inside the release job for this exact evidence.** The
+  release job's own run — the one that drove the published framework-dependent executable
+  and produced the `gui-smoke-evidence` artifact — passed, per its required check; the
+  hashes and reproduction above were gathered afterward, locally, against the downloaded
+  archives.
+- **Code signing did not run.** The signing secrets are still not configured, so the step
+  was skipped and the archives above are **unsigned**. This is the **seventh** release to
+  carry the limit unchanged — v3.11.2, v3.12.0, v3.12.1, v3.13.0, v3.14.0, v3.14.1,
+  v3.14.2. The v3.14.1 record itself says "fifth," repeating v3.14.0's count instead of
+  incrementing it; that entry is left as written, and the count here is the corrected one.
+- **No accessibility spot check is recorded.** This is the **sixth** release without one.
+  A partial attempt was made this cycle — the review dialog was driven and found fully
+  visible at 100% display scaling — but 125%/150% scaling and the high-contrast check were
+  not reached, so the checklist's three-part check is still not completed for any release.
+
 ## Known limits
 
 - No detector can recover an author's historical legacy encoding when the same bytes admit multiple plausible readings. EC refuses automatic legacy conversion instead of guessing.
