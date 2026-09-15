@@ -46,8 +46,8 @@ jobs:
           $required = @(
             'encoding-checker/sources/EncodingChecker/UnicodeDetector.cs',
             'encoding-checker/sources/EncodingChecker/TextValidation.cs',
-            'line-ending-normalizer/UnicodeDetector.cs',
-            'line-ending-normalizer/TextValidation.cs',
+            'line-ending-normalizer/sources/LineEndingNormalizer/UnicodeDetector.cs',
+            'line-ending-normalizer/sources/LineEndingNormalizer/TextValidation.cs',
             'corpus-testers/CorpusTesting/UnicodeDetector.cs',
             'corpus-testers/CorpusTesting/TextValidation.cs'
           )
@@ -88,11 +88,11 @@ jobs:
           $files = @(
             @{ Name = 'UnicodeDetector.cs'
                Ec   = 'encoding-checker/sources/EncodingChecker/UnicodeDetector.cs'
-               Len  = 'line-ending-normalizer/UnicodeDetector.cs'
+               Len  = 'line-ending-normalizer/sources/LineEndingNormalizer/UnicodeDetector.cs'
                Cor  = 'corpus-testers/CorpusTesting/UnicodeDetector.cs' },
             @{ Name = 'TextValidation.cs'
                Ec   = 'encoding-checker/sources/EncodingChecker/TextValidation.cs'
-               Len  = 'line-ending-normalizer/TextValidation.cs'
+               Len  = 'line-ending-normalizer/sources/LineEndingNormalizer/TextValidation.cs'
                Cor  = 'corpus-testers/CorpusTesting/TextValidation.cs' }
           )
 
