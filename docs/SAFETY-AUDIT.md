@@ -1073,6 +1073,78 @@ behavior did not change" — this record is evidence for the latter.
   one. The checklist's three-part check (display scaling, keyboard-only navigation,
   high-contrast theme) is still not completed for any release.
 
+### v3.14.4 — `8a200a1ebb8e2270dc3a68602c9bede964d2a1d4`, four-corpus audit run
+
+**A four-corpus regression audit was run**, because this release changes a detection
+dependency: `UTF.Unknown` 2.6.0 → 2.7.0. 5,078 files across UnicodeTestSuite v3.0,
+chardet `test-data`, the char-dataset corpus, and UTF.unknown's own 2.6 test corpus
+were compared between a build on the prior dependency version (baseline) and a build
+on the new one (this release). Result: 0 changed / 0 improved / 0 regressed / 0 lateral
+outcomes across all four fidelity metrics (DetectionAccuracy, StrictDecoding,
+CodecConformance, TextPreservation). Source corpora were left unmodified; the audit's
+own integrity checks reported zero defects on both runs. Full comparison report:
+`CorpusTesters/audit/reports/before-after-summary.md` (not committed to this repository;
+CorpusTesters is a separate, unversioned tool repository).
+
+**The v3.12.0 gap is still open.** That build changed `ConversionPolicy` and shipped
+without a corpus run. This entry audits a dependency swap, not that gap.
+
+#### The shipped build reproduces from the tagged commit, on a matching runtime
+
+```
+commit      8a200a1ebb8e2270dc3a68602c9bede964d2a1d4   (annotated tag v3.14.4)
+worktree    clean checkout (fresh git clone into a scratch directory, not the primary clone)
+runner      windows-2025-vs2026, image version 20260907.229.1 - .NET SDK 10.0.401, runtime 10.0.12
+local       Windows 10.0.26200 - .NET SDK 10.0.401, runtime 10.0.12
+executable  EncodingChecker.exe (framework-dependent and self-contained, single-file)
+  framework-dependent  published and driven  322f28f63420c0b20efcdee24b1d2bd29e7981edb94c690d1b573f0c862c2449
+                       rebuilt locally        322f28f63420c0b20efcdee24b1d2bd29e7981edb94c690d1b573f0c862c2449
+  self-contained       published             5cc5a3ec2c9d5f3e9a7372466eca80209539d3d96d362ccf7cd320ad17d2ae7d
+                       rebuilt locally        5cc5a3ec2c9d5f3e9a7372466eca80209539d3d96d362ccf7cd320ad17d2ae7d
+```
+
+Both hashes match exactly, for both build flavors. As with v3.14.3, this is a matching
+runtime by circumstance rather than by a pin: both workflows still resolve
+`dotnet-version: "10.0.x"`, and this record covers this pair of machines on this day.
+
+The published archives, each downloaded and hashed rather than trusting GitHub's own
+report of them — and confirmed to equal what GitHub itself reports as each asset's digest:
+
+```
+EncodingChecker-3.14.4-framework-dependent.zip
+  47fcf7020f87aac9a85465ae7b3c423c677f4f04571c048f6a0c70637a08527a
+EncodingChecker-3.14.4-win-x64-self-contained.zip
+  5549cc7c52ee856d29a5b50f5b28e991916589c2b84c69a4a7466a2368d9b9fc
+```
+
+#### What changed in v3.14.4
+
+| | |
+|---|---|
+| `UTF.Unknown` package reference | 2.6.0 → 2.7.0. Adds .NET 10 support and a `DetectFromBytes(ReadOnlySpan<byte>)` overload. |
+| `TextEncoding.cs` | Calls the new span overload directly instead of copying the detection sample into a `byte[]` first. No change to what is detected. |
+| `TextValidation.cs` (EC-17) | Comment fix only, beside the control/private-use character case: corrected from claiming these characters are "ignored" in the printable-text ratio to stating they lower it (they count toward the total but never toward printable). The calculation is unchanged. Parity-checked identical fix landed in LineEndingNormalizer and CorpusTesters in the same change. |
+
+#### What this release says about these records
+
+Unlike v3.14.3, this release does carry corpus evidence, because it touches the
+detection dependency rather than only refactoring code around it — a minor-version
+package bump is not assumed behavior-neutral by policy, and the four-corpus run is
+what makes "detection outcomes are unchanged" a measured claim instead of an inference
+from the dependency's own release notes (which do not advertise detector changes).
+The comment fix (EC-17) carries no behavioral risk by construction: it changes text
+inside a `//` comment, which does not compile to anything.
+
+#### Known limits specific to this release
+
+- **Code signing did not run.** The signing secrets are still not configured, so the step
+  was skipped and the archives above are **unsigned**. This is the **ninth** release to
+  carry the limit unchanged — v3.11.2, v3.12.0, v3.12.1, v3.13.0, v3.14.0, v3.14.1,
+  v3.14.2, v3.14.3, v3.14.4.
+- **No accessibility spot check is recorded.** This is the **eighth** release without
+  one. The checklist's three-part check (display scaling, keyboard-only navigation,
+  high-contrast theme) is still not completed for any release.
+
 ## Known limits
 
 - No detector can recover an author's historical legacy encoding when the same bytes admit multiple plausible readings. EC refuses automatic legacy conversion instead of guessing.
