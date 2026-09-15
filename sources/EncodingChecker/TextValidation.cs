@@ -140,7 +140,8 @@ internal static class TextValidation
 
             switch (Rune.GetUnicodeCategory(rune))
             {
-                // Ignore control and private-use characters in the ratio.
+                // Control and private-use characters count toward the total but not
+                // toward printable, lowering the ratio.
                 case UnicodeCategory.PrivateUse:
                 case UnicodeCategory.Control:
                     break;
