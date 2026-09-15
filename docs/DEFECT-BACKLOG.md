@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=77 fixed=66 open=7 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
+<!-- backlog-counts total=77 fixed=67 open=6 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 77 findings — 66 fixed, 7 open, 1 not reproduced, 1 withdrawn,
+**Derived count: 77 findings — 67 fixed, 6 open, 1 not reproduced, 1 withdrawn,
 1 intentional behavior, and 1 design decision.** Recompute and check these
 figures with:
 
@@ -50,7 +50,6 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 
 | ID | Finding | Status | Impact | Likelihood | Details |
 |---|---|---|---|---|---|
-| EC-17 | A comment describes the text check backwards | Open | Low | Common | [EC-17](#ec-17) |
 | EC-20 | A file can change while EC is detecting its encoding | Open | Low | Rare | [EC-20](#ec-20) |
 | CX-06 | EC checks for random-looking data before checking for a BOM | Open | Medium | Theoretical | [CX-06](#cx-06) |
 | BL-05 | Force-closing during a conversion can produce an error on exit | Open | Low | Rare | [BL-05](#bl-05) |
@@ -88,6 +87,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | EC-32 | A cancellation timeout could hide repeated refusals to press Cancel | Fixed | — | — | [EC-32](#ec-32) |
 | EC-15 | Plans and journals showed fixed safety flags as if they recorded checks | Fixed | — | — | [EC-15](#ec-15) |
 | BL-18 | BOM-less UTF-16 could be detected and converted as UTF-32 | Fixed | — | — | [BL-18](#bl-18) |
+| EC-17 | A comment describes the text check backwards | Fixed | — | — | [EC-17](#ec-17) |
 | EC-05 | An unreadable skipped or refused entry blocked the whole plan | Fixed | — | — | [EC-05](#ec-05) |
 | EC-06 | Plans rooted at a drive letter could not be applied | Fixed | — | — | [EC-06](#ec-06) |
 | EC-07 | A refusal advised the same ambiguous encoding it rejected | Fixed | — | — | [EC-07](#ec-07) |
@@ -757,9 +757,11 @@ Evidence: `TextValidation.cs` increments the total rune count before its categor
 switch, so those scalars count toward the denominator while never incrementing
 `printable`.
 
-Still open because the fix is not confined to one repository. The comment is
-byte-identical in EncodingChecker, LineEndingNormalizer and CorpusTesters, and
-the parity check requires it to stay that way, so all three must change together.
+Fixed in v3.14.4. The comment now reads "Control and private-use characters
+count toward the total but not toward printable, lowering the ratio." The fix
+landed in all three repositories in the same change (EncodingChecker PR #116,
+LineEndingNormalizer PR #16, CorpusTesters PR #6), keeping the parity-checked
+comment byte-identical across all three. The calculation itself is unchanged.
 
 ### EC-18
 
