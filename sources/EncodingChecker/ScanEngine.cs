@@ -933,6 +933,10 @@ internal static class ScanEngine
             !StrictFileValidation.TryValidateFile(
                 path, sourceEncoding, out string? unchangedDiagnostic))
         {
+            // The plan records the action, and a file that cannot be read in full is not
+            // "already in the target encoding": planning it as Unchanged put it in that
+            // count in the summary and the confirmation dialog.
+            entry.Action = PlannedAction.Refuse;
             entry.Result = ConversionRowResult.Error;
             entry.ReasonCode = ConversionReasonCodes.StrictValidationFailed;
             entry.Diagnostic = unchangedDiagnostic;
