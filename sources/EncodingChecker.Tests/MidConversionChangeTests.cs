@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 
 namespace EncodingChecker.Tests;
@@ -121,6 +122,125 @@ public sealed class MidConversionChangeTests : IDisposable
 
         Assert.False(result.Success);
         Assert.Equal(ConversionErrorCode.Cancelled, result.ErrorCode);
+        Assert.False(result.ReplacementCommitted);
+        Assert.Equal(original, File.ReadAllBytes(path));
+        Assert.Equal([path], Directory.GetFiles(_root));
+    }
+
+    [Fact]
+    public void ACancelledTokenRaisedDuringTheFinalReport_StopsTheConversionAndKeepsTheSource()
+    {
+        // Distinct from the handler throwing: here the handler only requests cancellation and
+        // the converter has to notice the token itself before it installs. Several checkpoints
+        // (before the recheck, before installation, and in the verification read) each honor
+        // the token, so this pins that at least one of them does, not which one.
+        byte[] original = Encoding.UTF8.GetBytes("plain text");
+        string path = WriteSource(original);
+        using var cancellation = new CancellationTokenSource();
+
+        ConversionResult result = Convert(
+            path,
+            new InlineProgress(_ => cancellation.Cancel()),
+            cancellationToken: cancellation.Token);
+
+        Assert.True(cancellation.IsCancellationRequested);
+        Assert.False(result.Success);
+        Assert.Equal(ConversionErrorCode.Cancelled, result.ErrorCode);
+        Assert.False(result.ReplacementCommitted);
+        Assert.Equal(original, File.ReadAllBytes(path));
+        Assert.Equal([path], Directory.GetFiles(_root));
+    }
+
+    // The recheck before verification compares timestamp and length. The check after it compares
+    // a hash of the source, which is what catches a change that leaves both of those alone.
+    private static ConversionResult ConvertExpectingHash(
+        string path, string expectedSha256, Action beforeVerify) =>
+        EncodingConverter.Convert(
+            path,
+            path,
+            new UTF8Encoding(false),
+            new UTF8Encoding(false),
+            new ConversionOptions
+            {
+                ExpectedSourceSha256 = expectedSha256,
+                BeforeVerifyTemporaryOutput = _ => beforeVerify(),
+            });
+
+    private static string Sha256Of(byte[] bytes) =>
+        System.Convert.ToHexStringLower(SHA256.HashData(bytes));
+
+    [Fact]
+    public void ASourceThatStillMatchesItsApprovedHash_IsConverted()
+    {
+        // The control for the tests below: same options, nothing disturbed.
+        byte[] original = Encoding.UTF8.GetBytes("Привет мир");
+        string path = WriteSource(original);
+
+        ConversionResult result = ConvertExpectingHash(path, Sha256Of(original), () => { });
+
+        Assert.True(result.Success);
+        Assert.True(result.ReplacementCommitted);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ASourceRewrittenWithItsTimestampRestored_IsRefusedByTheHashCheck(bool changeLength)
+    {
+        byte[] original = Encoding.UTF8.GetBytes("Привет мир");
+        string path = WriteSource(original);
+        DateTime written = File.GetLastWriteTimeUtc(path);
+
+        // Same byte length by default (т and д are both two bytes in UTF-8), or one byte longer.
+        byte[] changed = changeLength
+            ? [.. original, (byte)'!']
+            : Encoding.UTF8.GetBytes("Привед мир");
+        Assert.Equal(changeLength, changed.Length != original.Length);
+
+        ConversionResult result = ConvertExpectingHash(
+            path,
+            Sha256Of(original),
+            () =>
+            {
+                File.WriteAllBytes(path, changed);
+                File.SetLastWriteTimeUtc(path, written);
+            });
+
+        Assert.False(result.Success);
+        Assert.Equal(ConversionErrorCode.SourceChangedDuringConversion, result.ErrorCode);
+        Assert.Contains("no longer matches", result.ErrorMessage);
+        Assert.False(result.ReplacementCommitted);
+
+        // The file still holds the rewrite: the converted original was not installed over it.
+        Assert.Equal(changed, File.ReadAllBytes(path));
+        Assert.Equal([path], Directory.GetFiles(_root));
+    }
+
+    [Fact]
+    public void ASourceThatCannotBeReReadForTheHashCheck_IsRefusedWithThatReason()
+    {
+        byte[] original = Encoding.UTF8.GetBytes("Привет мир");
+        string path = WriteSource(original);
+        FileStream? held = null;
+        ConversionResult result;
+
+        try
+        {
+            result = ConvertExpectingHash(
+                path,
+                Sha256Of(original),
+                () => held = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None));
+        }
+        finally
+        {
+            held?.Dispose();
+        }
+
+        Assert.NotNull(held);
+        Assert.False(result.Success);
+        Assert.Equal(ConversionErrorCode.SourceChangedDuringConversion, result.ErrorCode);
+        Assert.Contains("could not be re-read", result.ErrorMessage);
+        Assert.False(result.ReplacementCommitted);
         Assert.Equal(original, File.ReadAllBytes(path));
         Assert.Equal([path], Directory.GetFiles(_root));
     }
