@@ -390,6 +390,11 @@ internal static class ScanEngine
                     entry.SourceInterpretation = SourceInterpretation.NotApplicable;
                     entry.Result = ConversionRowResult.Error;
                     entry.ReplacementCommitted = false;
+
+                    // Rows survive between runs; a hash from an earlier snapshot must not
+                    // stand in for bytes this attempt could not read.
+                    entry.ExpectedSourceSha256 = null;
+                    entry.ExpectedSourceSize = null;
                     entry.ReasonCode = ConversionReasonCodes.SourceSnapshotFailed;
                     entry.Diagnostic =
                         $"The source could not be read consistently for planning: {ex.Message}";
