@@ -68,21 +68,26 @@ public sealed class VerificationFailureTests : IDisposable
     {
         byte[] original = Encoding.UTF8.GetBytes("hello world");
         string path = WriteSource("missing-bom.txt", original);
+        byte[]? beforeDamage = null;
 
         ConversionResult result = ConvertUtf8ToUtf8(
             path, new UTF8Encoding(true), writeBom: true, damage: temporaryOutput =>
             {
-                // Same length: overwrite the three BOM bytes with spaces.
-                byte[] bytes = File.ReadAllBytes(temporaryOutput);
-                Assert.Equal(Utf8Bom, bytes[..3]);
+                // Same length: overwrite the three BOM bytes with spaces. Assertions belong
+                // outside this hook, where an exception is reported as an unrelated
+                // ConversionErrorCode.Unexpected.
+                beforeDamage = File.ReadAllBytes(temporaryOutput);
+                byte[] bytes = [.. beforeDamage];
                 bytes[0] = bytes[1] = bytes[2] = (byte)' ';
                 File.WriteAllBytes(temporaryOutput, bytes);
             });
 
+        Assert.NotNull(beforeDamage);
+        Assert.Equal(Utf8Bom, beforeDamage[..3]);
+
         AssertRefusedWithSourceAndDirectoryIntact(result, path, original);
         Assert.Equal(ConversionErrorCode.BomMismatch, result.ErrorCode);
         Assert.Contains("missing the expected byte-order mark", result.ErrorMessage);
-        Assert.False(result.BomVerificationPassed);
     }
 
     [Fact]
@@ -90,21 +95,24 @@ public sealed class VerificationFailureTests : IDisposable
     {
         byte[] original = Encoding.UTF8.GetBytes("hello world");
         string path = WriteSource("extra-bom.txt", original);
+        byte[]? beforeDamage = null;
 
         // Encoding.UTF8 has a preamble, so the BOM check runs; WriteBom = false asks for none.
         ConversionResult result = ConvertUtf8ToUtf8(
             path, Encoding.UTF8, writeBom: false, damage: temporaryOutput =>
             {
-                byte[] bytes = File.ReadAllBytes(temporaryOutput);
-                Assert.NotEqual(Utf8Bom, bytes[..3]);
+                beforeDamage = File.ReadAllBytes(temporaryOutput);
+                byte[] bytes = [.. beforeDamage];
                 Utf8Bom.CopyTo(bytes, 0);
                 File.WriteAllBytes(temporaryOutput, bytes);
             });
 
+        Assert.NotNull(beforeDamage);
+        Assert.NotEqual(Utf8Bom, beforeDamage[..3]);
+
         AssertRefusedWithSourceAndDirectoryIntact(result, path, original);
         Assert.Equal(ConversionErrorCode.BomMismatch, result.ErrorCode);
         Assert.Contains("unexpectedly contains a byte-order mark", result.ErrorMessage);
-        Assert.False(result.BomVerificationPassed);
     }
 
     [Fact]
@@ -113,11 +121,12 @@ public sealed class VerificationFailureTests : IDisposable
         byte[] original = Encoding.UTF8.GetBytes("Hello world");
         string path = WriteSource("same-length.txt", original);
 
+        // A BOM target, so the BOM check runs and passes and BomVerificationPassed says so.
         ConversionResult result = ConvertUtf8ToUtf8(
-            path, new UTF8Encoding(false), writeBom: false, damage: temporaryOutput =>
+            path, new UTF8Encoding(true), writeBom: true, damage: temporaryOutput =>
             {
                 byte[] bytes = File.ReadAllBytes(temporaryOutput);
-                bytes[0] = (byte)'J';
+                bytes[Utf8Bom.Length] = (byte)'J';
                 File.WriteAllBytes(temporaryOutput, bytes);
             });
 
@@ -126,6 +135,7 @@ public sealed class VerificationFailureTests : IDisposable
         Assert.Contains("Decoded content differs from source", result.ErrorMessage);
         Assert.False(result.VerificationPassed);
         Assert.True(result.BomVerificationPassed);
+        Assert.Equal("Hello world".Length, result.UnicodeScalarsVerified);
     }
 
     [Fact]
@@ -137,13 +147,14 @@ public sealed class VerificationFailureTests : IDisposable
         string path = WriteSource("same-bytes.txt", original);
 
         ConversionResult result = ConvertUtf8ToUtf8(
-            path, new UTF8Encoding(false), writeBom: false, damage: temporaryOutput =>
-                File.WriteAllBytes(temporaryOutput, [0xF0, 0x9F, 0x98, 0x80]));
+            path, new UTF8Encoding(true), writeBom: true, damage: temporaryOutput =>
+                File.WriteAllBytes(temporaryOutput, [.. Utf8Bom, 0xF0, 0x9F, 0x98, 0x80]));
 
         AssertRefusedWithSourceAndDirectoryIntact(result, path, original);
         Assert.Equal(ConversionErrorCode.UnicodeMismatch, result.ErrorCode);
         Assert.Contains("Decoded content length differs from source", result.ErrorMessage);
         Assert.Equal(1, result.UnicodeScalarsVerified);
         Assert.False(result.VerificationPassed);
+        Assert.True(result.BomVerificationPassed);
     }
 }
