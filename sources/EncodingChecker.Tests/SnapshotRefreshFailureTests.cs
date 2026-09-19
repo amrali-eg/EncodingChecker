@@ -8,8 +8,9 @@ namespace EncodingChecker.Tests;
 /// </summary>
 /// <remarks>
 /// The snapshot binds each entry to the exact bytes the plan was prepared from. A file that is
-/// locked by another process, or gone by then, cannot be bound, so it is refused as an error
-/// with no recorded hash rather than planned from a read that did not happen.
+/// locked by another process, gone by then, or chosen with a source encoding that is not
+/// available cannot be bound, so it is refused as an error rather than planned from a read that
+/// did not happen.
 /// </remarks>
 public sealed class SnapshotRefreshFailureTests : IDisposable
 {
@@ -22,9 +23,9 @@ public sealed class SnapshotRefreshFailureTests : IDisposable
         {
             Directory.Delete(_root, recursive: true);
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // Best-effort cleanup.
+            // A leftover temp directory must not fail the test run.
         }
     }
 
@@ -43,54 +44,83 @@ public sealed class SnapshotRefreshFailureTests : IDisposable
         TargetEncoding = "utf-8",
     };
 
-    [Theory]
-    [InlineData("locked")]
-    [InlineData("missing")]
-    public void AFileThatCannotBeReadIsAnErrorRowAndItsNeighbourIsStillSnapshotted(string problem)
+    // The failing entry is listed first and the run is sequential, so its neighbour is reached
+    // only if the failure stayed one row.
+    private static void Refresh(ConversionReportEntry bad, ConversionReportEntry good)
     {
-        string good = WriteSource("good.txt");
-        string bad = WriteSource("bad.txt");
-        byte[] badBytes = File.ReadAllBytes(bad);
+        ScanEngine.RefreshSourceSnapshots(
+            [bad, good], maxParallelism: 1, CancellationToken.None);
+    }
 
-        ConversionReportEntry goodEntry = Entry(good);
-        ConversionReportEntry badEntry = Entry(bad);
-
-        FileStream? held = problem == "locked"
-            ? new FileStream(bad, FileMode.Open, FileAccess.Read, FileShare.None)
-            : null;
-
-        if (problem == "missing")
-        {
-            File.Delete(bad);
-        }
-
-        using (held)
-        {
-            ScanEngine.RefreshSourceSnapshots(
-                [badEntry, goodEntry], maxParallelism: 1, CancellationToken.None);
-        }
-
-        Assert.Equal(ConversionRowResult.Error, badEntry.Result);
-        Assert.Equal(PlannedAction.Refuse, badEntry.Action);
-        Assert.Equal(SourceInterpretation.NotApplicable, badEntry.SourceInterpretation);
-        Assert.Equal(ConversionReasonCodes.SourceSnapshotFailed, badEntry.ReasonCode);
-        Assert.False(badEntry.ReplacementCommitted);
+    private static void AssertRefusedAsUnreadable(ConversionReportEntry bad)
+    {
+        Assert.Equal(ConversionRowResult.Error, bad.Result);
+        Assert.Equal(PlannedAction.Refuse, bad.Action);
+        Assert.Equal(SourceInterpretation.NotApplicable, bad.SourceInterpretation);
+        Assert.Equal(ConversionReasonCodes.SourceSnapshotFailed, bad.ReasonCode);
+        Assert.False(bad.ReplacementCommitted);
         Assert.StartsWith(
             "The source could not be read consistently for planning: ",
-            badEntry.Diagnostic,
+            bad.Diagnostic,
             StringComparison.Ordinal);
 
-        // No hash was recorded, so nothing can later mistake this row for a verified source.
-        Assert.Null(badEntry.ExpectedSourceSha256);
+        // This attempt captured nothing, so it recorded no hash.
+        Assert.Null(bad.ExpectedSourceSha256);
+    }
 
-        // The failure is one row: the file beside it was bound to its own bytes.
-        Assert.Equal(ConversionRowResult.Unchanged, goodEntry.Result);
-        Assert.Equal(ConversionMetadataStore.ComputeSha256(good), goodEntry.ExpectedSourceSha256);
+    private static void AssertSnapshotted(ConversionReportEntry good, string path)
+    {
+        Assert.Equal(ConversionRowResult.Unchanged, good.Result);
+        Assert.Equal(ConversionMetadataStore.ComputeSha256(path), good.ExpectedSourceSha256);
+    }
 
-        // Snapshotting only reads; a locked file's bytes are untouched.
-        if (problem == "locked")
+    [Fact]
+    public void AFileHeldByAnotherProcessIsAnErrorRowAndItsNeighbourIsStillSnapshotted()
+    {
+        string goodPath = WriteSource("good.txt");
+        string badPath = WriteSource("bad.txt");
+        ConversionReportEntry good = Entry(goodPath);
+        ConversionReportEntry bad = Entry(badPath);
+
+        using (new FileStream(badPath, FileMode.Open, FileAccess.Read, FileShare.None))
         {
-            Assert.Equal(badBytes, File.ReadAllBytes(bad));
+            Refresh(bad, good);
         }
+
+        AssertRefusedAsUnreadable(bad);
+        AssertSnapshotted(good, goodPath);
+    }
+
+    [Fact]
+    public void AFileThatVanishedIsAnErrorRowAndItsNeighbourIsStillSnapshotted()
+    {
+        string goodPath = WriteSource("good.txt");
+        string badPath = WriteSource("bad.txt");
+        ConversionReportEntry good = Entry(goodPath);
+        ConversionReportEntry bad = Entry(badPath);
+
+        File.Delete(badPath);
+        Refresh(bad, good);
+
+        AssertRefusedAsUnreadable(bad);
+        AssertSnapshotted(good, goodPath);
+    }
+
+    [Fact]
+    public void AnExplicitSourceEncodingThatIsNotAvailableIsAnErrorRowNamingIt()
+    {
+        string goodPath = WriteSource("good.txt");
+        ConversionReportEntry good = Entry(goodPath);
+        ConversionReportEntry bad = Entry(WriteSource("bad.txt"));
+
+        // A source the user chose is never silently replaced by what detection would have said.
+        bad.SourceEncodingWasSpecified = true;
+        bad.CurrentCharsetLabel = "not-a-real-charset";
+
+        Refresh(bad, good);
+
+        AssertRefusedAsUnreadable(bad);
+        Assert.Contains("'not-a-real-charset' is not available", bad.Diagnostic);
+        AssertSnapshotted(good, goodPath);
     }
 }
