@@ -1145,6 +1145,79 @@ inside a `//` comment, which does not compile to anything.
   one. The checklist's three-part check (display scaling, keyboard-only navigation,
   high-contrast theme) is still not completed for any release.
 
+### v3.14.5 — `8d8a9c16ac5d256f3fb177b7f1ea369458ef0c11`, no corpus run
+
+**No four-corpus audit was run.** This release changes neither detection nor
+`ConversionPolicy` (its only edit there is a comment), and `UnicodeDetector.cs` and
+`TextValidation.cs` have no diff since v3.14.4. What EC detects, converts and refuses is
+what v3.14.4 did; the changes are to what a file that failed validation is *planned* as,
+how a failed snapshot is recorded, and how the GUI saves its two report types.
+
+**The v3.12.0 gap is still open.** That build changed `ConversionPolicy` and shipped
+without a corpus run. Nothing here re-audits it, and a release that does not need a
+corpus run must not be read as that requirement having been met.
+
+#### The shipped build reproduces from the tagged commit, on a matching runtime
+
+```
+commit      8d8a9c16ac5d256f3fb177b7f1ea369458ef0c11   (annotated tag v3.14.5)
+worktree    clean checkout (fresh git clone of the tag into a scratch directory, not the primary clone)
+runner      windows-2025-vs2026, image version 20260907.229.1 - .NET SDK 10.0.401, runtime 10.0.12
+local       Windows 10.0.26200 - .NET SDK 10.0.401, runtime 10.0.12
+executable  EncodingChecker.exe (framework-dependent and self-contained, single-file)
+  framework-dependent  published and driven  7bc092c535e6632158a85a1a3d4eb2fac11351e16ee1c101629ec01c3dec117e
+                       rebuilt locally        7bc092c535e6632158a85a1a3d4eb2fac11351e16ee1c101629ec01c3dec117e
+  self-contained       published             f2a951885990d6d86c511a810e4ff335d364cff0bdda5ebf0fb492a5c77f1237
+                       rebuilt locally        f2a951885990d6d86c511a810e4ff335d364cff0bdda5ebf0fb492a5c77f1237
+```
+
+Both hashes match exactly, for both build flavors. The "published and driven" hash is the
+`EcSha256` recorded by the release job's own GUI smoke report (`Outcome` Passed, ten
+phases, no evidence errors, driven on Windows 10.0.26100 with runtime 10.0.12), and it
+equals the executable inside the downloaded archive. As with v3.14.3 and v3.14.4, this is a
+matching runtime by circumstance rather than by a pin: both workflows still resolve
+`dotnet-version: "10.0.x"`, and this record covers this pair of machines on this day.
+
+The published archives, each downloaded and hashed rather than trusting GitHub's own
+report of them — and confirmed to equal what GitHub itself reports as each asset's digest:
+
+```
+EncodingChecker-3.14.5-framework-dependent.zip
+  6f2024fd3cf2239b24933cf52d0c025e5fb1afda8cdb3e5719b21a373c101393
+EncodingChecker-3.14.5-win-x64-self-contained.zip
+  bdc4ba97fd9b1559f26bf18a9c37533900d6822076f0ecd3c2bf4ea1d7b03edc
+```
+
+#### What changed in v3.14.5
+
+| | |
+|---|---|
+| `ScanEngine.cs`, full-file validation of an unchanged file | A file that matched the target codec in the 64 KiB detection sample but failed the full-file check was reported as an error while its planned action stayed `Unchanged`, so the plan summary and confirmation dialog counted it as already in the target encoding. It is now planned as `Refuse`. The file was never converted, the CLI already exited 3, and applying the plan still re-reads the file and leaves its bytes untouched. |
+| `ScanEngine.cs`, failed plan snapshot | A GUI row whose source could not be read kept the hash and size of its previous snapshot, which the plan and journal could then record for this attempt. Both are cleared when the snapshot fails. |
+| `MainForm.Export.cs` | The GUI text and CSV exports opened the chosen file directly, so a failed write erased an existing report. They now write through `AtomicArtifactFile`, and a read-only report or a link is refused rather than replaced. Closes the gap BL-24 missed. |
+| Documentation and comments | `SAFETY.md` now separates failures before installation from a failure to mark the recovery record complete, and names `utf-32le`/`utf-32be` for BOM-less UTF-32; two stale comments corrected. |
+
+#### What this release says about these records
+
+Conversion semantics stay at 7, the plan schema at 6, the journal schema at 6. The
+release carries no corpus evidence because nothing it changed affects detection or
+what is converted. A plan written by an earlier 3.14.x release for a file of the first
+kind records `Unchanged`, so its confirmation dialog still lists that file as already in
+the target encoding; applying it still fails the file safely.
+
+#### Known limits specific to this release
+
+- **Code signing did not run.** The signing secrets are still not configured, so the step
+  was skipped and the archives above are **unsigned**. This is the **tenth** release to
+  carry the limit unchanged — v3.11.2, v3.12.0, v3.12.1, v3.13.0, v3.14.0, v3.14.1,
+  v3.14.2, v3.14.3, v3.14.4, v3.14.5.
+- **No accessibility spot check is recorded.** This is the **ninth** release without
+  one. The checklist's three-part check (display scaling, keyboard-only navigation,
+  high-contrast theme) is still not completed for any release.
+- **The GUI export refusals and the GUI-side fixes were not exercised in a live window.**
+  The smoke suite drives the review dialog and conversion, not the export menu; the
+  export write path is covered by unit tests, and the `SaveFileDialog` around it is not.
+
 ## Known limits
 
 - No detector can recover an author's historical legacy encoding when the same bytes admit multiple plausible readings. EC refuses automatic legacy conversion instead of guessing.
