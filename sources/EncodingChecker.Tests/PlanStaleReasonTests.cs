@@ -4,19 +4,24 @@ using System.Text.Json.Nodes;
 namespace EncodingChecker.Tests;
 
 /// <summary>
-/// A plan that no longer describes the files and codecs in front of it is refused, and each
-/// reason it can go stale is reported as its own message.
+/// A plan that no longer describes the target codec, the files or their codecs is refused, and
+/// each reason it can go stale is reported as its own message.
 /// </summary>
 /// <remarks>
-/// Applying a plan is the one place EC writes files it did not just look at, so the plan carries
-/// what it was reviewed against - the target codec, each file's hash, the source codec and how
-/// it was detected - and <see cref="ConversionPlan.FindStaleFiles"/> checks every one of them
-/// again. Each case here edits one recorded fact in a plan that is otherwise valid and asserts
-/// exactly one stale message, so a check that is dropped fails its own test, and a check that
-/// fires for the wrong reason fails the control.
+/// A plan is applied later than it was reviewed, so it records what it was reviewed against.
+/// <see cref="ConversionPlan.FindStaleFiles"/> checks that the target codec is still available
+/// and, for each file, that its path stays inside the plan's directory and is listed once, that
+/// the file still exists without a link in its path and still has the recorded hash, that the
+/// source codec (for a file scheduled for conversion) still resolves to the recorded code page,
+/// and that the recorded detected codec still resolves to the recorded code page and is
+/// recorded completely. It does not consult the recorded BOM flags or whether a source was
+/// chosen.
 /// <para>
-/// The tests load a plan EC really wrote, then change it with <c>with</c> expressions instead of
-/// writing JSON, since the records are init-only.
+/// Each stale-reason case loads a plan EC really wrote, changes one recorded fact with a
+/// <c>with</c> expression (the records are init-only), and asserts the one message that fact
+/// should produce, in full. The untouched plan is checked to be clean first, so a message can
+/// only come from the change. The two-field detection theory, the held file and the load
+/// errors change a condition instead of a single fact.
 /// </para>
 /// </remarks>
 public sealed class PlanStaleReasonTests : IDisposable
@@ -36,22 +41,25 @@ public sealed class PlanStaleReasonTests : IDisposable
         }
         catch (IOException)
         {
-            // Best-effort cleanup.
+            // A leftover temp directory must not fail the test run.
         }
     }
 
-    // A UTF-8 file with a BOM, so converting to UTF-8 rewrites it and the plan schedules a Convert.
-    private string WriteSource(string name = "a.txt")
-    {
-        string path = Path.Combine(_root, name);
-        File.WriteAllText(path, "hello world", new UTF8Encoding(true));
+    // The path a stale message names for a file in the plan's directory.
+    private string PathOf(string name) => Path.GetFullPath(Path.Combine(_root, name));
 
-        return path;
+    // A UTF-8 file with a BOM, so converting to UTF-8 rewrites it and the plan schedules a Convert.
+    private void WriteSource(string name)
+    {
+        File.WriteAllText(Path.Combine(_root, name), "hello world", new UTF8Encoding(true));
     }
 
-    private ConversionPlan MakePlan()
+    private ConversionPlan MakePlan(params string[] names)
     {
-        WriteSource();
+        foreach (string name in names.Length == 0 ? new[] { "a.txt" } : names)
+        {
+            WriteSource(name);
+        }
 
         Assert.Equal(
             0,
@@ -61,21 +69,24 @@ public sealed class PlanStaleReasonTests : IDisposable
         Assert.Null(error);
         Assert.NotNull(plan);
 
-        PlannedFile file = Assert.Single(plan.Files);
-        Assert.Equal(PlannedAction.Convert, file.Action);
+        // The facts the cases below rely on are checked here, so a change that stopped EC
+        // recording them fails loudly instead of leaving every case testing nothing.
+        Assert.NotEmpty(plan.Files);
+
+        foreach (PlannedFile file in plan.Files)
+        {
+            Assert.Equal(PlannedAction.Convert, file.Action);
+            Assert.Equal("utf-8", file.SourceEncoding);
+            Assert.Equal(65001, file.SourceCodePage);
+            Assert.Equal("utf-8", file.DetectedEncoding);
+            Assert.Equal(65001, file.DetectedCodePage);
+            Assert.True(file.DetectedHasBom);
+        }
+
+        Assert.Empty(plan.FindStaleFiles());
 
         return plan;
     }
-
-    // Pins the recorded detection to a known state, so each case below changes one fact from a
-    // baseline that is itself valid.
-    private static ConversionPlan WithDetectedUtf8(ConversionPlan plan) =>
-        Replace(plan, plan.Files[0] with
-        {
-            DetectedEncoding = "utf-8",
-            DetectedCodePage = 65001,
-            DetectedHasBom = true,
-        });
 
     private static ConversionPlan Replace(ConversionPlan plan, params PlannedFile[] files) =>
         plan with { Files = files };
@@ -84,18 +95,9 @@ public sealed class PlanStaleReasonTests : IDisposable
         Assert.Single(plan.FindStaleFiles());
 
     [Fact]
-    public void ThePlanUsedAsABaselineIsNotStale()
-    {
-        // The control: every test below changes one thing in this plan and expects one message.
-        ConversionPlan plan = WithDetectedUtf8(MakePlan());
-
-        Assert.Empty(plan.FindStaleFiles());
-    }
-
-    [Fact]
     public void ATargetEncodingThatIsNoLongerAvailable_IsStale()
     {
-        ConversionPlan plan = WithDetectedUtf8(MakePlan()) with { TargetEncoding = NoSuchCharset };
+        ConversionPlan plan = MakePlan() with { TargetEncoding = NoSuchCharset };
 
         Assert.Equal(
             $"Target encoding '{NoSuchCharset}' is not available.",
@@ -105,20 +107,34 @@ public sealed class PlanStaleReasonTests : IDisposable
     [Fact]
     public void AFileListedTwice_IsStaleTheSecondTime()
     {
-        ConversionPlan plan = WithDetectedUtf8(MakePlan());
+        ConversionPlan plan = MakePlan();
         plan = Replace(plan, plan.Files[0], plan.Files[0]);
 
-        Assert.EndsWith("(appears more than once in the plan)", OnlyMessage(plan));
+        Assert.Equal(
+            $"{PathOf("a.txt")} (appears more than once in the plan)",
+            OnlyMessage(plan));
+    }
+
+    [Fact]
+    public void AFileListedTwiceUnderDifferentCase_IsStaleTheSecondTime()
+    {
+        // Paths are compared without regard to case, as the file system does.
+        ConversionPlan plan = MakePlan();
+        plan = Replace(plan, plan.Files[0], plan.Files[0] with { RelativePath = "A.TXT" });
+
+        Assert.Equal(
+            $"{PathOf("A.TXT")} (appears more than once in the plan)",
+            OnlyMessage(plan));
     }
 
     [Fact]
     public void ASourceEncodingThatIsNoLongerAvailable_IsStale()
     {
-        ConversionPlan plan = WithDetectedUtf8(MakePlan());
+        ConversionPlan plan = MakePlan();
         plan = Replace(plan, plan.Files[0] with { SourceEncoding = NoSuchCharset });
 
-        Assert.EndsWith(
-            $"(source encoding '{NoSuchCharset}' is not available)",
+        Assert.Equal(
+            $"{PathOf("a.txt")} (source encoding '{NoSuchCharset}' is not available)",
             OnlyMessage(plan));
     }
 
@@ -126,11 +142,11 @@ public sealed class PlanStaleReasonTests : IDisposable
     public void ASourceCodecWhoseIdentityChanged_IsStale()
     {
         // The name still resolves, but to a different code page than the one the plan recorded.
-        ConversionPlan plan = WithDetectedUtf8(MakePlan());
+        ConversionPlan plan = MakePlan();
         plan = Replace(plan, plan.Files[0] with { SourceCodePage = 1252 });
 
-        Assert.EndsWith(
-            "(source codec identity does not match the plan)",
+        Assert.Equal(
+            $"{PathOf("a.txt")} (source codec identity does not match the plan)",
             OnlyMessage(plan));
     }
 
@@ -140,7 +156,7 @@ public sealed class PlanStaleReasonTests : IDisposable
     [InlineData("unknownName")]
     public void ADetectedCodecWhoseIdentityChanged_IsStale(string change)
     {
-        ConversionPlan plan = WithDetectedUtf8(MakePlan());
+        ConversionPlan plan = MakePlan();
 
         PlannedFile changed = change switch
         {
@@ -149,8 +165,8 @@ public sealed class PlanStaleReasonTests : IDisposable
             _ => plan.Files[0] with { DetectedEncoding = NoSuchCharset },
         };
 
-        Assert.EndsWith(
-            "(detected codec identity does not match the plan)",
+        Assert.Equal(
+            $"{PathOf("a.txt")} (detected codec identity does not match the plan)",
             OnlyMessage(Replace(plan, changed)));
     }
 
@@ -160,7 +176,7 @@ public sealed class PlanStaleReasonTests : IDisposable
     public void DetectionDetailsWithoutADetectedCodec_AreStale(bool keepCodePage, bool keepBom)
     {
         // A recorded code page or BOM with no detected encoding to attach it to.
-        ConversionPlan plan = WithDetectedUtf8(MakePlan());
+        ConversionPlan plan = MakePlan();
         plan = Replace(
             plan,
             plan.Files[0] with
@@ -170,41 +186,108 @@ public sealed class PlanStaleReasonTests : IDisposable
                 DetectedHasBom = keepBom,
             });
 
-        Assert.EndsWith(
-            "(detected codec provenance is incomplete)",
+        Assert.Equal(
+            $"{PathOf("a.txt")} (detected codec provenance is incomplete)",
             OnlyMessage(plan));
     }
 
     [Fact]
     public void AFileThatCannotBeReadForItsHash_IsStaleWithTheReasonTheSystemGave()
     {
-        ConversionPlan plan = WithDetectedUtf8(MakePlan());
-        string path = Path.Combine(_root, "a.txt");
+        ConversionPlan plan = MakePlan();
+        string path = PathOf("a.txt");
 
         // A second open is refused exactly as it would be while another process holds the file.
         using var held = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
 
-        string message = OnlyMessage(plan);
+        // The system's own reason, obtained the same way the plan check obtains it, so the
+        // message is pinned in full and cannot be mistaken for the link or hash messages.
+        string reason = Assert.Throws<IOException>(
+            () => ConversionMetadataStore.ComputeSha256(path)).Message;
 
-        Assert.StartsWith(path, message);
-        Assert.DoesNotContain("contents changed", message);
-        Assert.DoesNotContain("no longer exists", message);
+        Assert.Equal($"{path} ({reason})", OnlyMessage(plan));
     }
 
     [Fact]
     public void ARelativePathTheSystemCannotResolve_IsReportedAsLeavingThePlansDirectory()
     {
         // An embedded NUL is rejected by path resolution itself, before any containment check.
-        ConversionPlan plan = WithDetectedUtf8(MakePlan());
+        ConversionPlan plan = MakePlan();
         PlannedFile file = plan.Files[0] with { RelativePath = "bad\0name.txt" };
         plan = Replace(plan, file);
 
         Assert.Null(plan.ResolvePath(file));
-        Assert.EndsWith("(resolves outside the plan's directory)", OnlyMessage(plan));
+        Assert.Equal(
+            "bad\0name.txt (resolves outside the plan's directory)",
+            OnlyMessage(plan));
     }
 
     [Fact]
-    public void AnEmptyPlanFile_IsRefusedAsEmpty()
+    public void EveryStaleFileIsReported_NotJustTheFirst()
+    {
+        // One bad target and three files, each stale for a different reason. Any of these
+        // returning early would drop the messages after it.
+        ConversionPlan plan = MakePlan("a.txt", "b.txt", "c.txt");
+
+        File.Delete(PathOf("b.txt"));
+        File.WriteAllText(PathOf("c.txt"), "changed since the plan", new UTF8Encoding(true));
+
+        plan = plan with
+        {
+            TargetEncoding = NoSuchCharset,
+            Files =
+            [
+                .. plan.Files.Select(f => f.RelativePath == "a.txt"
+                    ? f with { SourceCodePage = 1252 }
+                    : f),
+            ],
+        };
+
+        string[] expected =
+        [
+            $"Target encoding '{NoSuchCharset}' is not available.",
+            $"{PathOf("a.txt")} (source codec identity does not match the plan)",
+            $"{PathOf("b.txt")} (no longer exists)",
+            $"{PathOf("c.txt")} (contents changed since the plan was made)",
+        ];
+
+        Assert.Equal(expected, plan.FindStaleFiles());
+    }
+
+    [Fact]
+    public void AnEntryThatIsNotScheduledForConversion_IsNotHeldToTheSourceCodecChecks()
+    {
+        // A refusal writes nothing, so its source codec is a note, not a promise. Its hash is
+        // still checked when it has one, and a refusal recorded without one is left alone.
+        ConversionPlan plan = MakePlan();
+        PlannedFile refusal = plan.Files[0] with
+        {
+            Action = PlannedAction.Refuse,
+            SourceEncoding = NoSuchCharset,
+            SourceCodePage = 1,
+        };
+
+        Assert.Empty(Replace(plan, refusal).FindStaleFiles());
+        Assert.Empty(Replace(plan, refusal with { Sha256 = "" }).FindStaleFiles());
+
+        Assert.Equal(
+            $"{PathOf("a.txt")} (contents changed since the plan was made)",
+            OnlyMessage(Replace(plan, refusal with { Sha256 = new string('0', 64) })));
+    }
+
+    [Fact]
+    public void AnEmptyFileList_IsNotStale_ButTheTargetIsStillChecked()
+    {
+        ConversionPlan plan = Replace(MakePlan());
+
+        Assert.Empty(plan.FindStaleFiles());
+        Assert.Equal(
+            $"Target encoding '{NoSuchCharset}' is not available.",
+            OnlyMessage(plan with { TargetEncoding = NoSuchCharset }));
+    }
+
+    [Fact]
+    public void ANullPlanDocument_IsRefusedAsEmpty()
     {
         File.WriteAllText(PlanPath, "null");
 
