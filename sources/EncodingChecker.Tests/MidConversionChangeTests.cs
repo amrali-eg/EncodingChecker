@@ -3,14 +3,16 @@ using System.Text;
 namespace EncodingChecker.Tests;
 
 /// <summary>
-/// A change that happens while a conversion is running must be refused, not installed over.
+/// Conversion stays safe when the source changes, or the progress callback misbehaves, while it
+/// runs.
 /// </summary>
 /// <remarks>
 /// The final progress report is delivered after the last byte is written and before the
 /// source is rechecked, so a report handler that touches the source lands in exactly the
-/// window the recheck exists to close. The handler runs inline (not through
-/// <see cref="Progress{T}"/>, which posts to a synchronization context) so the change is
-/// made before the recheck rather than at some later point.
+/// window the recheck exists to close. The handler runs inline because
+/// <see cref="Progress{T}"/> invokes its handler asynchronously, possibly after the recheck,
+/// and the change would then be missed. The other tests use the same seam to make the callback
+/// throw or cancel.
 /// </remarks>
 public sealed class MidConversionChangeTests : IDisposable
 {
@@ -45,12 +47,13 @@ public sealed class MidConversionChangeTests : IDisposable
     private static ConversionResult Convert(
         string path,
         IProgress<ConversionProgress>? progress,
+        Encoding? target = null,
         CancellationToken cancellationToken = default) =>
         EncodingConverter.Convert(
             path,
             path,
             new UTF8Encoding(false),
-            new UTF8Encoding(false),
+            target ?? new UTF8Encoding(false),
             new ConversionOptions(),
             progress,
             cancellationToken);
@@ -65,6 +68,10 @@ public sealed class MidConversionChangeTests : IDisposable
         ConversionResult result = Convert(
             path,
             new InlineProgress(_ => File.SetLastWriteTimeUtc(path, touched)));
+
+        // A progress handler's exceptions are swallowed, so confirm the touch itself happened;
+        // otherwise a failed touch would surface below as an unrelated success.
+        Assert.Equal(touched, File.GetLastWriteTimeUtc(path));
 
         Assert.False(result.Success);
         Assert.Equal(ConversionErrorCode.SourceChangedDuringConversion, result.ErrorCode);
@@ -82,17 +89,24 @@ public sealed class MidConversionChangeTests : IDisposable
         string path = WriteSource(original);
         int reports = 0;
 
+        // UTF-8 to UTF-16 so the installed bytes differ from the source: an unchanged file would
+        // mean nothing was installed.
+        Encoding utf16 = new UnicodeEncoding(bigEndian: false, byteOrderMark: false);
+
         ConversionResult result = Convert(
             path,
             new InlineProgress(_ =>
             {
                 reports++;
                 throw new InvalidOperationException("the UI went away");
-            }));
+            }),
+            utf16);
 
         Assert.True(reports > 0, "the handler was never invoked, so nothing was tested");
         Assert.True(result.Success);
-        Assert.Equal(original, File.ReadAllBytes(path));
+        Assert.True(result.ReplacementCommitted);
+        Assert.Equal(utf16.GetBytes("plain text"), File.ReadAllBytes(path));
+        Assert.Equal([path], Directory.GetFiles(_root));
     }
 
     [Fact]
