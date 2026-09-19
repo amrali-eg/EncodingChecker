@@ -76,37 +76,96 @@ public sealed class ConversionConfirmationFormTests : IDisposable
     private static string AllText(Control root) =>
         string.Join("\n", Descendants(root).Select(c => c.Text));
 
-    [Fact]
-    public void ItBuildsForAMixOfEveryOutcome()
+    private static IEnumerable<Control> Named(Control root, string name) =>
+        Descendants(root).Where(c => c.Name == name);
+
+    // The count the dialog shows beside a category label, or null when the category is hidden.
+    private static string? CountShownFor(Control root, string label)
     {
-        Write("jp.txt", "こんにちは世界。日本語のテキストです。", "shift_jis");
-        Write("ambiguous.txt", "Le café était déjà prêt", "windows-1252");
-        Write("plain.txt", "just ascii here", "ascii");
-        Write("already.txt", "already utf-8 世界", "utf-8");
+        Label? cell = Descendants(root).OfType<Label>()
+            .FirstOrDefault(l => l.Text == label && l.Parent is TableLayoutPanel);
+
+        if (cell?.Parent is not TableLayoutPanel table)
+            return null;
+
+        return table.GetControlFromPosition(0, table.GetPositionFromControl(cell).Row)?.Text;
+    }
+
+    [Fact]
+    public void TheSummaryShowsEveryOutcomeWithItsCount()
+    {
+        // A different number of files in each of the five categories the dialog reports, so a
+        // count shown against the wrong label cannot go unnoticed: 1, 2, 3, 4 and 5.
+        WriteBytes("convertible1.txt", [0xEF, 0xBB, 0xBF, .. "hello world"u8]);
+
+        for (int i = 1; i <= 2; i++)
+            Write($"jp{i}.txt", "こんにちは世界。日本語のテキストです。", "shift_jis");
+
+        for (int i = 1; i <= 3; i++)
+            WriteBytes($"already{i}.txt", Encoding.UTF8.GetBytes("already utf-8 世界"));
+
+        for (int i = 1; i <= 4; i++)
+        {
+            byte[] unidentified = new byte[4096];
+            new Random(418 + i).NextBytes(unidentified);
+            WriteBytes($"unknown{i}.bin", unidentified);
+        }
+
+        for (int i = 1; i <= 5; i++)
+            WriteBytes($"double-bom{i}.txt", [0xEF, 0xBB, 0xBF, 0xEF, 0xBB, 0xBF, .. "hello world"u8]);
 
         ConversionPlan plan = Plan();
+        ConversionPlanSummary summary = plan.Summary;
+
+        // The fixtures reach the outcomes they are named for, or the checks below prove nothing.
+        Assert.Equal(15, summary.Selected);
+        Assert.Equal(1, summary.ReadyToConvert);
+        Assert.Equal(2, summary.NeedsSourceChoice);
+        Assert.Equal(3, summary.AlreadyTarget);
+        Assert.Equal(4, summary.NotIdentified);
+        Assert.Equal(5, summary.OtherRefusals);
 
         UiTest.OnStaThread(() =>
         {
             using var form = new ConversionConfirmationForm(plan);
 
-            Assert.NotEmpty(Descendants(form).ToList());
+            Assert.Equal("1", CountShownFor(form, "Ready to convert"));
+            Assert.Equal("2", CountShownFor(form, "Needs a source encoding"));
+            Assert.Equal("3", CountShownFor(form, "Already in the target encoding"));
+            Assert.Equal("4", CountShownFor(form, "Encoding not identified"));
+            Assert.Equal("5", CountShownFor(form, "Cannot be processed safely"));
+
+            // Only the files that need a source are offered a choice.
+            var refused = Assert.IsType<ListView>(
+                Assert.Single(Named(form, "lstRefusedFiles")));
+            Assert.Equal(
+                ["jp1.txt", "jp2.txt"],
+                refused.Items.Cast<ListViewItem>().Select(i => i.Text).Order());
+            Assert.Single(Named(form, "lstSourceEncoding"));
+            Assert.Single(Named(form, "btnConfirmSourceEncoding"));
         });
     }
 
     [Fact]
-    public void ItBuildsWhenNothingIsRefused()
+    public void ItBuildsWithoutASourceChoicePanelWhenNothingNeedsOne()
     {
-        // The common case, and the one where a refusal panel must not appear at all.
-        Write("jp.txt", "こんにちは世界。日本語のテキストです。", "shift_jis");
+        // The common case, and the one where the refusal panel must not appear at all.
+        WriteBytes("convertible.txt", [0xEF, 0xBB, 0xBF, .. "hello world"u8]);
 
         ConversionPlan plan = Plan();
+
+        PlannedFile planned = Assert.Single(plan.Files);
+        Assert.Equal(PlannedAction.Convert, planned.Action);
+        Assert.False(planned.NeedsSourceChoice);
 
         UiTest.OnStaThread(() =>
         {
             using var form = new ConversionConfirmationForm(plan);
 
-            Assert.DoesNotContain("need an explicit source encoding", AllText(form));
+            Assert.Equal("1", CountShownFor(form, "Ready to convert"));
+            Assert.Empty(Named(form, "lstRefusedFiles"));
+            Assert.Empty(Named(form, "lstSourceEncoding"));
+            Assert.Empty(Named(form, "btnConfirmSourceEncoding"));
         });
     }
 
