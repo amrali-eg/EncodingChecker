@@ -4,11 +4,9 @@ using System.Windows.Forms;
 namespace EncodingChecker.Tests;
 
 /// <summary>
-/// The confirmation dialog is the only part of the safety model a GUI user ever reads,
-/// and until now it was also the only part no test had ever executed. Layout code that
-/// has never run is layout code that throws the first time somebody converts a directory
-/// with an unusual mix of outcomes — and it would throw at exactly the moment the user is
-/// being asked to approve something.
+/// The confirmation dialog is the only part of the safety model a GUI user ever reads, and
+/// it describes the outcomes at exactly the moment the user is asked to approve them. Layout
+/// code that throws on an unusual mix of outcomes would fail there.
 ///
 /// These build it against real plans rather than asserting on pixels: every outcome mix,
 /// on an STA thread, checking that it constructs and that what it says matches the plan
@@ -96,6 +94,12 @@ public sealed class ConversionConfirmationFormTests : IDisposable
     {
         // A different number of files in each of the five categories the dialog reports, so a
         // count shown against the wrong label cannot go unnoticed: 1, 2, 3, 4 and 5.
+        //
+        // Each fixture reaches its category for a reason: a UTF-8 BOM the target omits is
+        // rewritten; Shift_JIS text needs the user to name its source; UTF-8 without a BOM
+        // already matches; random bytes identify as no encoding, and the fixed seeds keep them
+        // that way; two leading BOMs are refused for a reason no source choice can fix. If a
+        // detector change moves a fixture, the plan-summary assertions below fail first.
         WriteBytes("convertible1.txt", [0xEF, 0xBB, 0xBF, .. "hello world"u8]);
 
         for (int i = 1; i <= 2; i++)
@@ -163,6 +167,13 @@ public sealed class ConversionConfirmationFormTests : IDisposable
             using var form = new ConversionConfirmationForm(plan);
 
             Assert.Equal("1", CountShownFor(form, "Ready to convert"));
+
+            // Categories with no files are not listed at all.
+            Assert.Null(CountShownFor(form, "Needs a source encoding"));
+            Assert.Null(CountShownFor(form, "Already in the target encoding"));
+            Assert.Null(CountShownFor(form, "Encoding not identified"));
+            Assert.Null(CountShownFor(form, "Cannot be processed safely"));
+
             Assert.Empty(Named(form, "lstRefusedFiles"));
             Assert.Empty(Named(form, "lstSourceEncoding"));
             Assert.Empty(Named(form, "btnConfirmSourceEncoding"));
