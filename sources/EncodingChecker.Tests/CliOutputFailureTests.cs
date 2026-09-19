@@ -72,9 +72,9 @@ public sealed class CliOutputFailureTests : IDisposable
     // Outputs are staged in a temporary file beside the destination; a failed write removes it.
     private void AssertNoStagingFileLeft()
     {
-        Assert.Empty(
-            Directory.EnumerateFiles(_root, "*", SearchOption.AllDirectories)
-                .Where(f => f.EndsWith(EncodingConverter.TempFileSuffix, StringComparison.Ordinal)));
+        Assert.DoesNotContain(
+            Directory.EnumerateFiles(_root, "*", SearchOption.AllDirectories),
+            f => f.EndsWith(EncodingConverter.TempFileSuffix, StringComparison.Ordinal));
     }
 
     private void MakePlan()
