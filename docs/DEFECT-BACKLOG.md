@@ -431,6 +431,12 @@ The recovery sidecar keeps its own writer, which also reads back and verifies wh
 it wrote - more than the shared one does, and not worth reducing. The same change
 closed EC-16.
 
+**Later correction:** the two GUI exports, the text list and the CSV report, were
+missed and still opened the chosen file directly, so a failed write could erase a
+previous report. They now write through `AtomicArtifactFile` as well (`GuiExportWriteTests`
+fail a mid-write error against the old behaviour and pass now). The save dialog
+around that step is not exercised by tests.
+
 ### BL-25
 
 **EC and LineEndingNormalizer both verify that conversion preserved the content,

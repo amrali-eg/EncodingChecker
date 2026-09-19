@@ -36,10 +36,9 @@ public partial class MainForm
     }
 
     /// <summary>
-    /// Shared shape for the two exports whose failure is an I/O exception. The journal
-    /// export is deliberately not routed through this: its Save method reports failure
-    /// by returning an error string, and forcing that into a thrown exception here would
-    /// manufacture one that was never raised.
+    /// Shared shape for the text and CSV exports. The journal export is deliberately not
+    /// routed through this: its Save method already writes atomically and reports failure by
+    /// returning an error string.
     /// </summary>
     private void ExportToFile(
         string title,
@@ -60,16 +59,24 @@ public partial class MainForm
         if (saveFileDialog.ShowDialog(this) != DialogResult.OK)
             return;
 
-        try
-        {
-            using var writer = new StreamWriter(saveFileDialog.FileName, false, encoding);
-            write(writer);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            ShowWarning(failureMessage, ex.Message);
-        }
+        string? error = WriteExportFile(saveFileDialog.FileName, encoding, write);
+
+        if (error is not null)
+            ShowWarning(failureMessage, error);
     }
+
+    /// <summary>
+    /// Writes an export without replacing an existing report until the new one is complete,
+    /// so a failed write leaves the previous report as it was.
+    /// </summary>
+    /// <returns><see langword="null"/> on success; otherwise, why the write failed.</returns>
+    internal static string? WriteExportFile(
+        string path, Encoding encoding, Action<StreamWriter> write) =>
+        AtomicArtifactFile.Write(path, stream =>
+        {
+            using var writer = new StreamWriter(stream, encoding, leaveOpen: true);
+            write(writer);
+        });
 
     private void OnExportResultsOpening(object? sender, EventArgs e)
     {
