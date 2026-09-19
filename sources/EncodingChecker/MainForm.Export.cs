@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Windows.Forms;
 
@@ -20,19 +21,28 @@ public partial class MainForm
             title: @"Export to a Text File",
             filter: @"Text files (*.txt)|*.txt",
             defaultFileName: "Encoding.txt",
-            encoding: new UTF8Encoding(true),
+            encoding: TextExportEncoding,
             failureMessage: "Failed to export the report: {0}",
-            write: writer =>
-            {
-                foreach (ListViewItem item in lstResults.CheckedItems)
-                {
-                    string charset = item.SubItems[ResultsColumnCharset].Text;
-                    string fileName = item.SubItems[ResultsColumnFileName].Text;
-                    string directory = item.SubItems[ResultsColumnDirectory].Text;
+            write: writer => WriteTextExport(
+                lstResults.CheckedItems.Cast<ListViewItem>().Select(item =>
+                (
+                    item.SubItems[ResultsColumnCharset].Text,
+                    item.SubItems[ResultsColumnDirectory].Text,
+                    item.SubItems[ResultsColumnFileName].Text
+                )),
+                writer));
+    }
 
-                    writer.WriteLine("{0}\t{1}\\{2}", charset, directory, fileName);
-                }
-            });
+    /// <summary>UTF-8 with a BOM, so the text list opens correctly in Notepad.</summary>
+    internal static readonly Encoding TextExportEncoding = new UTF8Encoding(true);
+
+    /// <summary>One tab-separated line per file: its charset, then its full path.</summary>
+    internal static void WriteTextExport(
+        IEnumerable<(string Charset, string Directory, string FileName)> rows,
+        TextWriter writer)
+    {
+        foreach ((string charset, string directory, string fileName) in rows)
+            writer.WriteLine("{0}\t{1}\\{2}", charset, directory, fileName);
     }
 
     /// <summary>
@@ -69,14 +79,50 @@ public partial class MainForm
     /// Writes an export without replacing an existing report until the new one is complete,
     /// so a failed write leaves the previous report as it was.
     /// </summary>
+    /// <remarks>
+    /// A read-only report or a link is refused rather than replaced: the atomic install would
+    /// clear the read-only flag or swap the link for a regular file, where a direct write
+    /// would have failed or written through. A fault of an argument or invalid-operation kind
+    /// raised by <paramref name="write"/> is reported as a failed export.
+    /// </remarks>
     /// <returns><see langword="null"/> on success; otherwise, why the write failed.</returns>
     internal static string? WriteExportFile(
-        string path, Encoding encoding, Action<StreamWriter> write) =>
-        AtomicArtifactFile.Write(path, stream =>
+        string path, Encoding encoding, Action<StreamWriter> write)
+    {
+        if (RefusalForExistingDestination(path) is { } refusal)
+            return refusal;
+
+        return AtomicArtifactFile.Write(path, stream =>
         {
             using var writer = new StreamWriter(stream, encoding, leaveOpen: true);
             write(writer);
         });
+    }
+
+    private static string? RefusalForExistingDestination(string path)
+    {
+        FileAttributes attributes;
+
+        try
+        {
+            attributes = File.GetAttributes(path);
+        }
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or ArgumentException
+                or NotSupportedException)
+        {
+            // Not there yet, or not readable; the write reports its own failure.
+            return null;
+        }
+
+        if ((attributes & FileAttributes.ReparsePoint) != 0)
+            return $"'{path}' is a link. Choose a regular file for the report.";
+
+        if ((attributes & FileAttributes.ReadOnly) != 0)
+            return $"'{path}' is read-only.";
+
+        return null;
+    }
 
     private void OnExportResultsOpening(object? sender, EventArgs e)
     {

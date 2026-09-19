@@ -424,8 +424,8 @@ be applied.
 
 **Now:** EC writes a complete temporary file beside the destination and replaces
 the old one only after that write succeeds. Converted files and recovery sidecars
-already worked this way; all four saved-file types now use the same mechanism,
-`AtomicArtifactFile`.
+already worked this way; the four saved-file types listed above now use the same
+mechanism, `AtomicArtifactFile`.
 
 The recovery sidecar keeps its own writer, which also reads back and verifies what
 it wrote - more than the shared one does, and not worth reducing. The same change
@@ -433,9 +433,15 @@ closed EC-16.
 
 **Later correction:** the two GUI exports, the text list and the CSV report, were
 missed and still opened the chosen file directly, so a failed write could erase a
-previous report. They now write through `AtomicArtifactFile` as well (`GuiExportWriteTests`
-fail a mid-write error against the old behaviour and pass now). The save dialog
-around that step is not exercised by tests.
+previous report. They now write through `AtomicArtifactFile` as well. This is folded
+into BL-24 because it completes the same fix rather than adding a mechanism.
+
+`GuiExportWriteTests` pin the new behaviour: a failed write leaves the previous
+report byte-for-byte and no staging file. They never ran against the original code,
+because the method they call did not exist; with the direct write re-created behind
+that method, the mid-write failure tests fail. A read-only report or a link is
+refused rather than replaced, which a direct write would not have done either. The
+save dialog around the write is not exercised by tests.
 
 ### BL-25
 
