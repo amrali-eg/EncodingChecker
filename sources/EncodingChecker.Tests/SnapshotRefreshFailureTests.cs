@@ -48,6 +48,11 @@ public sealed class SnapshotRefreshFailureTests : IDisposable
     // only if the failure stayed one row.
     private static void Refresh(ConversionReportEntry bad, ConversionReportEntry good)
     {
+        // Rows survive between GUI runs, so the failing entry arrives holding the previous
+        // run's snapshot.
+        bad.ExpectedSourceSha256 = new string('0', 64);
+        bad.ExpectedSourceSize = 99;
+
         ScanEngine.RefreshSourceSnapshots(
             [bad, good], maxParallelism: 1, CancellationToken.None);
     }
@@ -64,8 +69,9 @@ public sealed class SnapshotRefreshFailureTests : IDisposable
             bad.Diagnostic,
             StringComparison.Ordinal);
 
-        // This attempt captured nothing, so it recorded no hash.
+        // This attempt captured nothing, and the earlier run's hash and size no longer apply.
         Assert.Null(bad.ExpectedSourceSha256);
+        Assert.Null(bad.ExpectedSourceSize);
     }
 
     private static void AssertSnapshotted(ConversionReportEntry good, string path)
