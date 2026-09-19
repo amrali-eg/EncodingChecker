@@ -103,13 +103,12 @@ internal sealed record ConversionMetadata
     public required bool SourceHasBom { get; init; }
 
     /// <summary>
-    /// What detection concluded, or <see langword="null"/> when detection did not run.
+    /// What detection concluded, or <see langword="null"/> when it identified no codec.
     /// </summary>
     /// <remarks>
-    /// This is null only when detection did not run, such as a CLI <c>-From</c>
-    /// conversion. A GUI user can explicitly choose a source after a scan; in that
-    /// case the sidecar preserves both the detector's earlier conclusion and the
-    /// codec the conversion actually used.
+    /// Detection runs even when the source is chosen explicitly, such as with a CLI
+    /// <c>-From</c> or a GUI choice after a scan, so the sidecar preserves the detector's
+    /// conclusion beside the codec the conversion actually used.
     /// </remarks>
     [JsonPropertyOrder(15)]
     public int? DetectedEncodingId { get; init; }

@@ -22,10 +22,16 @@ For each file EC is allowed to convert:
 8. Atomically installs the verified temporary output where the platform supports it.
 9. Marks the recovery record `Completed` after installation succeeds.
 
-If a required step fails, EC does not install converted output. Because the
-backup is created before decoding and encoding, a later conversion failure can
-leave a valid `.bak` beside an unchanged source; metadata is not written until
-both the output and backup have verified.
+If a step before installation (step 8) fails, EC does not install converted
+output and the source is unchanged. Because the backup is created before decoding
+and encoding, a later conversion failure can leave a valid `.bak` beside an
+unchanged source; metadata is not written until both the output and backup have
+verified.
+
+If step 9 fails, installation has already happened: the verified converted output
+is in place, EC reports a recovery-record error with the replacement recorded as
+committed, and the `Prepared` record keeps the hashes needed to inspect the result.
+Do not treat that file as unchanged.
 
 ## Source-encoding policy
 
@@ -53,6 +59,9 @@ This is intentionally conservative: most ordinary BOM-less UTF-16 files are
 expected to be refused. It costs a second full read, which is deliberate because
 rewriting a file must not rest on a sample-based byte-order guess.
 
+Choose `-From utf-16le` or `-From utf-16be` if you know the source order. That
+chooses the source interpretation only; it does not bypass any other safeguard.
+
 ### BOM-less UTF-32
 
 EC never converts it automatically. It reports `Refused` with reason code
@@ -67,8 +76,10 @@ pass it through. Separately, genuine UTF-32 can be valid under both orders.
 The cost is that ordinary BOM-less UTF-32 is refused too. Nothing in the bytes
 separates it from the UTF-16 file above. Add a BOM, or name the source.
 
-Choose `-From utf-16le` or `-From utf-16be` if you know the source order. That
+Choose `-From utf-32le` or `-From utf-32be` if you know the source order. That
 chooses the source interpretation only; it does not bypass any other safeguard.
+Naming a UTF-16 order for a UTF-32 file would read its bytes as UTF-16, so use
+only the UTF-32 names.
 
 ## Plans, backups, and recovery metadata
 

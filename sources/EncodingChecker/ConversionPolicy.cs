@@ -60,7 +60,8 @@ internal static class ConversionPolicy
             return PlannedAction.Skip;
         }
 
-        // An unchanged file is not read or rewritten, so no source choice is needed.
+        // An unchanged file is not rewritten, so no source choice is needed. It is still
+        // read and validated in full after this decision.
         //
         // Codec identity is the code page, not the label. "utf-16", "unicode", "ucs-2"
         // and "utf-16le" all name code page 1200, so comparing the strings reported a
