@@ -187,9 +187,13 @@ public sealed class InvalidFilePlanningTests : IDisposable
         byte[] before = File.ReadAllBytes(corrupt);
 
         // Planning still writes the plan, and exits 3 because a file could not be processed.
+        // A failed file outranks "changes needed" (2), which the valid convertible file would
+        // otherwise report under -FailOnChanges.
         Assert.Equal(
             ExpectedProcessingErrors,
-            Run("-BasePath", _root, "-Target", "utf-8", "-Plan", PlanPath, "-Quiet"));
+            Run(
+                "-BasePath", _root, "-Target", "utf-8", "-Plan", PlanPath,
+                "-FailOnChanges", "-Quiet"));
 
         // The saved plan says what the summary says.
         ConversionPlan? saved = ConversionPlan.Load(PlanPath, out string? error);
