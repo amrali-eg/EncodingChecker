@@ -90,10 +90,10 @@ public sealed class UnchangedVerificationTests : IDisposable
     public void TheUnchangedPathNamesTheCheckThatFailed()
     {
         // Reported as the pre-check it is, not as a conversion that went wrong: no write
-        // was attempted at all.
+        // was attempted at all. It is planned as a refusal, not as a file that needs nothing.
         ConversionReportEntry entry = Convert(PastTheSample(ascii: true, corrupt: true), "us-ascii");
 
-        Assert.Equal(PlannedAction.Unchanged, entry.Action);
+        Assert.Equal(PlannedAction.Refuse, entry.Action);
         Assert.Equal(ConversionRowResult.Error, entry.Result);
         Assert.Equal(ConversionReasonCodes.StrictValidationFailed, entry.ReasonCode);
         Assert.False(entry.ReplacementCommitted);
