@@ -1318,9 +1318,11 @@ detector-parity check passed on the tagged commit.
 - **No accessibility spot check is recorded.** This is the **tenth** release without
   one. The checklist's three-part check (display scaling, keyboard-only navigation,
   high-contrast theme) is still not completed for any release.
-- **The new row tooltips were not seen in a live window.** Unit tests cover the tooltip
-  text and a real window's settings; the GUI smoke suite does not read icons or tooltips,
-  and it does not run Validate, so the new Validate status was not seen live either.
+- **The new row tooltips were checked live only for one case.** On 2026-09-29 a person
+  confirmed that a plain-English file converted to UTF-8 shows "ASCII is already valid
+  UTF-8 without a BOM." as its row tooltip. The tooltip of a failed or refused row and the
+  new Validate status were not checked live; unit tests cover them, and the GUI smoke
+  suite reads neither.
 - **The self-contained executable is still not driven** by the GUI smoke suite; it was run
   here only for `--version`.
 
