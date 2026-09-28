@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=80 fixed=70 open=6 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
+<!-- backlog-counts total=81 fixed=71 open=6 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 80 findings — 70 fixed, 6 open, 1 not reproduced, 1 withdrawn,
+**Derived count: 81 findings — 71 fixed, 6 open, 1 not reproduced, 1 withdrawn,
 1 intentional behavior, and 1 design decision.** Recompute and check these
 figures with:
 
@@ -87,6 +87,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | BL-34 | Repeating a backed-up UTF-8 conversion could replace the original backup once the text was ASCII | Fixed | — | — | [BL-34](#bl-34) |
 | BL-35 | Plans, journals, reports and settings replaced a read-only or linked file | Fixed | — | — | [BL-35](#bl-35) |
 | BL-36 | A conversion refused for a changed file still replaced its earlier backup | Fixed | — | — | [BL-36](#bl-36) |
+| BL-37 | A contradicting source choice that was also the target was not refused | Fixed | — | — | [BL-37](#bl-37) |
 | EC-32 | A cancellation timeout could hide repeated refusals to press Cancel | Fixed | — | — | [EC-32](#ec-32) |
 | EC-15 | Plans and journals showed fixed safety flags as if they recorded checks | Fixed | — | — | [EC-15](#ec-15) |
 | BL-18 | BOM-less UTF-16 could be detected and converted as UTF-32 | Fixed | — | — | [BL-18](#bl-18) |
@@ -1359,6 +1360,30 @@ the record before the check each fails them.
 This covers a change made before the backup is staged. A change after that point,
 or another later conversion failure, can still leave the new backup in place of
 the old one.
+
+### BL-37
+
+**A source choice that contradicts reliable detection is now refused even when it
+names the target encoding.** The policy checked "already in the target" before the
+conflict, so when the chosen source was also the target the file skipped the
+conflict check. Reproduced on 2026-09-28 with the `master` build:
+
+- `-From windows-1252 -Target windows-1252` on a UTF-8 file with non-ASCII text
+  reported it `Unchanged`, already windows-1252, and exited 0. The report was
+  false, and `-FailOnChanges` passed.
+- `-From utf-8 -Target utf-8` on UTF-16 with a BOM ended as a validation error,
+  exit 3, instead of a refusal naming the conflict.
+
+Nothing was written in either case. The conflict check now runs before both
+"already in the target" rules, so both files are `Refused` with
+`ExplicitSourceConflictsWithDetection` and exit 5, and an existing backup is left
+as it was. A choice that agrees with detection is still `Unchanged`. Tests cover
+both reproductions, the agreeing control and the rule order; restoring the old
+order fails them.
+
+Semantics stay at 8. The change only turns some `Unchanged` decisions into
+refusals, which revalidation of an applied plan already permits, and semantics 8
+has not been released.
 
 ## Decisions and mistakes that must remain visible
 

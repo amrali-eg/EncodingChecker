@@ -63,6 +63,17 @@ internal static class ConversionPolicy
             return PlannedAction.Skip;
         }
 
+        // A source choice that contradicts reliable detection is refused before anything
+        // else is decided, including "already in the target": that claim would rest on the
+        // contradicted choice, and would report a UTF-8 file as already windows-1252.
+        if (sourceWasSpecified && explicitSourceConflictsWithReliableDetection)
+        {
+            sourceInterpretation = SourceInterpretation.ExplicitSource;
+            reason = "The selected source encoding conflicts with EC's reliable Unicode "
+                     + "or ASCII detection and could change the text. No conversion was performed.";
+            return PlannedAction.Refuse;
+        }
+
         // An unchanged file is not rewritten, so no source choice is needed. It is still
         // read and validated in full after this decision.
         //
@@ -79,19 +90,10 @@ internal static class ConversionPolicy
             return PlannedAction.Unchanged;
         }
 
-        if (sourceWasSpecified && explicitSourceConflictsWithReliableDetection)
-        {
-            sourceInterpretation = SourceInterpretation.ExplicitSource;
-            reason = "The selected source encoding conflicts with EC's reliable Unicode "
-                     + "or ASCII detection and could change the text. No conversion was performed.";
-            return PlannedAction.Refuse;
-        }
-
         // ASCII bytes are already BOM-less UTF-8. Converting would rewrite identical bytes
         // and, with backups on, a repeat run would replace the backup of an earlier original
         // with a copy of the current file. The unchanged path validates the whole file as
-        // ASCII, so a later non-ASCII byte is reported as an error. This follows the conflict
-        // check so a source choice that contradicts reliable detection is still refused.
+        // ASCII, so a later non-ASCII byte is reported as an error.
         if (sourceCodePage == AsciiCodePage
             && !sourceHasBom
             && targetCodePage == Utf8CodePage
