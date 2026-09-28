@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=82 fixed=72 open=6 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
+<!-- backlog-counts total=83 fixed=73 open=6 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 82 findings — 72 fixed, 6 open, 1 not reproduced, 1 withdrawn,
+**Derived count: 83 findings — 73 fixed, 6 open, 1 not reproduced, 1 withdrawn,
 1 intentional behavior, and 1 design decision.** Recompute and check these
 figures with:
 
@@ -89,6 +89,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | BL-36 | A conversion refused for a changed file still replaced its earlier backup | Fixed | — | — | [BL-36](#bl-36) |
 | BL-37 | A contradicting source choice that was also the target was not refused | Fixed | — | — | [BL-37](#bl-37) |
 | BL-38 | `-Validate utf-8` rejected ASCII files that conversion treats as already UTF-8 | Fixed | — | — | [BL-38](#bl-38) |
+| BL-39 | A source chosen in a cancelled GUI review carried into the next review | Fixed | — | — | [BL-39](#bl-39) |
 | EC-32 | A cancellation timeout could hide repeated refusals to press Cancel | Fixed | — | — | [EC-32](#ec-32) |
 | EC-15 | Plans and journals showed fixed safety flags as if they recorded checks | Fixed | — | — | [EC-15](#ec-15) |
 | BL-18 | BOM-less UTF-16 could be detected and converted as UTF-32 | Fixed | — | — | [BL-18](#bl-18) |
@@ -1402,6 +1403,24 @@ rejects it, because an ASCII file has no BOM. The whole file is still validated
 as ASCII, so a non-ASCII byte past the detection sample is reported as invalid,
 as conversion reports it. Tests cover each list, the explanation and the late
 byte.
+
+### BL-39
+
+**A source chosen in a GUI review that ends without writing no longer carries into
+the next review.** Choosing a source for a refused file updates that row, so the
+review can show it as ready. The rows survive between runs, and cancelling left
+the choice on them: the next Convert showed the file as ready to convert with a
+source nobody chose in that review, while the list still showed the detected
+encoding. Found by a 2026-09-20 review and confirmed through the orchestration
+sequence; no file was written.
+
+The choices are now saved when the review opens and put back when it ends without
+writing: cancelled, stale, or not plannable, or cancelled before the write pass.
+Choices that existed before the review opened are kept. A completed or
+interrupted run keeps the choices it wrote with. Tests choose and then cancel,
+and run the same rows again, keep an earlier choice, and cover a review that went
+stale; removing the restore, clearing every choice, or restoring only on
+cancellation each fails them.
 
 ## Decisions and mistakes that must remain visible
 

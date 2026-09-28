@@ -258,6 +258,124 @@ public sealed class ConversionOrchestrationTests : IDisposable
         Assert.Equal(text, Encoding.Unicode.GetString(File.ReadAllBytes(path)));
     }
 
+    // ------------------------------------------------------ abandoned source choices
+
+    private static ConfirmationResponse Choose(string charset, string path) =>
+        new(ConfirmationChoice.ChooseSourceEncoding, charset, [path]);
+
+    // The plan the next review would open with, read without writing anything.
+    private PlannedFile NextReviewShows(List<ConversionReportEntry> rows, string path)
+    {
+        ConversionPlan? shown = null;
+
+        Convert(rows, plan =>
+        {
+            shown = plan;
+            return ConfirmationResponse.Cancel;
+        });
+
+        return Assert.Single(
+            shown!.Files, f => f.RelativePath == Path.GetFileName(path));
+    }
+
+    [Fact]
+    public void ChoosingASourceThenCancelling_LeavesNoChoiceForTheNextReview()
+    {
+        string path = Write("french.txt", "Le café était déjà prêt", "windows-1252");
+        byte[] before = File.ReadAllBytes(path);
+
+        List<ConversionReportEntry> rows = View();
+        ConversionReportEntry row = Assert.Single(rows);
+        string? labelBefore = row.CurrentCharsetLabel;
+
+        int shown = 0;
+        OrchestrationResult result = Convert(rows, plan =>
+        {
+            if (++shown == 1)
+                return Choose("windows-1252", path);
+
+            // The choice took effect inside this review...
+            Assert.Equal(PlannedAction.Convert, Assert.Single(plan.Files).Action);
+
+            // ...and the user then cancels it.
+            return ConfirmationResponse.Cancel;
+        });
+
+        Assert.Equal(OrchestrationOutcome.Cancelled, result.Outcome);
+        Assert.Equal(before, File.ReadAllBytes(path));
+        Assert.False(row.SourceEncodingWasSpecified);
+        Assert.Equal(labelBefore, row.CurrentCharsetLabel);
+
+        // A second run on the same rows asks for the source again instead of calling the
+        // file ready with a choice nobody made in that review.
+        PlannedFile next = NextReviewShows(rows, path);
+        Assert.Equal(PlannedAction.Refuse, next.Action);
+        Assert.True(next.NeedsSourceChoice);
+        Assert.Equal(before, File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void CancellingAReviewKeepsAChoiceThatExistedBeforeItOpened()
+    {
+        string kept = Write("kept.txt", "Le café était déjà prêt", "windows-1252");
+        string chosen = Write("chosen.txt", "Привет мир, это русский текст", "koi8-r");
+
+        List<ConversionReportEntry> rows = View();
+
+        // A choice left by an earlier review, as a run interrupted after it began writing
+        // leaves one on the rows it did not reach.
+        ConversionReportEntry keptRow = Assert.Single(rows, r => r.FilePath == kept);
+        keptRow.CurrentCharsetLabel = "windows-1252";
+        keptRow.SourceEncodingWasSpecified = true;
+
+        ConversionReportEntry chosenRow = Assert.Single(rows, r => r.FilePath == chosen);
+
+        int shown = 0;
+        Convert(rows, _ => ++shown == 1
+            ? Choose("koi8-r", chosen)
+            : ConfirmationResponse.Cancel);
+
+        Assert.True(keptRow.SourceEncodingWasSpecified);
+        Assert.Equal("windows-1252", keptRow.CurrentCharsetLabel);
+        Assert.False(chosenRow.SourceEncodingWasSpecified);
+
+        PlannedFile keptNext = NextReviewShows(rows, kept);
+        Assert.Equal(PlannedAction.Convert, keptNext.Action);
+        Assert.True(keptNext.SourceWasSpecified);
+        Assert.Equal("windows-1252", keptNext.SourceEncoding);
+
+        PlannedFile chosenNext = NextReviewShows(rows, chosen);
+        Assert.Equal(PlannedAction.Refuse, chosenNext.Action);
+        Assert.True(chosenNext.NeedsSourceChoice);
+    }
+
+    [Fact]
+    public void AChoiceInAReviewThatWentStaleIsNotKeptEither()
+    {
+        // Proceeding does not make the choice used: the file changed, nothing was written,
+        // and the next review starts from the file as it is.
+        string path = Write("french.txt", "Le café était déjà prêt", "windows-1252");
+
+        List<ConversionReportEntry> rows = View();
+        ConversionReportEntry row = Assert.Single(rows);
+
+        int shown = 0;
+        OrchestrationResult result = Convert(rows, _ =>
+        {
+            if (++shown == 1)
+                return Choose("windows-1252", path);
+
+            File.WriteAllBytes(
+                path, Encoding.GetEncoding("windows-1252").GetBytes("Le café a changé"));
+
+            return ConfirmationResponse.Proceed;
+        });
+
+        Assert.Equal(OrchestrationOutcome.PlanWentStale, result.Outcome);
+        Assert.False(row.SourceEncodingWasSpecified);
+        Assert.False(File.Exists(path + ".bak"));
+    }
+
     // ------------------------------------------------------------ explicit source
 
     [Fact]
