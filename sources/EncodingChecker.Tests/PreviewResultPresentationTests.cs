@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Reflection;
 using System.Windows.Forms;
 
 namespace EncodingChecker.Tests;
@@ -20,6 +22,8 @@ public sealed class PreviewResultPresentationTests
     // form-less test can only address these images by index.
     private const int SuccessIcon = 0;
     private const int FailedIcon = 1;
+    private const int WouldChangeIcon = 2;
+    private const int NoIcon = -1;
 
     private static ListViewItem Row(string charset) =>
         new([charset, "f.txt", ".txt", @"C:\dir"]);
@@ -157,5 +161,72 @@ public sealed class PreviewResultPresentationTests
         Assert.True(
             imageList.Images.Count >= 3,
             $"imgsResults must contain at least 3 images; found {imageList.Images.Count}.");
+    }
+
+    // Rows survive between runs, so an icon or reason from an earlier run must not stay on a
+    // row whose file this run left alone.
+    [Theory]
+    [InlineData(nameof(ConversionRowResult.Unchanged), FailedIcon)]
+    [InlineData(nameof(ConversionRowResult.Unchanged), WouldChangeIcon)]
+    [InlineData(nameof(ConversionRowResult.Skipped), FailedIcon)]
+    public void ARowThisRunLeftAloneLosesAnEarlierRunsIcon(string resultName, int earlierIcon)
+    {
+        var result = Enum.Parse<ConversionRowResult>(resultName);
+        ListViewItem item = Row("us-ascii");
+        item.ImageIndex = earlierIcon;
+        item.ToolTipText = "an earlier run's failure";
+
+        MainForm.UpdateResultItem(item, Entry(result), "utf-8", wasPreview: false);
+
+        Assert.Equal(NoIcon, item.ImageIndex);
+        Assert.Equal(string.Empty, item.ToolTipText);
+    }
+
+    [Fact]
+    public void TheRowTooltipShowsThisRunsReason()
+    {
+        ListViewItem item = Row("us-ascii");
+
+        ConversionReportEntry unchanged = Entry(ConversionRowResult.Unchanged);
+        unchanged.Diagnostic = "ASCII is already valid UTF-8 without a BOM.";
+        MainForm.UpdateResultItem(item, unchanged, "utf-8", wasPreview: false);
+        Assert.Equal("ASCII is already valid UTF-8 without a BOM.", item.ToolTipText);
+
+        ConversionReportEntry failed = Entry(ConversionRowResult.Error);
+        failed.Diagnostic = "SourceChangedDuringConversion: the file changed.";
+        MainForm.UpdateResultItem(item, failed, "utf-8", wasPreview: false);
+        Assert.Equal("SourceChangedDuringConversion: the file changed.", item.ToolTipText);
+        Assert.Equal(FailedIcon, item.ImageIndex);
+
+        // A later success carries no reason, so the failure text goes with it.
+        MainForm.UpdateResultItem(item, Entry(ConversionRowResult.Converted), "utf-8", wasPreview: false);
+        Assert.Equal(string.Empty, item.ToolTipText);
+        Assert.Equal(SuccessIcon, item.ImageIndex);
+    }
+
+    [Fact]
+    public void TheWindowShowsEachScannedRowsReasonAsATooltip()
+    {
+        UiTest.OnStaThread(() =>
+        {
+            using var form = new MainForm();
+
+            var list = (ListView)typeof(MainForm)
+                .GetField("lstResults", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(form)!;
+
+            Assert.True(list.ShowItemToolTips);
+
+            ConversionReportEntry invalid = Entry(ConversionRowResult.Invalid);
+            invalid.Diagnostic = "The file is us-ascii, which is not in the allowed list.";
+
+            typeof(MainForm)
+                .GetMethod("ActionWorkerProgressChanged", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(form, [form, new ProgressChangedEventArgs(0, invalid)]);
+
+            ListViewItem row = Assert.Single(list.Items.Cast<ListViewItem>());
+            Assert.Equal(invalid.Diagnostic, row.ToolTipText);
+            Assert.Equal(NoIcon, row.ImageIndex);
+        });
     }
 }

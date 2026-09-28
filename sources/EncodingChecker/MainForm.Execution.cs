@@ -309,9 +309,12 @@ public partial class MainForm
                 Path.GetExtension(entry.FilePath),
                 Path.GetDirectoryName(entry.FilePath) ?? string.Empty
             ],
-            -1)
+            ResultIconNone)
         {
             Tag = entry,
+
+            // The reason a scan gave, such as why a file failed validation.
+            ToolTipText = entry.Diagnostic ?? string.Empty,
         };
 
         lstResults.Items.Add(resultItem);
@@ -641,6 +644,9 @@ public partial class MainForm
         // Keep the row tied to the entry that produced its current state.
         item.Tag = entry;
 
+        // This run's reason, so an earlier run's failure text does not stay on the row.
+        item.ToolTipText = entry.Diagnostic ?? string.Empty;
+
         if (entry.Result == ConversionRowResult.Converted)
         {
             // Preview leaves the file unchanged, so only the icon changes.
@@ -662,12 +668,12 @@ public partial class MainForm
             Debug.WriteLine(
                 $"Conversion failed for {entry.FilePath}: {entry.Diagnostic}");
         }
-        else if (entry.Result == ConversionRowResult.Skipped)
+        else
         {
-            Debug.WriteLine(
-                $"Conversion skipped for {entry.FilePath}: encoding could not be determined.");
+            // Unchanged or skipped: nothing to mark. Clearing the icon stops an earlier
+            // run's failure or "would convert" mark describing this run.
+            item.ImageIndex = ResultIconNone;
         }
-        // Unchanged: already matches the target; leave the row unchanged.
     }
 
     #endregion

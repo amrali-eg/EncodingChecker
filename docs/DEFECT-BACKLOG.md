@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=84 fixed=74 open=6 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
+<!-- backlog-counts total=85 fixed=75 open=6 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 84 findings — 74 fixed, 6 open, 1 not reproduced, 1 withdrawn,
+**Derived count: 85 findings — 75 fixed, 6 open, 1 not reproduced, 1 withdrawn,
 1 intentional behavior, and 1 design decision.** Recompute and check these
 figures with:
 
@@ -91,6 +91,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | BL-38 | `-Validate utf-8` rejected ASCII files that conversion treats as already UTF-8 | Fixed | — | — | [BL-38](#bl-38) |
 | BL-39 | A source chosen in a cancelled GUI review carried into the next review | Fixed | — | — | [BL-39](#bl-39) |
 | BL-40 | The GUI's Validate status read the same when every file passed and when none was checked | Fixed | — | — | [BL-40](#bl-40) |
+| BL-41 | GUI rows kept an earlier run's icon and never showed why a file failed | Fixed | — | — | [BL-41](#bl-41) |
 | EC-32 | A cancellation timeout could hide repeated refusals to press Cancel | Fixed | — | — | [EC-32](#ec-32) |
 | EC-15 | Plans and journals showed fixed safety flags as if they recorded checks | Fixed | — | — | [EC-15](#ec-15) |
 | BL-18 | BOM-less UTF-16 could be detected and converted as UTF-32 | Fixed | — | — | [BL-18](#bl-18) |
@@ -1440,6 +1441,22 @@ nothing, an empty folder, all valid, and a mix with a file held open; three
 mutations to the counting fail them. The two lines that connect the count to the
 window are checked by reading, not by a test, and the GUI smoke suite does not
 run Validate.
+
+### BL-41
+
+**GUI rows now show this run's state and reason.** Rows survive between runs. A
+file that failed or was previewed as "would convert" in one run and was then left
+unchanged or skipped in the next kept the earlier run's icon, so the list described
+a run that was over. The reason a file failed, was refused or was left unchanged
+went only to the debug output, so the window never said why; the CSV export was the
+only place to read it. Found by the 2026-09-20 review from the source.
+
+A row left unchanged or skipped now has its icon cleared. Every row shows its
+current reason as a tooltip, set on each run and emptied when the run gives none,
+for example "ASCII is already valid UTF-8 without a BOM." on a plain-English file
+converted to UTF-8, or a validation failure's reason. No column was added. Tests
+cover cleared icons after a failed and a previewed run, the tooltip following each
+result, and the window showing a scanned row's reason; four mutations fail them.
 
 ## Decisions and mistakes that must remain visible
 

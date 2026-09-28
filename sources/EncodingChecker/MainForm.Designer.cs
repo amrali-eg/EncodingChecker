@@ -142,6 +142,7 @@ partial class MainForm
         lstResults.FullRowSelect = true;
         lstResults.GridLines = true;
         lstResults.Name = "lstResults";
+        lstResults.ShowItemToolTips = true;
         lstResults.SmallImageList = imgsResults;
         lstResults.UseCompatibleStateImageBehavior = false;
         lstResults.View = System.Windows.Forms.View.Details;
