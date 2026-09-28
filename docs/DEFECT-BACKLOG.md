@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=85 fixed=75 open=6 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
+<!-- backlog-counts total=87 fixed=75 open=8 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 85 findings — 75 fixed, 6 open, 1 not reproduced, 1 withdrawn,
+**Derived count: 87 findings — 75 fixed, 8 open, 1 not reproduced, 1 withdrawn,
 1 intentional behavior, and 1 design decision.** Recompute and check these
 figures with:
 
@@ -56,6 +56,8 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | BL-19 | ASCII with many NUL bytes can be reported as UTF-16 | Open | Medium | Rare | [BL-19](#bl-19) |
 | BL-20 | Two hard-link names for one file are converted separately | Open | Low | Rare | [BL-20](#bl-20) |
 | BL-21 | Detection can accept a cut-off final character that conversion rejects | Open | Low | Rare | [BL-21](#bl-21) |
+| BL-42 | A preview's CSV report calls files Converted | Open | Low | Common | [BL-42](#bl-42) |
+| BL-43 | A file name with an unpaired UTF-16 surrogate cannot be planned or backed up | Open | Low | Rare | [BL-43](#bl-43) |
 
 ### Fixed and resolved findings
 
@@ -1457,6 +1459,59 @@ for example "ASCII is already valid UTF-8 without a BOM." on a plain-English fil
 converted to UTF-8, or a validation failure's reason. No column was added. Tests
 cover cleared icons after a failed and a previewed run, the tooltip following each
 result, and the window showing a scanned row's reason; four mutations fail them.
+
+### BL-42
+
+**A preview's CSV report calls files `Converted`.** `-WhatIf`, and the GUI's
+preview followed by a CSV export, write `Converted` for each file that a real run
+would convert, although nothing was written. Only the journal marks a preview, as
+`NotAttempted`. Found by the 2026-09-20 review with the CLI's `-WhatIf` output.
+No file is at risk: this is what the report says, not what EC does.
+
+Left open deliberately. The CSV `Result` column is read by scripts, so renaming
+the value, or adding a column, changes a contract. It needs a decision on the
+wording before any change.
+
+### BL-43
+
+**A file name with an unpaired UTF-16 surrogate cannot be planned or backed up.**
+NTFS allows such names. Plans, journals and recovery records are JSON, and the
+serializer silently replaces the unpaired half with U+FFFD, so the recorded path
+names a different file. Reproduced on 2026-09-28 with the v3.14.5 build:
+
+- `-Plan` exited 0 and listed the file as ready to convert, but recorded
+  `x\uFFFDy.txt`; `-Apply` then refused the whole plan, naming the file as no
+  longer existing.
+- A direct `-Backup` run failed with `RecoveryRecordError` ("does not describe the
+  expected file") and left a `.bak` behind.
+
+The source file was never modified. The failure is safe, but it arrives late and
+names the wrong cause. Deferred because such names are unusual, and refusing them
+at planning would still have to report a path that JSON cannot hold exactly.
+
+## Known test coverage gaps
+
+These are parts of the code no test drives. None is a known defect, and none is
+counted in the ledger. Each was checked against `master` at `23d83c4` on
+2026-09-29.
+
+- **Settings loading and mask parsing.** `MainForm.LoadSettings` and
+  `MainForm.SplitFileMasks` are private and no test calls them, directly or through
+  the form.
+- **The converter's link and unknown-installation branches.** No test reaches
+  `ReparsePointRejected`, for a source or a destination that is a link, or the
+  branch that reports the installation state as unknown. The journal's mapping of
+  an unknown installation is tested with a constructed entry, not a real failure.
+- **The Ctrl+C handlers.** Cancelling a CLI run through a cancellation token is
+  tested; the `Console.CancelKeyPress` handlers that turn Ctrl+C into that token
+  are not driven.
+- **The self-contained executable.** The release workflow checks `--version` on
+  the build's DLL and drives the published framework-dependent executable through
+  the GUI smoke suite. The self-contained executable is built, signed when a
+  certificate is available, and archived, but never run.
+
+An earlier note that the GUI smoke report hashes only the launcher was wrong: it
+records the managed assembly's hash as well, which changes with each build.
 
 ## Decisions and mistakes that must remain visible
 
