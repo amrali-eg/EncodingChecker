@@ -123,11 +123,28 @@ internal sealed class ConversionOrchestrator
         foreach (ConversionReportEntry entry in entries)
             entry.ResetAttemptEvidence();
 
+        // A source chosen in a review that ends without writing was never used. Kept, it
+        // would show those files as ready in the next review without being chosen there.
+        // Choices that existed before this review opened are what gets restored.
+        (string? Label, bool Specified)[] choicesBefore =
+        [
+            .. entries.Select(e => (e.CurrentCharsetLabel, e.SourceEncodingWasSpecified)),
+        ];
+
         try
         {
-            return DecideConfirmAndRun(
+            OrchestrationResult result = DecideConfirmAndRun(
                 entries, baseDirectory, targetCharset, targetWriteBom, backup, preview,
                 maxParallelism, onEntry, cancellationToken, startedUtc);
+
+            if (result.Outcome is OrchestrationOutcome.Cancelled
+                or OrchestrationOutcome.PlanWentStale
+                or OrchestrationOutcome.CouldNotPlan)
+            {
+                RestoreSourceChoices(entries, choicesBefore);
+            }
+
+            return result;
         }
         catch (OperationCanceledException)
         {
@@ -136,7 +153,19 @@ internal sealed class ConversionOrchestrator
             // own cancellation handling that returns normally instead of throwing, so it
             // never reaches this catch; only a decide-phase cancellation does.
             ConversionReportEntry.MarkUnattempted(entries, []);
+            RestoreSourceChoices(entries, choicesBefore);
             throw;
+        }
+    }
+
+    private static void RestoreSourceChoices(
+        IReadOnlyList<ConversionReportEntry> entries,
+        (string? Label, bool Specified)[] choices)
+    {
+        for (int i = 0; i < entries.Count; i++)
+        {
+            entries[i].CurrentCharsetLabel = choices[i].Label;
+            entries[i].SourceEncodingWasSpecified = choices[i].Specified;
         }
     }
 
