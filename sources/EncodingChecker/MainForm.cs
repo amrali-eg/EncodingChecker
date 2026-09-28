@@ -22,6 +22,7 @@ public partial class MainForm : Form
         internal required string FileMasks;
         internal required List<string> ValidCharsets;
         internal required DirectoryTraversal.TraversalCounters Counters;
+        internal required ValidationTally Tally;
         internal CancellationToken CancellationToken;
     }
 
@@ -75,6 +76,9 @@ public partial class MainForm : Form
 
     // The completed scan's coverage is shown with its result count.
     private DirectoryTraversal.TraversalCounters? _scanCounters;
+
+    // What the completed validation examined, including files that passed and so have no row.
+    private ValidationTally? _validationTally;
 
     // Indices into imgsResults (see SetKeyName calls in MainForm.Designer.cs).
     // Reuses the existing Failed and Warning icons; Warning marks preview rows.

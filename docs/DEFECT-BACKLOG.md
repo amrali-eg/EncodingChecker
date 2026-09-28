@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=83 fixed=73 open=6 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
+<!-- backlog-counts total=84 fixed=74 open=6 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 83 findings — 73 fixed, 6 open, 1 not reproduced, 1 withdrawn,
+**Derived count: 84 findings — 74 fixed, 6 open, 1 not reproduced, 1 withdrawn,
 1 intentional behavior, and 1 design decision.** Recompute and check these
 figures with:
 
@@ -90,6 +90,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | BL-37 | A contradicting source choice that was also the target was not refused | Fixed | — | — | [BL-37](#bl-37) |
 | BL-38 | `-Validate utf-8` rejected ASCII files that conversion treats as already UTF-8 | Fixed | — | — | [BL-38](#bl-38) |
 | BL-39 | A source chosen in a cancelled GUI review carried into the next review | Fixed | — | — | [BL-39](#bl-39) |
+| BL-40 | The GUI's Validate status read the same when every file passed and when none was checked | Fixed | — | — | [BL-40](#bl-40) |
 | EC-32 | A cancellation timeout could hide repeated refusals to press Cancel | Fixed | — | — | [EC-32](#ec-32) |
 | EC-15 | Plans and journals showed fixed safety flags as if they recorded checks | Fixed | — | — | [EC-15](#ec-15) |
 | BL-18 | BOM-less UTF-16 could be detected and converted as UTF-32 | Fixed | — | — | [BL-18](#bl-18) |
@@ -1421,6 +1422,24 @@ interrupted run keeps the choices it wrote with. Tests choose and then cancel,
 and run the same rows again, keep an earlier choice, and cover a review that went
 stale; removing the restore, clearing every choice, or restoring only on
 cancellation each fails them.
+
+### BL-40
+
+**The GUI's Validate status now says how many files it checked.** Files that pass
+are not added to the list, and the status was built from the row count, so it read
+"0 files do not have the correct encoding" both when every file passed and when a
+mistyped mask matched nothing. A clean result could stand in for a check that never
+ran. Found by a 2026-09-20 review from the source.
+
+The window now counts every file as the scan reports it. The status reads "No
+matching files were examined", "Checked N files: all valid", or "Checked N files:
+X do not have the correct encoding", adding "Y could not be read" for files the
+scan could not open. Files skipped by exclusions are still reported after it, as
+before. Tests feed real Validate scans into the same count: a mask that matches
+nothing, an empty folder, all valid, and a mix with a file held open; three
+mutations to the counting fail them. The two lines that connect the count to the
+window are checked by reading, not by a test, and the GUI smoke suite does not
+run Validate.
 
 ## Decisions and mistakes that must remain visible
 
