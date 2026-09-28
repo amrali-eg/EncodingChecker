@@ -76,6 +76,7 @@ public partial class MainForm
         _actionCancellation = new CancellationTokenSource();
 
         var counters = new DirectoryTraversal.TraversalCounters();
+        var tally = new ValidationTally();
 
         var args = new WorkerArgs
         {
@@ -85,10 +86,12 @@ public partial class MainForm
             FileMasks = txtFileMasks.Text,
             ValidCharsets = validCharsets,
             Counters = counters,
+            Tally = tally,
             CancellationToken = _actionCancellation.Token,
         };
 
         _scanCounters = counters;
+        _validationTally = tally;
 
         _actionWorker.RunWorkerAsync(args);
     }
@@ -227,6 +230,8 @@ public partial class MainForm
                 scanOptions,
                 onEntry: entry =>
                 {
+                    args.Tally.Count(entry.Result);
+
                     // Hide files that already pass validation.
                     if (args.Action == CurrentAction.Validate &&
                         entry.Result == ConversionRowResult.Unchanged)
@@ -351,13 +356,12 @@ public partial class MainForm
         lstResults.Sort();
         lstResults.EndUpdate();
 
-        string statusMessage = e.Cancelled
-            ? "Cancelled - {0} files processed"
+        string completedStatus = e.Cancelled
+            ? $"Cancelled - {lstResults.Items.Count} files processed"
             : _currentAction == CurrentAction.View
-                ? "{0} files processed"
-                : "{0} files do not have the correct encoding";
+                ? $"{lstResults.Items.Count} files processed"
+                : (_validationTally ?? new ValidationTally()).Describe();
 
-        string completedStatus = string.Format(statusMessage, lstResults.Items.Count);
         string coverage = FormatCoverage(_scanCounters);
 
         UpdateControlsOnActionDone(
@@ -501,6 +505,47 @@ public partial class MainForm
                 wasPreview,
                 stopped: e.Cancelled ||
                          outcome?.Outcome == OrchestrationOutcome.Interrupted));
+    }
+
+    /// <summary>
+    /// Counts what a validation examined, and says it.
+    /// </summary>
+    /// <remarks>
+    /// Valid files are not added as rows, so the row count alone read "0 files do not have
+    /// the correct encoding" both when every file passed and when no file matched at all.
+    /// Counted as the scan reports each file, from several threads at once.
+    /// </remarks>
+    internal sealed class ValidationTally
+    {
+        private int _examined;
+        private int _invalid;
+        private int _unreadable;
+
+        internal void Count(ConversionRowResult result)
+        {
+            Interlocked.Increment(ref _examined);
+
+            if (result == ConversionRowResult.Invalid)
+                Interlocked.Increment(ref _invalid);
+            else if (result == ConversionRowResult.Error)
+                Interlocked.Increment(ref _unreadable);
+        }
+
+        internal string Describe()
+        {
+            if (_examined == 0)
+                return "No matching files were examined";
+
+            if (_invalid == 0 && _unreadable == 0)
+                return $"Checked {_examined} files: all valid";
+
+            string status =
+                $"Checked {_examined} files: {_invalid} do not have the correct encoding";
+
+            return _unreadable == 0
+                ? status
+                : status + $", {_unreadable} could not be read";
+        }
     }
 
     /// <summary>
