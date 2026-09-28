@@ -1218,6 +1218,112 @@ the target encoding; applying it still fails the file safely.
   The smoke suite drives the review dialog and conversion, not the export menu; the
   export write path is covered by unit tests, and the `SaveFileDialog` around it is not.
 
+### v3.15.0 — `383e2dff13a2b8cccfb162121933e9741e68dad2`, four-corpus audit run
+
+**A four-corpus regression audit was run on the tagged commit**, because this release
+changes `ConversionPolicy`: ASCII with a BOM-less UTF-8 target is now `Unchanged`, and an
+explicit source choice that contradicts reliable detection is refused before either
+"already in the target" rule. Conversion semantics move from 7 to 8.
+
+Both builds were measured fresh on 2026-09-28, each from a clean tree: the v3.14.5 tag
+(`8d8a9c16`, assembly `7054572f467c…`) as the baseline, and the tagged commit (`383e2dff`,
+assembly `8c3fee50665069c3…`) as the release. No earlier run was carried forward. 5,078
+files across UnicodeTestSuite v3.0, chardet `test-data`, the char-dataset corpus and
+UTF.unknown's 2.6 tests, with the same audit configuration (`--forced-reference`, target
+UTF-8, backups on).
+
+```
+changed=0 improved=0 regressed=0 lateral=0
+  DetectionAccuracy        4640/4646 (99.87%)  ->  4640/4646 (99.87%)
+  StrictDecoding          4694/4694 (100.00%)  ->  4694/4694 (100.00%)
+  CodecConformance         4591/4694 (97.81%)  ->  4591/4694 (97.81%)
+  TextPreservation         4520/4623 (97.77%)  ->  4520/4623 (97.77%)
+```
+
+**The audit sees the change it was run for.** A comparison of fidelity outcomes alone
+would read the same whether or not the new rule took effect, so EC's own per-file result
+was compared as well. 243 files, every one detected as `us-ascii`, moved from `Converted`
+to `Unchanged` and received no backup (backup integrity `Verified` 4,290 → 4,047,
+`NotApplicable` 788 → 1,031). Each had produced byte-identical output under v3.14.5, so no
+file's text outcome moved. By reference encoding: 145 UTF-7, whose text already differed
+from its reference under v3.14.5 because EC does not detect UTF-7; 68 ASCII; 12
+hp-roman8; 18 without a reference encoding. No reason code changed. The comparison
+report is `CorpusTesters/audit/reports/rel3145-vs-rel3150/` (not committed to this
+repository; CorpusTesters is a separate tool repository).
+
+**The v3.12.0 gap is still open.** That build changed `ConversionPolicy` and shipped
+without a corpus run. This entry measures v3.14.5 against v3.15.0, not that change.
+
+#### The shipped build reproduces from the tagged commit, on a matching runtime
+
+```
+commit      383e2dff13a2b8cccfb162121933e9741e68dad2   (annotated tag v3.15.0)
+worktree    clean checkout (fresh git clone of the tag into a scratch directory, not the primary clone)
+runner      windows-2025-vs2026, image version 20260922.246.2 - .NET SDK 10.0.401, runtime 10.0.12
+local       Windows 10.0.26200 - .NET SDK 10.0.401, runtime 10.0.12
+executable  EncodingChecker.exe (framework-dependent and self-contained, single-file)
+  framework-dependent  published and driven  1f17d448520287eb48568a77420e62a6cc27feb54861afe00d9d8de8ddc9007d
+                       rebuilt locally        1f17d448520287eb48568a77420e62a6cc27feb54861afe00d9d8de8ddc9007d
+  self-contained       published             470f194b203a6a714b245c1707c77432b24acbacaf8965672fe2eeef68ec08b8
+                       rebuilt locally        470f194b203a6a714b245c1707c77432b24acbacaf8965672fe2eeef68ec08b8
+```
+
+Both hashes match exactly, for both build flavors. The "published and driven" hash is the
+`EcSha256` recorded by the release job's own GUI smoke report (`Outcome` Passed, ten
+phases, no evidence errors, driven on Windows 10.0.26100 with runtime 10.0.12), and it
+equals the executable inside the downloaded archive. Both published executables report
+`3.15.0` from `--version`; earlier records did not run the self-contained one at all.
+As before, the matching runtime is by circumstance rather than by a pin:
+both workflows still resolve `dotnet-version: "10.0.x"`.
+
+The published archives, each downloaded and hashed rather than trusting GitHub's own
+report of them — and confirmed to equal what GitHub itself reports as each asset's digest:
+
+```
+EncodingChecker-3.15.0-framework-dependent.zip
+  4e55e1a39ff7b405f221bc5b1b117db2edb3aa03f960d07bb1f5b22db1e920fb
+EncodingChecker-3.15.0-win-x64-self-contained.zip
+  a8951570c101bee436962355d89654c272be13ca91382ce188bf5099f34236a3
+```
+
+The local gates ran on the same commit before tagging: a Release build with no warnings,
+980 tests passing, `Test-DefectBacklog.ps1` passing, and the ten GUI smoke phases
+passing against the local build (managed assembly `8c3fee50665069c3…`, the assembly the
+audit measured). The `release.yml` rehearsal passed on the bump branch before merging.
+
+#### What changed in v3.15.0
+
+| | |
+|---|---|
+| `ConversionPolicy.cs` (BL-34, BL-37) | ASCII with a BOM-less UTF-8 target is `Unchanged`, explained as "ASCII is already valid UTF-8 without a BOM"; the whole file is still validated. The explicit-source conflict check runs before both "already in the target" rules. Semantics 7 → 8. |
+| `ScanEngine.cs` (BL-36, BL-38) | The backup copy hashes the bytes it stages and leaves the existing backup and recovery record in place when they no longer match the approved snapshot. `-Validate` accepts ASCII where BOM-less UTF-8 is allowed, through the same policy rule. A source-choice warning is kept on a file left unchanged. |
+| `AtomicArtifactFile.cs`, `Program.CliExecution.cs` (BL-35) | Every saved file refuses a read-only or linked destination instead of replacing it; the CLI checks its output paths before any file changes. |
+| `ConversionOrchestrator.cs`, `ConversionConfirmationForm.cs` (BL-39) | Source choices made in a GUI review that ends without writing are restored; the review lists a warning for a file the choice leaves unchanged. |
+| `MainForm*.cs` (BL-40, BL-41) | The Validate status counts the files checked; result rows clear stale icons and show their reason as a tooltip. |
+
+#### What this release says about these records
+
+Conversion semantics move from 7 to 8, so plans written by v3.14.x or earlier are refused
+rather than applied. The plan schema stays at 6 and the journal schema at 6.
+`UnicodeDetector.cs` and `TextValidation.cs` are unchanged since v3.14.4, and the
+detector-parity check passed on the tagged commit.
+
+#### Known limits specific to this release
+
+- **Code signing did not run, by decision.** The signing secrets are still not
+  configured, so the step was skipped and the archives above are **unsigned**. Shipping
+  unsigned was decided for this release; it is not a passed check. This is the
+  **eleventh** release to carry the limit — v3.11.2, v3.12.0, v3.12.1, v3.13.0, v3.14.0,
+  v3.14.1, v3.14.2, v3.14.3, v3.14.4, v3.14.5, v3.15.0.
+- **No accessibility spot check is recorded.** This is the **tenth** release without
+  one. The checklist's three-part check (display scaling, keyboard-only navigation,
+  high-contrast theme) is still not completed for any release.
+- **The new row tooltips were not seen in a live window.** Unit tests cover the tooltip
+  text and a real window's settings; the GUI smoke suite does not read icons or tooltips,
+  and it does not run Validate, so the new Validate status was not seen live either.
+- **The self-contained executable is still not driven** by the GUI smoke suite; it was run
+  here only for `--version`.
+
 ## Known limits
 
 - No detector can recover an author's historical legacy encoding when the same bytes admit multiple plausible readings. EC refuses automatic legacy conversion instead of guessing.
