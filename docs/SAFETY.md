@@ -12,7 +12,10 @@ For each file EC is allowed to convert:
 2. For a reviewed plan, verifies that every approved source hash still matches.
 3. Rejects malformed input, unsafe source choices, repeated leading BOMs, and
    ambiguous BOM-less UTF-16 and all BOM-less UTF-32 before writing output.
-4. If backups are enabled, creates `<file>.bak` before conversion begins.
+4. If backups are enabled, creates `<file>.bak` before conversion begins. The
+   copied bytes must match the hash the decision was made on; if the file has
+   changed, the existing backup and recovery record are left in place and the
+   file is reported as `SourceChangedDuringConversion`.
 5. Strictly decodes the source and strictly encodes the target into a sibling
    temporary file.
 6. Strictly decodes that output and compares the exact Unicode scalar sequence
@@ -108,10 +111,14 @@ reason code, final result, and before/after hashes for every file.
 ## Concurrent changes and links
 
 EC does not follow linked/reparse-point files or directories. Plans verify
-source hashes before execution and EC checks again immediately before
-installation. This greatly reduces accidental overwrite risk, but cannot remove
-the narrow race where another process changes a file between the last check and
-replacement.
+source hashes before execution, EC checks the bytes it copies into a backup, and
+it checks again immediately before installation. This greatly reduces accidental
+overwrite risk, but cannot remove the narrow race where another process changes a
+file between the last check and replacement.
+
+The backup check protects an existing backup only from a change made before the
+new backup is staged. A change after that point, or any other later conversion
+failure, can still leave the new `.bak` in place of the old one.
 
 ## Known limits
 

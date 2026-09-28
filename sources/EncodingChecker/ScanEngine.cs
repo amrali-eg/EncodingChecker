@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -1002,7 +1003,20 @@ internal static class ScanEngine
         {
             try
             {
-                CreateBackup(path);
+                if (!CreateBackup(path, entry.ExpectedSourceSha256))
+                {
+                    // Nothing was replaced, so the row must not claim a backup; the converter
+                    // would refuse these bytes anyway, for the same reason.
+                    entry.Result = ConversionRowResult.Error;
+                    entry.ReasonCode = nameof(ConversionErrorCode.SourceChangedDuringConversion);
+                    entry.Diagnostic =
+                        $"{ConversionErrorCode.SourceChangedDuringConversion}: The source file no "
+                        + "longer matches the one this conversion was decided on; it changed "
+                        + "before its backup was made. The existing backup and recovery record "
+                        + "were left in place.";
+                    return;
+                }
+
                 entry.BackupPath = path + ".bak";
             }
             catch (Exception ex) when (
@@ -1218,7 +1232,21 @@ internal static class ScanEngine
     }
 
     /// <summary>Creates a durable backup before conversion can replace the source.</summary>
-    private static void CreateBackup(string path)
+    /// <remarks>
+    /// The bytes are hashed as they are staged. When they no longer match the snapshot the
+    /// decision was made on, the existing backup and its recovery record are left in place:
+    /// replacing them would discard an earlier restore point for a conversion the converter
+    /// then refuses. This covers a change made before the backup is staged, not one made
+    /// after it.
+    /// </remarks>
+    /// <param name="path">The source file.</param>
+    /// <param name="expectedSha256">
+    /// The approved snapshot's hash, or <see langword="null"/> when no snapshot is bound.
+    /// </param>
+    /// <returns>
+    /// <see langword="false"/> when the staged bytes did not match and nothing was replaced.
+    /// </returns>
+    private static bool CreateBackup(string path, string? expectedSha256)
     {
         string? directory = Path.GetDirectoryName(path);
 
@@ -1233,8 +1261,12 @@ internal static class ScanEngine
             directory,
             $"{Path.GetFileName(path)}.{Guid.NewGuid():N}.bak.{EncodingConverter.TempFileSuffix}");
 
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(EncodingConverter.DefaultBufferSize);
+
         try
         {
+            string stagedSha256;
+
             using (FileStream source = new(
                        path,
                        FileMode.Open,
@@ -1249,15 +1281,32 @@ internal static class ScanEngine
                        FileShare.None,
                        EncodingConverter.DefaultBufferSize,
                        FileOptions.SequentialScan))
+            using (IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256))
             {
-                source.CopyTo(destination, EncodingConverter.DefaultBufferSize);
+                int read;
+
+                while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    hash.AppendData(buffer, 0, read);
+                    destination.Write(buffer, 0, read);
+                }
+
                 destination.Flush(flushToDisk: true);
+                stagedSha256 = Convert.ToHexStringLower(hash.GetHashAndReset());
+            }
+
+            if (expectedSha256 is not null &&
+                !string.Equals(stagedSha256, expectedSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
             }
 
             // Never leave old metadata describing a newly replaced backup.
             ConversionMetadataStore.RemoveBeforeBackupReplacement(path);
 
             EncodingConverter.AtomicReplaceForBackup(tempPath, path + ".bak");
+
+            return true;
         }
         finally
         {
@@ -1271,6 +1320,8 @@ internal static class ScanEngine
             {
                 // Cleanup failure does not invalidate the completed backup.
             }
+
+            ArrayPool<byte>.Shared.Return(buffer);
         }
     }
 

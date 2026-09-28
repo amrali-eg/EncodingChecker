@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=79 fixed=69 open=6 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
+<!-- backlog-counts total=80 fixed=70 open=6 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 79 findings — 69 fixed, 6 open, 1 not reproduced, 1 withdrawn,
+**Derived count: 80 findings — 70 fixed, 6 open, 1 not reproduced, 1 withdrawn,
 1 intentional behavior, and 1 design decision.** Recompute and check these
 figures with:
 
@@ -86,6 +86,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | BL-33 | The GUI CSV export could still call cancelled or stale-plan files Converted | Fixed | — | — | [BL-33](#bl-33) |
 | BL-34 | Repeating a backed-up UTF-8 conversion could replace the original backup once the text was ASCII | Fixed | — | — | [BL-34](#bl-34) |
 | BL-35 | Plans, journals, reports and settings replaced a read-only or linked file | Fixed | — | — | [BL-35](#bl-35) |
+| BL-36 | A conversion refused for a changed file still replaced its earlier backup | Fixed | — | — | [BL-36](#bl-36) |
 | EC-32 | A cancellation timeout could hide repeated refusals to press Cancel | Fixed | — | — | [EC-32](#ec-32) |
 | EC-15 | Plans and journals showed fixed safety flags as if they recorded checks | Fixed | — | — | [EC-15](#ec-15) |
 | BL-18 | BOM-less UTF-16 could be detected and converted as UTF-32 | Fixed | — | — | [BL-18](#bl-18) |
@@ -1326,6 +1327,38 @@ them.
 One effect to know: a read-only or linked `Settings.xml` is no longer replaced, so
 preferences are not saved while it stays that way. Before, a linked settings file
 was silently replaced by a local copy.
+
+### BL-36
+
+**A file that changes after its conversion was decided now keeps its earlier backup
+and recovery record.** A plan's stale check runs once, before any file is written,
+and the converter checks the source hash again just before installing. The backup
+was made between the two. A file changed after the first check but before its own
+turn was correctly refused by the second, yet by then its `.bak` had been replaced
+with the changed bytes and its recovery record deleted. The row and the journal
+also named the new backup. An earlier restore point was lost for a conversion that
+never happened; the changed file itself was never at risk.
+
+Reproduced on 2026-09-28 at `f553912` with two files, each carrying a backup and
+record from an earlier run, and the second file changed as soon as the first had
+finished. Through `-Apply` and through the GUI sequence alike, the second file
+ended as `SourceChangedDuringConversion` with its backup replaced and its record
+gone. A control that changed the file before `-Apply` started was refused by the
+stale check with nothing touched. A direct run without a plan has the same order,
+but its window is too narrow to hit deterministically; that case is inferred from
+the code.
+
+The backup copy now hashes the bytes it stages and, if they no longer match the
+hash the decision was made on, discards the staged copy before touching the old
+backup or record. The file is reported as `SourceChangedDuringConversion`, and no
+backup is claimed for it. The converter's own check before installation is
+unchanged. Regression tests cover `-Apply`, the GUI sequence and a control where
+nothing changed; removing the new check, claiming the backup anyway, or deleting
+the record before the check each fails them.
+
+This covers a change made before the backup is staged. A change after that point,
+or another later conversion failure, can still leave the new backup in place of
+the old one.
 
 ## Decisions and mistakes that must remain visible
 
