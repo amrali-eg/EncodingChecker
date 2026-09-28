@@ -1,6 +1,8 @@
 using System.Text;
 
 using System.Text.Json;
+using static EncodingChecker.Tests.CliRunner;
+using static EncodingChecker.Tests.ExpectedExitCode;
 
 namespace EncodingChecker.Tests;
 
@@ -267,5 +269,68 @@ public sealed class ExplicitSourceEncodingTests : IDisposable
 
         Assert.False(Assert.Single(Scan(from: null)).SourceEncodingWasSpecified);
         Assert.True(Assert.Single(Scan(from: "windows-1252")).SourceEncodingWasSpecified);
+    }
+
+    // The conflict check comes before "already in the target". When the chosen source was
+    // also the target, the file was reported as already in it: a UTF-8 file as already
+    // windows-1252 with exit 0, or UTF-16 as a UTF-8 validation error with exit 3.
+    [Theory]
+    [InlineData("utf-16-with-bom", "utf-8")]
+    [InlineData("utf-8", "windows-1252")]
+    public void AChoiceThatContradictsReliableDetectionIsRefusedEvenWhenItIsTheTarget(
+        string actual, string chosen)
+    {
+        byte[] original = actual == "utf-8"
+            ? new UTF8Encoding(false).GetBytes("Hello 世界, café text\n")
+            : [.. Encoding.Unicode.GetPreamble(), .. Encoding.Unicode.GetBytes("Hello 世界 text\n")];
+        string path = Write("reliable.txt", original);
+        byte[] earlierBackup = Encoding.ASCII.GetBytes("backup from an earlier run\r\n");
+        File.WriteAllBytes(path + ".bak", earlierBackup);
+
+        (int exit, string output, _) = RunCaptured(
+            "-BasePath", _root, "-From", chosen, "-Target", chosen, "-Backup");
+
+        Assert.Equal(ExpectedSafeRefusal, exit);
+        Assert.Contains(
+            output.Split(Environment.NewLine),
+            line => line.StartsWith(path + ",", StringComparison.Ordinal)
+                    && line.Contains(
+                        $",Refused,{ConversionReasonCodes.ExplicitSourceConflictsWithDetection},",
+                        StringComparison.Ordinal));
+        Assert.Equal(original, File.ReadAllBytes(path));
+        Assert.Equal(earlierBackup, File.ReadAllBytes(path + ".bak"));
+    }
+
+    [Fact]
+    public void AChoiceThatAgreesWithDetectionAndIsTheTargetIsStillUnchanged()
+    {
+        byte[] original = new UTF8Encoding(false).GetBytes("Hello 世界, café text\n");
+        string path = Write("agrees.txt", original);
+
+        (int exit, string output, _) = RunCaptured(
+            "-BasePath", _root, "-From", "utf-8", "-Target", "utf-8", "-Backup");
+
+        Assert.Equal(ExpectedClean, exit);
+        Assert.Contains(
+            output.Split(Environment.NewLine),
+            line => line.StartsWith(path + ",", StringComparison.Ordinal)
+                    && line.Contains(",Unchanged,", StringComparison.Ordinal));
+        Assert.Equal(original, File.ReadAllBytes(path));
+        Assert.False(File.Exists(path + ".bak"));
+    }
+
+    [Fact]
+    public void ThePolicyChecksAConflictBeforeTheSameCodecRule()
+    {
+        PlannedAction action = ConversionPolicy.Decide(
+            "windows-1252", sourceCodePage: 1252, sourceHasBom: false,
+            "windows-1252", targetCodePage: 1252, targetHasBom: false,
+            sourceWasSpecified: true, isUnicodeOrAscii: false,
+            explicitSourceConflictsWithReliableDetection: true,
+            automaticBomlessUnicodeDoubt: BomlessUnicodeKind.None,
+            out SourceInterpretation interpretation, out _);
+
+        Assert.Equal(PlannedAction.Refuse, action);
+        Assert.Equal(SourceInterpretation.ExplicitSource, interpretation);
     }
 }
