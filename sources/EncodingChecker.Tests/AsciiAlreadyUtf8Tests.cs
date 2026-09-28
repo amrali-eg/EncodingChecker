@@ -199,6 +199,55 @@ public sealed class AsciiAlreadyUtf8Tests : IDisposable
         AssertNoBackupOrRecord(path);
     }
 
+    // -Validate accepts ASCII wherever BOM-less UTF-8 is allowed, as conversion does, and
+    // still reads the whole file. utf-8-bom alone does not accept it: ASCII has no BOM.
+    [Theory]
+    [InlineData("utf-8", "Unchanged,,ASCII is already valid UTF-8 without a BOM.", ExpectedClean)]
+    [InlineData("utf-8,utf-8-bom", "Unchanged,,ASCII is already valid UTF-8 without a BOM.", ExpectedClean)]
+    [InlineData("us-ascii", "Unchanged,,", ExpectedClean)]
+    [InlineData("utf-8-bom", "Invalid,CharsetNotAllowed,", ExpectedChangesNeeded)]
+    public void ValidateAcceptsAsciiWhereBomlessUtf8IsAllowed(
+        string allowed, string expectedOutcome, int expectedExit)
+    {
+        string path = WriteAscii();
+
+        (int exit, string output, _) = RunCaptured(
+            "-BasePath", _root, "-Validate", allowed, "-FailOnChanges");
+
+        Assert.Equal(expectedExit, exit);
+        Assert.Contains(
+            output.Split(Environment.NewLine),
+            line => line.StartsWith(path + ",us-ascii,No,", StringComparison.Ordinal)
+                    && line.Contains("," + expectedOutcome, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateStillReadsTheWholeFileOfAnAsciiSample()
+    {
+        // ASCII in the 64 KiB detection sample, then a UTF-8 "é". Accepting it under utf-8
+        // must not skip the full-file check, which conversion applies to the same file.
+        var text = new StringBuilder();
+
+        while (text.Length < 70 * 1024)
+            text.Append("the quick brown fox jumps over the lazy dog. ");
+
+        text.Append("café\n");
+
+        string path = PathOf("late.txt");
+        File.WriteAllBytes(path, new UTF8Encoding(false).GetBytes(text.ToString()));
+
+        (int exit, string output, _) = RunCaptured(
+            "-BasePath", _root, "-Validate", "utf-8", "-FailOnChanges");
+
+        Assert.Equal(ExpectedChangesNeeded, exit);
+        Assert.Contains(
+            output.Split(Environment.NewLine),
+            line => line.StartsWith(path + ",us-ascii,", StringComparison.Ordinal)
+                    && line.Contains(
+                        $",Invalid,{ConversionReasonCodes.StrictValidationFailed},",
+                        StringComparison.Ordinal));
+    }
+
     [Fact]
     public void AFileAlreadyInTheTargetCodecGetsNoExplanation()
     {

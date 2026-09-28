@@ -107,7 +107,7 @@ or `-Report` file is refused before any file changes (exit 3) and left as it is.
 | Option | Meaning |
 |---|---|
 | `-DetectOnly` | Report detected encodings; do not modify files. |
-| `-Validate <charset1,...>` | Strictly validate complete files against an allowed encoding list; do not modify files. |
+| `-Validate <charset1,...>` | Strictly validate complete files against an allowed encoding list; do not modify files. `utf-8` also accepts ASCII, which is already UTF-8 without a BOM; `utf-8-bom` does not. |
 | `-FailOnChanges` | Return exit code 2 when files need conversion or fail validation. Useful in CI. |
 
 `-DetectOnly` cannot be combined with `-Validate`, `-Target`, `-From`,

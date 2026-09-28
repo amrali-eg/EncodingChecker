@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=81 fixed=71 open=6 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
+<!-- backlog-counts total=82 fixed=72 open=6 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 81 findings — 71 fixed, 6 open, 1 not reproduced, 1 withdrawn,
+**Derived count: 82 findings — 72 fixed, 6 open, 1 not reproduced, 1 withdrawn,
 1 intentional behavior, and 1 design decision.** Recompute and check these
 figures with:
 
@@ -88,6 +88,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | BL-35 | Plans, journals, reports and settings replaced a read-only or linked file | Fixed | — | — | [BL-35](#bl-35) |
 | BL-36 | A conversion refused for a changed file still replaced its earlier backup | Fixed | — | — | [BL-36](#bl-36) |
 | BL-37 | A contradicting source choice that was also the target was not refused | Fixed | — | — | [BL-37](#bl-37) |
+| BL-38 | `-Validate utf-8` rejected ASCII files that conversion treats as already UTF-8 | Fixed | — | — | [BL-38](#bl-38) |
 | EC-32 | A cancellation timeout could hide repeated refusals to press Cancel | Fixed | — | — | [EC-32](#ec-32) |
 | EC-15 | Plans and journals showed fixed safety flags as if they recorded checks | Fixed | — | — | [EC-15](#ec-15) |
 | BL-18 | BOM-less UTF-16 could be detected and converted as UTF-32 | Fixed | — | — | [BL-18](#bl-18) |
@@ -1384,6 +1385,23 @@ order fails them.
 Semantics stay at 8. The change only turns some `Unchanged` decisions into
 refusals, which revalidation of an applied plan already permits, and semantics 8
 has not been released.
+
+### BL-38
+
+**`-Validate` now accepts ASCII wherever BOM-less UTF-8 is allowed.** After BL-34,
+conversion to UTF-8 without a BOM leaves ASCII files unchanged, but `-Validate`
+still compared labels, so the same file failed `-Validate "utf-8"` as
+`CharsetNotAllowed`, exit 2 under `-FailOnChanges`. A pipeline that converted with
+`-Target utf-8` and then checked with `-Validate "utf-8,utf-8-bom"` failed every
+file whose text was plain English. Reproduced on 2026-09-28 with the `master` build.
+
+`-Validate` now uses the same rule conversion uses, from `ConversionPolicy`, and
+explains the pass with "ASCII is already valid UTF-8 without a BOM." Only the
+BOM-less `utf-8` label accepts ASCII; a list allowing only `utf-8-bom` still
+rejects it, because an ASCII file has no BOM. The whole file is still validated
+as ASCII, so a non-ASCII byte past the detection sample is reported as invalid,
+as conversion reports it. Tests cover each list, the explanation and the late
+byte.
 
 ## Decisions and mistakes that must remain visible
 

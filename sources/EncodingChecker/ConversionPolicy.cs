@@ -14,6 +14,24 @@ internal static class ConversionPolicy
     private const int AsciiCodePage = 20127;
     private const int Utf8CodePage = 65001;
 
+    /// <summary>Why an ASCII file needs nothing to become UTF-8 without a BOM.</summary>
+    internal const string AsciiAlreadyUtf8Reason = "ASCII is already valid UTF-8 without a BOM.";
+
+    /// <summary>
+    /// Whether the source is ASCII and the target is UTF-8, both without a BOM, so the bytes
+    /// already are the target encoding.
+    /// </summary>
+    /// <remarks>
+    /// Kept here so conversion and <c>-Validate</c> accept the same files. Either way the whole
+    /// file is still validated as ASCII afterwards.
+    /// </remarks>
+    internal static bool IsAsciiAlreadyUtf8(
+        int sourceCodePage, bool sourceHasBom, int targetCodePage, bool targetHasBom) =>
+        sourceCodePage == AsciiCodePage
+        && !sourceHasBom
+        && targetCodePage == Utf8CodePage
+        && !targetHasBom;
+
     /// <summary>
     /// Decides what to do with one file, given what is known about its encoding.
     /// </summary>
@@ -94,13 +112,10 @@ internal static class ConversionPolicy
         // and, with backups on, a repeat run would replace the backup of an earlier original
         // with a copy of the current file. The unchanged path validates the whole file as
         // ASCII, so a later non-ASCII byte is reported as an error.
-        if (sourceCodePage == AsciiCodePage
-            && !sourceHasBom
-            && targetCodePage == Utf8CodePage
-            && !targetHasBom)
+        if (IsAsciiAlreadyUtf8(sourceCodePage, sourceHasBom, targetCodePage, targetHasBom))
         {
             sourceInterpretation = SourceInterpretation.NotApplicable;
-            reason = "ASCII is already valid UTF-8 without a BOM.";
+            reason = AsciiAlreadyUtf8Reason;
             return PlannedAction.Unchanged;
         }
 
