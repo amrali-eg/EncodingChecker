@@ -269,6 +269,9 @@ internal static partial class Program
             if (Directory.Exists(fullPath))
                 return $"{name} names an existing directory. Give it a file path.";
 
+            if (AtomicArtifactFile.RefusalForExistingDestination(fullPath) is { } refusal)
+                return $"{name}: {refusal}";
+
             string? parent = Path.GetDirectoryName(fullPath);
 
             if (!string.IsNullOrEmpty(parent) && !Directory.Exists(parent))

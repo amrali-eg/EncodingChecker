@@ -77,6 +77,45 @@ public sealed class OutputDestinationPreflightTests : IDisposable
         Assert.Equal(before, File.ReadAllBytes(source));
     }
 
+    /// <summary>
+    /// A read-only output would be refused when written, so it must be refused before any
+    /// file changes, and keep its own bytes and flag.
+    /// </summary>
+    [Theory]
+    [InlineData("-Journal")]
+    [InlineData("-Report")]
+    [InlineData("-Plan")]
+    public void AReadOnlyOutputLeavesTheSourceAndTheOutputAlone(string option)
+    {
+        string source = WriteSource();
+        byte[] before = File.ReadAllBytes(source);
+
+        string output = Path.Combine(_root, "output.out");
+        File.WriteAllText(output, "the previous output");
+        byte[] outputBefore = File.ReadAllBytes(output);
+        File.SetAttributes(output, FileAttributes.ReadOnly);
+
+        try
+        {
+            int exitCode = Run(
+                out string stderr,
+                "-BasePath", _root,
+                "-Include", "source.txt",
+                "-Target", "utf-16-bom",
+                option, output);
+
+            Assert.Equal(ExpectedProcessingErrors, exitCode);
+            Assert.Contains($"{option}: '{output}' is read-only.", stderr);
+            Assert.Equal(before, File.ReadAllBytes(source));
+            Assert.Equal(outputBefore, File.ReadAllBytes(output));
+            Assert.True(File.GetAttributes(output).HasFlag(FileAttributes.ReadOnly));
+        }
+        finally
+        {
+            File.SetAttributes(output, FileAttributes.Normal);
+        }
+    }
+
     /// <summary>A usable output path must pass preflight and allow the run.</summary>
     [Fact]
     public void AUsableDestinationStillRuns()
