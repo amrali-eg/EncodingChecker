@@ -84,7 +84,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | BL-31 | Interrupted runs could report unprocessed files as completed work | Fixed | — | — | [BL-31](#bl-31) |
 | BL-32 | A cancelled scan could leave an old CSV without explaining the missing plan | Fixed | — | — | [BL-32](#bl-32) |
 | BL-33 | The GUI CSV export could still call cancelled or stale-plan files Converted | Fixed | — | — | [BL-33](#bl-33) |
-| BL-34 | Repeating a backed-up conversion could replace the original backup of ASCII text | Fixed | — | — | [BL-34](#bl-34) |
+| BL-34 | Repeating a backed-up UTF-8 conversion could replace the original backup once the text was ASCII | Fixed | — | — | [BL-34](#bl-34) |
 | EC-32 | A cancellation timeout could hide repeated refusals to press Cancel | Fixed | — | — | [EC-32](#ec-32) |
 | EC-15 | Plans and journals showed fixed safety flags as if they recorded checks | Fixed | — | — | [EC-15](#ec-15) |
 | BL-18 | BOM-less UTF-16 could be detected and converted as UTF-32 | Fixed | — | — | [BL-18](#bl-18) |
@@ -1285,13 +1285,22 @@ second run the backup and the converted file had the same hash, and the recovery
 record named `us-ascii` instead of `utf-16`.
 
 The policy now plans an ASCII source for a UTF-8 target, both without a BOM, as
-`Unchanged`. That path already validates the whole file, so a non-ASCII byte past
-the 64 KiB detection sample is refused before any backup is made. A UTF-8 target
-with a BOM still converts. Conversion semantics moved from 7 to 8, so plans
-written earlier are refused rather than applied. Regression tests cover a repeat
-backed-up run, `-FailOnChanges`, a late non-ASCII byte, a saved plan, and the GUI
-sequence converting the same rows twice; smoke phase B now expects ASCII to keep
-its bytes with no backup or record.
+`Unchanged`, with the explanation "ASCII is already valid UTF-8 without a BOM."
+That path already validates the whole file, so a non-ASCII byte past the 64 KiB
+detection sample is reported as an error before any backup is made. A UTF-8 target
+with a BOM still converts. The rule runs after the check for a source choice that
+contradicts reliable detection, so `-From us-ascii` on UTF-8 text is still refused
+rather than reported as an error. A source-choice warning about a BOM-less UTF-16
+or UTF-32 estimate now stays with any file left unchanged, and outranks the ASCII
+explanation. Conversion semantics moved from 7 to 8, so plans written earlier are
+refused rather than applied.
+
+Regression tests cover a repeat backed-up run, `-FailOnChanges`, a late non-ASCII
+byte, a saved plan, the GUI sequence converting the same rows twice, the conflict
+order, and the kept warnings. Several older tests used ASCII as their convertible
+file and silently stopped reaching conversion; they now use UTF-16 with a BOM, and
+each was confirmed to fail again against a broken build. Smoke phase B now expects
+ASCII to keep its bytes with no backup or record.
 
 ## Decisions and mistakes that must remain visible
 

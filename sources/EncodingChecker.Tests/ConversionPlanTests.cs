@@ -707,6 +707,9 @@ public sealed class ConversionPlanTests : IDisposable
         Write("ambiguous.txt", "Le café était déjà prêt", "windows-1252");
         Write("plain.txt", "just ascii here", "ascii");
 
+        // ASCII is already UTF-8, so a UTF-16 file is what puts one in "Will convert".
+        File.WriteAllText(Path.Combine(_root, "utf16.txt"), "text to convert", Encoding.Unicode);
+
         Assert.Equal(0, Plan());
 
         ConversionPlan plan = LoadPlan();
@@ -720,6 +723,9 @@ public sealed class ConversionPlanTests : IDisposable
 
             return int.Parse(line[label.Length..].Trim());
         }
+
+        Assert.Equal(1, Line("Will convert:"));
+        Assert.Equal(1, Line("Already in target encoding:"));
 
         // The indented pair breaks down "Will convert" and is not part of the sum.
         Assert.Equal(
@@ -742,11 +748,15 @@ public sealed class ConversionPlanTests : IDisposable
         Write("ambiguous.txt", "Le café était déjà prêt", "windows-1252");
         Write("plain.txt", "just ascii here", "ascii");
 
+        // ASCII is already UTF-8, so a UTF-16 file is what puts one in "Will convert".
+        File.WriteAllText(Path.Combine(_root, "utf16.txt"), "text to convert", Encoding.Unicode);
+
         Assert.Equal(0, Plan());
 
         ConversionPlan plan = LoadPlan();
 
-        Assert.Equal(3, plan.Files.Count);
+        Assert.Equal(4, plan.Files.Count);
+        Assert.Equal(1, plan.Files.Count(f => f.Action == PlannedAction.Convert));
         Assert.Equal(
             plan.Files.Count,
             plan.Files.Count(f => f.Action == PlannedAction.Convert)

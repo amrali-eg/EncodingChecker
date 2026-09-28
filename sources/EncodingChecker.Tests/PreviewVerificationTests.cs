@@ -124,10 +124,11 @@ public sealed class PreviewVerificationTests : IDisposable
     [Fact]
     public void AnOrdinaryAsciiFilePreviewsAsAlreadyUtf8()
     {
-        // ASCII is already BOM-less UTF-8, and the whole file, not only the detection
-        // sample, was read to say so.
+        // ASCII is already BOM-less UTF-8. The corrupt case above shows the whole file is
+        // validated; this shows a clean one past the detection sample is not refused.
         ConversionReportEntry entry = Preview(PastTheSample(corrupt: false), "utf-8");
 
+        Assert.Equal("us-ascii", entry.SourceEncoding);
         Assert.Equal(PlannedAction.Unchanged, entry.Action);
         Assert.Equal(ConversionRowResult.Unchanged, entry.Result);
         Assert.Null(entry.ReasonCode);

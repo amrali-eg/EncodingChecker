@@ -897,7 +897,9 @@ internal static class ScanEngine
         entry.Diagnostic = null;
 
         // Matching an unprovable estimate still means the byte order was taken on trust.
-        if (action == PlannedAction.Convert &&
+        // The warning stays with a file left unchanged too: the choice still decided how
+        // its bytes were read.
+        if (action is PlannedAction.Convert or PlannedAction.Unchanged &&
             entry.SourceEncodingWasSpecified &&
             automaticallyDetected is not null &&
             IsUtf16OrUtf32(automaticallyDetected) &&
@@ -948,9 +950,10 @@ internal static class ScanEngine
         if (action != PlannedAction.Convert)
         {
             entry.Result = ConversionPolicy.ToRowResult(action);
+            // A source-choice warning set above outranks the policy's own explanation.
             entry.Diagnostic = automaticBomlessUnicodeDoubt != BomlessUnicodeKind.None
                 ? BomlessUnicodeSafety.DescribeRefusal(sourceEncoding)
-                : policyReason;
+                : entry.Diagnostic ?? policyReason;
             return;
         }
 

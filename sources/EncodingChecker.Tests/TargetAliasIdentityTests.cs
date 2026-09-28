@@ -127,7 +127,7 @@ public sealed class TargetAliasIdentityTests : IDisposable
     {
         // ASCII bytes are BOM-less UTF-8, so there is nothing to rewrite and no backup to
         // take. Detection samples only the first 64 KiB; the unchanged path validates the
-        // rest, which AsciiAlreadyUtf8Tests covers for a later non-ASCII byte.
+        // whole file, so a later non-ASCII byte is an error.
         byte[] original = Encoding.ASCII.GetBytes("plain ascii content\n");
         File.WriteAllBytes(_path, original);
 

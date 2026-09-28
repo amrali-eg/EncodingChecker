@@ -39,7 +39,11 @@ public sealed class DetectionCountTests : IDisposable
     {
         Write("jp.txt", "こんにちは世界。日本語のテキストです。", "shift_jis");
         Write("zh.txt", "这是一段简体中文文本内容", "gb18030");
-        Write("plain.txt", "plain ascii, no high bytes at all", "ascii");
+
+        // The one file that converts, so the write path is measured too. UTF-16 with a BOM
+        // converts automatically; ASCII would already be UTF-8 and never be written.
+        File.WriteAllText(
+            Path.Combine(_root, "plain.txt"), "plain text, no high bytes at all", Encoding.Unicode);
     }
 
     /// <summary>Counts what one operation costs, from zero.</summary>

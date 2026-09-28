@@ -337,7 +337,7 @@ internal sealed class SmokeSuite
             sourceCodePage: 1200);
 
         // ASCII bytes are already UTF-8 without a BOM, so the file is not rewritten and
-        // gets no backup that a later run could replace with a copy of itself.
+        // gets no backup or recovery record.
         string plainPath = Path.Combine(directory, "plain.txt");
         Check(Hash(plainPath) == before["plain.txt"], "The ASCII file was rewritten.");
         Check(!File.Exists(plainPath + ".bak"), "The ASCII file received a backup.");

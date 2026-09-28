@@ -77,12 +77,16 @@ public sealed class ExplicitSourceEncodingTests : IDisposable
     [Fact]
     public void AsciiAutoDetection_IsAllowed()
     {
-        // ASCII is byte-identical in UTF-8, so automatic conversion is safe.
-        Write("ascii.txt", "plain ascii, no high bytes"u8.ToArray());
+        // ASCII needs no source choice. It is byte-identical in UTF-8, so under this
+        // UTF-8 target it is already done rather than refused.
+        byte[] original = "plain ascii, no high bytes"u8.ToArray();
+        string path = Write("ascii.txt", original);
 
         ConversionReportEntry entry = Assert.Single(Scan(from: null));
 
-        Assert.NotEqual(ConversionRowResult.Error, entry.Result);
+        Assert.Equal(PlannedAction.Unchanged, entry.Action);
+        Assert.Equal(ConversionRowResult.Unchanged, entry.Result);
+        Assert.Equal(original, File.ReadAllBytes(path));
     }
 
     [Fact]
