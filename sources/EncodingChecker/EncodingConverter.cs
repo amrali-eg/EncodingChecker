@@ -82,7 +82,8 @@ internal sealed record ConversionOptions
     /// <see langword="null"/> to skip the check.
     /// </summary>
     /// <remarks>
-    /// Used by an approved plan to ensure the file has not changed since it was reviewed.
+    /// Every planned conversion sets it from the snapshot its decision was made on, so a file
+    /// that changed after that decision is not replaced.
     /// </remarks>
     internal string? ExpectedSourceSha256 { get; init; }
 
@@ -452,7 +453,7 @@ internal static partial class EncodingConverter
                 }
             }
 
-            // An approved plan must still refer to the bytes about to be replaced.
+            // The file must still be the bytes this conversion was decided on.
             if (options.ExpectedSourceSha256 is not null &&
                 !string.Equals(
                     sourceFileSha,

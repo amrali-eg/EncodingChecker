@@ -38,6 +38,16 @@ public sealed class ConversionOrchestrationTests : IDisposable
     private string Write(string name, string text, string charset) =>
         TestContent.Write(_root, name, text, charset);
 
+    // UTF-16 with a BOM converts automatically to UTF-8. ASCII would not: it is already
+    // UTF-8, so a test that needs a file planned for conversion cannot use it.
+    private string WriteConvertible(string name, string text)
+    {
+        string path = Path.Combine(_root, name);
+        File.WriteAllText(path, text, Encoding.Unicode);
+
+        return path;
+    }
+
     /// <summary>The rows the GUI's View button produces, which Convert then acts on.</summary>
     private List<ConversionReportEntry> View()
     {
@@ -234,31 +244,18 @@ public sealed class ConversionOrchestrationTests : IDisposable
     public void Ascii_IsConvertedAutomatically()
     {
         // ASCII has one safe Unicode interpretation and does not require a source choice.
-        string path = Write("plain.txt", "plain ascii, no high bytes at all", "ascii");
+        // It is already UTF-8, so UTF-16 is the target that makes this a conversion.
+        const string text = "plain ascii, no high bytes at all";
+        string path = Write("plain.txt", text, "ascii");
 
-        OrchestrationResult result = Convert(View(), Proceed);
-
-        Assert.Equal(OrchestrationOutcome.Converted, result.Outcome);
-        Assert.Equal(
-            PlannedAction.Convert, Assert.Single(result.Plan!.Files).Action);
-        Assert.Equal(
-            "plain ascii, no high bytes at all",
-            Encoding.UTF8.GetString(File.ReadAllBytes(path)));
-    }
-
-    [Fact]
-    public void AsciiEncoding_IsConverted()
-    {
-        const string text = "plain ASCII text";
-        string path = Write("ascii.txt", text, "ascii");
-
-        OrchestrationResult result = Convert(View(), Proceed);
+        OrchestrationResult result = Convert(View(), Proceed, target: "utf-16");
 
         PlannedFile planned = Assert.Single(result.Plan!.Files);
 
+        Assert.Equal(OrchestrationOutcome.Converted, result.Outcome);
         Assert.Equal(PlannedAction.Convert, planned.Action);
         Assert.Equal(SourceInterpretation.AutomaticUnicodeOrAscii, planned.SourceInterpretation);
-        Assert.Equal(text, Encoding.UTF8.GetString(File.ReadAllBytes(path)));
+        Assert.Equal(text, Encoding.Unicode.GetString(File.ReadAllBytes(path)));
     }
 
     // ------------------------------------------------------------ explicit source
@@ -419,7 +416,7 @@ public sealed class ConversionOrchestrationTests : IDisposable
         // prove this same no-op scope doesn't leak a stale Converted for an eligible
         // file the decide pass already marked before this response was scripted.
         string ambiguous = Write("ambiguous.txt", "Le café était déjà prêt", "windows-1252");
-        string eligible = Write("eligible.txt", "plain ascii here", "ascii");
+        string eligible = WriteConvertible("eligible.txt", "plain text here");
         byte[] ambiguousBefore = File.ReadAllBytes(ambiguous);
         byte[] eligibleBefore = File.ReadAllBytes(eligible);
 
@@ -444,7 +441,7 @@ public sealed class ConversionOrchestrationTests : IDisposable
     public void CancellingTheConfirmation_ModifiesNothing()
     {
         string jp = Write("jp.txt", "こんにちは世界。テキスト", "shift_jis");
-        string plain = Write("plain.txt", "plain ascii here", "ascii");
+        string plain = WriteConvertible("plain.txt", "plain text here");
 
         byte[] jpBefore = File.ReadAllBytes(jp);
         byte[] plainBefore = File.ReadAllBytes(plain);
@@ -475,7 +472,7 @@ public sealed class ConversionOrchestrationTests : IDisposable
         // The decide pass runs before the user is ever asked and can itself be
         // cancelled. Whatever it already marked "would convert" must not be left
         // looking like completed work once the exception propagates.
-        Write("plain.txt", "plain ascii here", "ascii");
+        WriteConvertible("plain.txt", "plain text here");
 
         List<ConversionReportEntry> entries = View();
         using var cts = new CancellationTokenSource();
@@ -501,8 +498,8 @@ public sealed class ConversionOrchestrationTests : IDisposable
     {
         // The user reads a dialog; that takes time. What they approved was the files as
         // they were. All-or-nothing, as with -Apply: a plan is reviewed as a whole.
-        string stable = Write("stable.txt", "plain ascii text", "ascii");
-        string moving = Write("moving.txt", "other ascii text", "ascii");
+        string stable = WriteConvertible("stable.txt", "plain text");
+        string moving = WriteConvertible("moving.txt", "other text");
 
         byte[] stableBefore = File.ReadAllBytes(stable);
 

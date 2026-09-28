@@ -42,7 +42,8 @@ Do not treat that file as unchanged.
 
 A file already matching the target is strictly validated in full. A valid file
 is reported as `Unchanged` and is not rewritten; an invalid file is reported as
-an error instead.
+an error instead. ASCII already matches UTF-8 without a BOM, because the bytes
+are identical, so it is validated in full as ASCII and treated the same way.
 
 A source encoding chosen by the user controls only how EC reads the original
 bytes. It does not bypass any safety check.

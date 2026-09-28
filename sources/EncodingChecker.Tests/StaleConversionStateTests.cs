@@ -115,14 +115,14 @@ public sealed class StaleConversionStateTests : IDisposable
     [Fact]
     public void SecondConvertToTheSameTarget_ReportsUnchanged()
     {
-        // A pure-ASCII file converted to UTF-8 without a BOM keeps identical bytes, so
-        // re-detecting would report "us-ascii" again and convert a second time. The
-        // label recorded at install time says "utf-8", which is what the file now
-        // declares, so the repeat is correctly recognised as a no-op.
-        string path = Path.Combine(_root, "ascii.txt");
-        File.WriteAllText(path, TestContent.Ascii, Encoding.ASCII);
+        // The row keeps its scan-time label, which still says UTF-16 after the first
+        // conversion. The label recorded at install time says "utf-8", which is what the
+        // file now holds, so the repeat is recognised as a no-op instead of decoding the
+        // UTF-8 bytes as UTF-16 again.
+        string path = Path.Combine(_root, "utf16.txt");
+        File.WriteAllText(path, TestContent.Ascii, Encoding.Unicode);
 
-        ConversionReportEntry entry = Entry(path, "us-ascii");
+        ConversionReportEntry entry = Entry(path, "utf-16", sourceHasBom: true);
 
         Convert(entry, "utf-8", targetWriteBom: false);
         Assert.Equal(ConversionRowResult.Converted, entry.Result);

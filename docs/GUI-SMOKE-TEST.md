@@ -61,7 +61,7 @@ because nothing ran the sequence.
 | Phase | Proves | Would have caught |
 |---|---|---|
 | **A** | Opening the review and cancelling writes nothing, with backups enabled: no bytes change, no `.bak`, no `.ecmeta.json`. | A review that writes before you confirm. |
-| **B** | Unicode and ASCII convert with no source choice offered, both keep their text exactly, and **both** get a verified recovery record naming `Detected` and the right code page — ASCII included, whose bytes do not change. | A safe batch demanding a source choice, a conversion that alters text, or a conversion that skips the restore point when the bytes happen to match. |
+| **B** | Unicode converts with no source choice offered, keeps its text exactly, and gets a verified recovery record naming `Detected` and the right code page. ASCII, already UTF-8 without a BOM, keeps its bytes and gets no backup or recovery record. | A safe batch demanding a source choice, a conversion that alters text, a conversion that skips its restore point, or ASCII rewritten to identical bytes with a backup a later run would replace. |
 | **C** | A chosen legacy source applies **only** to the ticked files; an unticked file keeps its bytes and gets no backup. The record names `Explicit` and the chosen code page. | A source choice leaking to files it was not ticked for. |
 | **D** | BOM-less UTF-16 whose byte order cannot be proven is refused, is offered a source choice, and cancelling leaves the folder untouched. | Automatic conversion of a file whose byte order is a coin flip. |
 | **E** | Naming `utf-16BE` explicitly converts the same file exactly, with a backup and a recovery record. | A refusal that cannot be answered, or an answered one that loses text. |

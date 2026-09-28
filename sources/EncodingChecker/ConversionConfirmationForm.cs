@@ -97,11 +97,11 @@ internal sealed class ConversionConfirmationForm : Form
         List<PlannedFile> refused = Refused;
         // Both reason codes. Agreeing with an estimate EC has already called unprovable
         // is not corroboration, so the matching case needs saying at least as much as
-        // the contradicting one.
+        // the contradicting one. A file the choice leaves unchanged was still read with it.
         List<PlannedFile> advisories =
         [
             .. _plan.Files.Where(f =>
-                f.Action == PlannedAction.Convert &&
+                f.Action is PlannedAction.Convert or PlannedAction.Unchanged &&
                 (f.ReasonCode == ConversionReasonCodes
                      .ExplicitSourceDiffersFromBomlessUnicodeEstimate ||
                  f.ReasonCode == ConversionReasonCodes

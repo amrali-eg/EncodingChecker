@@ -21,6 +21,8 @@ that a destructive conversion should proceed.
 ## What automatic detection permits
 
 - ASCII and UTF-8 may be converted automatically after strict validation.
+  ASCII needs no conversion to UTF-8 without a BOM; it is validated in full and
+  left unchanged.
 - UTF-16/UTF-32 with a BOM may be converted automatically because the marker
   establishes byte order.
 - BOM-less UTF-16 is converted automatically only when the complete file is
