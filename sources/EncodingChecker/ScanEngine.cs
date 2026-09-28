@@ -554,12 +554,21 @@ internal static class ScanEngine
                 string label =
                     FormatCharsetLabel(sourceCharset, hasBom);
 
-                bool isValid =
-                    sourceCharset != UnknownCharset &&
+                // ASCII bytes are already BOM-less UTF-8, so a list allowing that allows ASCII.
+                // Only the BOM-less label: an ASCII file has no BOM, so utf-8-bom still fails it.
+                bool allowedAsUtf8 =
+                    detected is not null &&
                     options.ValidCharsets is not null &&
-                    options.ValidCharsets.Contains(
-                        label,
-                        StringComparer.OrdinalIgnoreCase);
+                    options.ValidCharsets.Contains("utf-8", StringComparer.OrdinalIgnoreCase) &&
+                    ConversionPolicy.IsAsciiAlreadyUtf8(
+                        detected.CodePage, hasBom, Encoding.UTF8.CodePage, targetHasBom: false);
+
+                bool listed =
+                    options.ValidCharsets is not null &&
+                    options.ValidCharsets.Contains(label, StringComparer.OrdinalIgnoreCase);
+
+                bool isValid =
+                    sourceCharset != UnknownCharset && (listed || allowedAsUtf8);
 
                 string? validationDiagnostic = null;
 
@@ -605,6 +614,11 @@ internal static class ScanEngine
                         BomlessUnicodeSafety.DescribeUnprovableByteOrder(detected!)
                         + $" The label '{label}' is in the allowed list, but EC cannot"
                         + " confirm this file belongs to it.";
+                }
+                else if (!listed)
+                {
+                    // Passed only through the UTF-8 rule, so say why a us-ascii row passes.
+                    entry.Diagnostic = ConversionPolicy.AsciiAlreadyUtf8Reason;
                 }
 
                 break;
