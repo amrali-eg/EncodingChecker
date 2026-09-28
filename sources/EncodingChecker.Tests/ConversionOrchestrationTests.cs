@@ -234,31 +234,18 @@ public sealed class ConversionOrchestrationTests : IDisposable
     public void Ascii_IsConvertedAutomatically()
     {
         // ASCII has one safe Unicode interpretation and does not require a source choice.
-        string path = Write("plain.txt", "plain ascii, no high bytes at all", "ascii");
+        // It is already UTF-8, so UTF-16 is the target that makes this a conversion.
+        const string text = "plain ascii, no high bytes at all";
+        string path = Write("plain.txt", text, "ascii");
 
-        OrchestrationResult result = Convert(View(), Proceed);
-
-        Assert.Equal(OrchestrationOutcome.Converted, result.Outcome);
-        Assert.Equal(
-            PlannedAction.Convert, Assert.Single(result.Plan!.Files).Action);
-        Assert.Equal(
-            "plain ascii, no high bytes at all",
-            Encoding.UTF8.GetString(File.ReadAllBytes(path)));
-    }
-
-    [Fact]
-    public void AsciiEncoding_IsConverted()
-    {
-        const string text = "plain ASCII text";
-        string path = Write("ascii.txt", text, "ascii");
-
-        OrchestrationResult result = Convert(View(), Proceed);
+        OrchestrationResult result = Convert(View(), Proceed, target: "utf-16");
 
         PlannedFile planned = Assert.Single(result.Plan!.Files);
 
+        Assert.Equal(OrchestrationOutcome.Converted, result.Outcome);
         Assert.Equal(PlannedAction.Convert, planned.Action);
         Assert.Equal(SourceInterpretation.AutomaticUnicodeOrAscii, planned.SourceInterpretation);
-        Assert.Equal(text, Encoding.UTF8.GetString(File.ReadAllBytes(path)));
+        Assert.Equal(text, Encoding.Unicode.GetString(File.ReadAllBytes(path)));
     }
 
     // ------------------------------------------------------------ explicit source

@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=77 fixed=67 open=6 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
+<!-- backlog-counts total=78 fixed=68 open=6 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 77 findings — 67 fixed, 6 open, 1 not reproduced, 1 withdrawn,
+**Derived count: 78 findings — 68 fixed, 6 open, 1 not reproduced, 1 withdrawn,
 1 intentional behavior, and 1 design decision.** Recompute and check these
 figures with:
 
@@ -84,6 +84,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | BL-31 | Interrupted runs could report unprocessed files as completed work | Fixed | — | — | [BL-31](#bl-31) |
 | BL-32 | A cancelled scan could leave an old CSV without explaining the missing plan | Fixed | — | — | [BL-32](#bl-32) |
 | BL-33 | The GUI CSV export could still call cancelled or stale-plan files Converted | Fixed | — | — | [BL-33](#bl-33) |
+| BL-34 | Repeating a backed-up conversion could replace the original backup of ASCII text | Fixed | — | — | [BL-34](#bl-34) |
 | EC-32 | A cancellation timeout could hide repeated refusals to press Cancel | Fixed | — | — | [EC-32](#ec-32) |
 | EC-15 | Plans and journals showed fixed safety flags as if they recorded checks | Fixed | — | — | [EC-15](#ec-15) |
 | BL-18 | BOM-less UTF-16 could be detected and converted as UTF-32 | Fixed | — | — | [BL-18](#bl-18) |
@@ -213,7 +214,7 @@ files already in UTF-16LE with identical bytes, changing timestamps and creating
 backups and sidecars. Under `-FailOnChanges`, spelling alone changed the exit
 code; on BOM-less UTF-16 it could change a no-op into a refusal. The decision now
 compares nonzero resolved code pages. ASCII-to-UTF-8 behavior was left separate
-until full-file validation made folding it safe.
+until full-file validation made folding it safe; BL-34 has since folded it in.
 
 ### BL-07
 
@@ -1267,6 +1268,30 @@ The timeout decision dropped the last refusal and could say no button was
 found even after repeated refused presses. It now names the refusal. Tests
 cover no button, refused presses, an attempted press and an uncertain press.
 This fixes diagnostics, not the underlying reason a provider refused a click.
+
+### BL-34
+
+**ASCII is now already UTF-8, so repeating a backed-up conversion keeps the
+original backup.** ASCII bytes are identical in UTF-8 without a BOM, but EC
+planned them as a conversion. A UTF-16 file of English text converts to ASCII
+bytes, so running `-Target utf-8 -Backup` a second time rewrote the file to the
+same bytes and replaced its `.bak`, which held the UTF-16 original, with a copy
+of the converted file. The recovery record describing the original went with it.
+The text was never at risk, but the only copy of the original bytes was, and
+`-FailOnChanges` reported a change on every run.
+
+Found by a 2026-09-28 review and reproduced with the v3.14.5 CLI: after the
+second run the backup and the converted file had the same hash, and the recovery
+record named `us-ascii` instead of `utf-16`.
+
+The policy now plans an ASCII source for a UTF-8 target, both without a BOM, as
+`Unchanged`. That path already validates the whole file, so a non-ASCII byte past
+the 64 KiB detection sample is refused before any backup is made. A UTF-8 target
+with a BOM still converts. Conversion semantics moved from 7 to 8, so plans
+written earlier are refused rather than applied. Regression tests cover a repeat
+backed-up run, `-FailOnChanges`, a late non-ASCII byte, a saved plan, and the GUI
+sequence converting the same rows twice; smoke phase B now expects ASCII to keep
+its bytes with no backup or record.
 
 ## Decisions and mistakes that must remain visible
 

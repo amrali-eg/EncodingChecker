@@ -133,7 +133,7 @@ internal sealed class SmokeSuite
         SmokePhase[] phases =
         [
             new("A", "Review cancellation changes nothing", PhaseA),
-            new("B", "Unicode and ASCII convert automatically", PhaseB),
+            new("B", "Unicode converts automatically; ASCII is already UTF-8", PhaseB),
             new("C", "Explicit legacy source is scoped to selected files", PhaseC),
             new("D", "Ambiguous BOM-less UTF-16 is refused", PhaseD),
             new("E", "Explicit BOM-less UTF-16 converts safely", PhaseE),
@@ -336,13 +336,13 @@ internal sealed class SmokeSuite
             sourceMode: "Detected",
             sourceCodePage: 1200);
 
-        // ASCII to UTF-8 leaves the bytes identical, but it is still planned as a
-        // conversion, so it must leave the same recovery evidence behind.
-        AssertRecovery(
-            Path.Combine(directory, "plain.txt"),
-            before["plain.txt"],
-            sourceMode: "Detected",
-            sourceCodePage: 20127);
+        // ASCII bytes are already UTF-8 without a BOM, so the file is not rewritten and
+        // gets no backup that a later run could replace with a copy of itself.
+        string plainPath = Path.Combine(directory, "plain.txt");
+        Check(Hash(plainPath) == before["plain.txt"], "The ASCII file was rewritten.");
+        Check(!File.Exists(plainPath + ".bak"), "The ASCII file received a backup.");
+        Check(!File.Exists(plainPath + ".ecmeta.json"),
+            "The ASCII file received a recovery record.");
     }
 
     private void PhaseC(SmokePhaseContext phase)

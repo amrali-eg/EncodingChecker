@@ -1055,7 +1055,7 @@ internal static class ScanEngine
                 }
                 : null,
 
-            // Present only when an approved plan pinned the original bytes.
+            // The snapshot the decision was made from, so bytes that changed since are not replaced.
             ExpectedSourceSha256 = entry.ExpectedSourceSha256,
         };
 

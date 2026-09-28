@@ -89,14 +89,15 @@ public sealed class ConversionPolicyTests : IDisposable
     public void TheGuiSequenceStillConvertsWhatIsSafe()
     {
         // The other direction. A gate that refuses everything is not safe, it is broken.
+        // ASCII is already UTF-8, so UTF-16 is the target that makes this a conversion.
         const string text = "plain ASCII is safe.";
         string path = Write("ascii.txt", text, "ascii");
 
-        ConversionReportEntry entry = Assert.Single(ViewThenConvert());
+        ConversionReportEntry entry = Assert.Single(ViewThenConvert(target: "utf-16"));
 
         Assert.Equal(PlannedAction.Convert, entry.Action);
         Assert.Equal(ConversionRowResult.Converted, entry.Result);
-        Assert.Equal(text, Encoding.UTF8.GetString(File.ReadAllBytes(path)));
+        Assert.Equal(text, Encoding.Unicode.GetString(File.ReadAllBytes(path)));
     }
 
     [Fact]

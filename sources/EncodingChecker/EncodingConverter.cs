@@ -82,7 +82,8 @@ internal sealed record ConversionOptions
     /// <see langword="null"/> to skip the check.
     /// </summary>
     /// <remarks>
-    /// Used by an approved plan to ensure the file has not changed since it was reviewed.
+    /// Every planned conversion sets it from the snapshot its decision was made on, so a file
+    /// that changed after it was reviewed is not replaced.
     /// </remarks>
     internal string? ExpectedSourceSha256 { get; init; }
 

@@ -74,6 +74,10 @@ cannot be proven safely need `-From`. Choosing a source encoding replaces
 detection only; strict source decoding, strict target encoding, output
 verification, backup checks, and atomic installation still apply.
 
+ASCII is already UTF-8 without a BOM. With `-Target utf-8`, EC validates an
+ASCII file in full and reports it as `Unchanged`; it is not rewritten or backed
+up, so running the same command again does not replace an earlier backup.
+
 For BOM-less UTF-16, EC converts automatically only when the bytes prove the
 byte order. If both UTF-16LE and UTF-16BE strictly decode the complete file,
 EC refuses the automatic conversion. Choose `-From utf-16le` or

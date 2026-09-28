@@ -24,6 +24,8 @@ For a file that needs conversion, EC applies this policy:
 A file that already matches the target encoding and BOM is still strictly validated in
 full. A valid file is reported as **Unchanged** and is not rewritten; an invalid file is
 reported as an error instead. No source choice is needed because no conversion occurs.
+ASCII already matches UTF-8 without a BOM, because the bytes are identical, so it is
+handled the same way.
 
 If you choose a source encoding, EC uses it only to read the original bytes. It does not
 disable strict decoding, output verification, backup verification, or safe installation.

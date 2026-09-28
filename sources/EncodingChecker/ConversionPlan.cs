@@ -41,11 +41,11 @@ internal sealed record ConversionSemantics
     /// <summary>
     /// Changes only when the meaning of an existing plan's decisions changes.
     /// </summary>
-    internal const int Current = 7;
+    internal const int Current = 8;
 
     /// <summary>The guarantees of <see cref="Current"/> shown to the reader.</summary>
     internal const string Describes =
-        "source-bound detection, strict codecs, verified output, atomic install, explicit source required for legacy text, proven BOM-less UTF-16 byte order, BOM or explicit source required for UTF-32, a reviewed refusal is binding";
+        "source-bound detection, strict codecs, verified output, atomic install, explicit source required for legacy text, proven BOM-less UTF-16 byte order, BOM or explicit source required for UTF-32, ASCII already counts as BOM-less UTF-8, a reviewed refusal is binding";
 }
 
 /// <summary>One file's entry in a conversion plan.</summary>

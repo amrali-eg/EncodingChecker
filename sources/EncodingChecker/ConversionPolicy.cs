@@ -11,6 +11,9 @@ namespace EncodingChecker;
 /// </remarks>
 internal static class ConversionPolicy
 {
+    private const int AsciiCodePage = 20127;
+    private const int Utf8CodePage = 65001;
+
     /// <summary>
     /// Decides what to do with one file, given what is known about its encoding.
     /// </summary>
@@ -71,6 +74,20 @@ internal static class ConversionPolicy
         if (sourceCodePage != 0
             && sourceCodePage == targetCodePage
             && sourceHasBom == targetHasBom)
+        {
+            sourceInterpretation = SourceInterpretation.NotApplicable;
+            return PlannedAction.Unchanged;
+        }
+
+        // ASCII bytes are already BOM-less UTF-8, so converting would rewrite identical
+        // bytes. Counted as a conversion, a repeat run replaced the file's backup with a copy
+        // of itself, discarding the original it held, and -FailOnChanges could never pass.
+        // The unchanged path validates the whole file as ASCII, so a later non-ASCII byte
+        // is still refused.
+        if (sourceCodePage == AsciiCodePage
+            && !sourceHasBom
+            && targetCodePage == Utf8CodePage
+            && !targetHasBom)
         {
             sourceInterpretation = SourceInterpretation.NotApplicable;
             return PlannedAction.Unchanged;

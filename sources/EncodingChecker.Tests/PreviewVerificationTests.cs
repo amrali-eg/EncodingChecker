@@ -108,8 +108,8 @@ public sealed class PreviewVerificationTests : IDisposable
     }
 
     [Theory]
-    [InlineData("utf-8")]
     [InlineData("utf-16")]
+    [InlineData("utf-32")]
     public void AnOrdinaryFileStillPreviewsAsConvertible(string target)
     {
         // The check must not start refusing the files a preview exists to describe, and
@@ -118,6 +118,18 @@ public sealed class PreviewVerificationTests : IDisposable
 
         Assert.Equal(PlannedAction.Convert, entry.Action);
         Assert.Equal(ConversionRowResult.Converted, entry.Result);
+        Assert.Null(entry.ReasonCode);
+    }
+
+    [Fact]
+    public void AnOrdinaryAsciiFilePreviewsAsAlreadyUtf8()
+    {
+        // ASCII is already BOM-less UTF-8, and the whole file, not only the detection
+        // sample, was read to say so.
+        ConversionReportEntry entry = Preview(PastTheSample(corrupt: false), "utf-8");
+
+        Assert.Equal(PlannedAction.Unchanged, entry.Action);
+        Assert.Equal(ConversionRowResult.Unchanged, entry.Result);
         Assert.Null(entry.ReasonCode);
     }
 

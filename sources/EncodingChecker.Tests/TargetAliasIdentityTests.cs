@@ -123,18 +123,35 @@ public sealed class TargetAliasIdentityTests : IDisposable
     }
 
     [Fact]
-    public void AsciiIsStillConvertedToUtf8BecauseTheyAreDifferentCodecs()
+    public void AsciiIsAlreadyUtf8WithoutABom()
     {
-        // Deliberately not folded into the unchanged test. Detection samples only the
-        // first 64 KiB, so accepting an "us-ascii" label as already being UTF-8 would
-        // pass silently over a file whose later bytes are neither.
+        // ASCII bytes are BOM-less UTF-8, so there is nothing to rewrite and no backup to
+        // take. Detection samples only the first 64 KiB; the unchanged path validates the
+        // rest, which AsciiAlreadyUtf8Tests covers for a later non-ASCII byte.
         byte[] original = Encoding.ASCII.GetBytes("plain ascii content\n");
         File.WriteAllBytes(_path, original);
 
         ConversionReportEntry entry = Convert("utf-8");
 
+        Assert.Equal("us-ascii", entry.SourceEncoding);
+        Assert.Equal(PlannedAction.Unchanged, entry.Action);
+        Assert.Equal(ConversionRowResult.Unchanged, entry.Result);
+        Assert.Null(entry.ReasonCode);
+        Assert.Equal(original, File.ReadAllBytes(_path));
+        Assert.False(File.Exists(_path + ".bak"));
+    }
+
+    [Fact]
+    public void AsciiStillGetsTheBomItsTargetAsksFor()
+    {
+        byte[] original = Encoding.ASCII.GetBytes("plain ascii content\n");
+        File.WriteAllBytes(_path, original);
+
+        ConversionReportEntry entry = Convert("utf-8-bom");
+
         Assert.Equal(PlannedAction.Convert, entry.Action);
         Assert.Equal(ConversionRowResult.Converted, entry.Result);
+        Assert.Equal([.. Encoding.UTF8.GetPreamble(), .. original], File.ReadAllBytes(_path));
     }
 
     [Fact]
