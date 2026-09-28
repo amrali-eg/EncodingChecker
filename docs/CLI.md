@@ -99,7 +99,8 @@ rejected with `-Apply`.
 `-Apply`, the journal path must not name any source file in the saved plan.
 `-Plan`, `-Journal`, and `-Report` also cannot use EC's reserved `.bak`,
 `.ecmeta.json`, or `.unicodechecker.tmp` suffixes, so command output cannot replace
-a backup or recovery artifact.
+a backup or recovery artifact. An existing read-only or linked `-Plan`, `-Journal`,
+or `-Report` file is refused before any file changes (exit 3) and left as it is.
 
 ## Read-only modes
 

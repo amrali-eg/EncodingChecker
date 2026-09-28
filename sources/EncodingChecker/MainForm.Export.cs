@@ -80,48 +80,19 @@ public partial class MainForm
     /// so a failed write leaves the previous report as it was.
     /// </summary>
     /// <remarks>
-    /// A read-only report or a link is refused rather than replaced: the atomic install would
-    /// clear the read-only flag or swap the link for a regular file, where a direct write
-    /// would have failed or written through. A fault of an argument or invalid-operation kind
-    /// raised by <paramref name="write"/> is reported as a failed export.
+    /// A read-only report or a link is refused rather than replaced, as for every artifact
+    /// EC writes. A fault of an argument or invalid-operation kind raised by
+    /// <paramref name="write"/> is reported as a failed export.
     /// </remarks>
     /// <returns><see langword="null"/> on success; otherwise, why the write failed.</returns>
     internal static string? WriteExportFile(
         string path, Encoding encoding, Action<StreamWriter> write)
     {
-        if (RefusalForExistingDestination(path) is { } refusal)
-            return refusal;
-
         return AtomicArtifactFile.Write(path, stream =>
         {
             using var writer = new StreamWriter(stream, encoding, leaveOpen: true);
             write(writer);
         });
-    }
-
-    private static string? RefusalForExistingDestination(string path)
-    {
-        FileAttributes attributes;
-
-        try
-        {
-            attributes = File.GetAttributes(path);
-        }
-        catch (Exception ex) when (
-            ex is IOException or UnauthorizedAccessException or ArgumentException
-                or NotSupportedException)
-        {
-            // Not there yet, or not readable; the write reports its own failure.
-            return null;
-        }
-
-        if ((attributes & FileAttributes.ReparsePoint) != 0)
-            return $"'{path}' is a link. Choose a regular file for the report.";
-
-        if ((attributes & FileAttributes.ReadOnly) != 0)
-            return $"'{path}' is read-only.";
-
-        return null;
     }
 
     private void OnExportResultsOpening(object? sender, EventArgs e)

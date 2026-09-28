@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=78 fixed=68 open=6 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
+<!-- backlog-counts total=79 fixed=69 open=6 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 78 findings — 68 fixed, 6 open, 1 not reproduced, 1 withdrawn,
+**Derived count: 79 findings — 69 fixed, 6 open, 1 not reproduced, 1 withdrawn,
 1 intentional behavior, and 1 design decision.** Recompute and check these
 figures with:
 
@@ -85,6 +85,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | BL-32 | A cancelled scan could leave an old CSV without explaining the missing plan | Fixed | — | — | [BL-32](#bl-32) |
 | BL-33 | The GUI CSV export could still call cancelled or stale-plan files Converted | Fixed | — | — | [BL-33](#bl-33) |
 | BL-34 | Repeating a backed-up UTF-8 conversion could replace the original backup once the text was ASCII | Fixed | — | — | [BL-34](#bl-34) |
+| BL-35 | Plans, journals, reports and settings replaced a read-only or linked file | Fixed | — | — | [BL-35](#bl-35) |
 | EC-32 | A cancellation timeout could hide repeated refusals to press Cancel | Fixed | — | — | [EC-32](#ec-32) |
 | EC-15 | Plans and journals showed fixed safety flags as if they recorded checks | Fixed | — | — | [EC-15](#ec-15) |
 | BL-18 | BOM-less UTF-16 could be detected and converted as UTF-32 | Fixed | — | — | [BL-18](#bl-18) |
@@ -1301,6 +1302,30 @@ order, and the kept warnings. Several older tests used ASCII as their convertibl
 file and silently stopped reaching conversion; they now use UTF-16 with a BOM, and
 each was confirmed to fail again against a broken build. Smoke phase B now expects
 ASCII to keep its bytes with no backup or record.
+
+### BL-35
+
+**A read-only or linked destination is now refused for every file EC saves, not
+only for the GUI's text and CSV exports.** Saving stages a temporary file and then
+installs it, and installing clears a read-only flag and replaces a link with a
+regular file. The GUI exports refused both cases after BL-24, but plans, journals
+(including the GUI's journal export), CLI reports and settings did not. Found by a
+2026-09-28 review: with the v3.14.5 CLI, `-Report` onto a read-only CSV exited 0,
+replaced its contents and set the flag again afterwards. The link case comes from
+reading the code; the tests use a directory junction, the link a test can create
+without special privileges, and no file symbolic link was tried.
+
+The refusal now sits in the shared writer, so every saved file gets it, and the
+file and its flag are left as they were. The CLI also checks `-Plan`, `-Journal`
+and `-Report` before any file changes, so a refused output stops the run with
+exit 3 instead of being found after conversion. Regression tests cover a plain
+write, a plan and a journal against a read-only file and a junction, and each CLI
+output option against a read-only file; removing each check was confirmed to fail
+them.
+
+One effect to know: a read-only or linked `Settings.xml` is no longer replaced, so
+preferences are not saved while it stays that way. Before, a linked settings file
+was silently replaced by a local copy.
 
 ## Decisions and mistakes that must remain visible
 
