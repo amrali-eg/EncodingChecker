@@ -86,6 +86,9 @@ public partial class MainForm : Form
     private const int ResultIconFailed = 1;
     private const int ResultIconWouldChange = 2;
 
+    // A row with nothing to mark: already in the target, or left alone.
+    private const int ResultIconNone = -1;
+
     private const int ResultsColumnCharset = 0;
     private const int ResultsColumnFileName = 1;
     private const int ResultsColumnFileExt = 2;
