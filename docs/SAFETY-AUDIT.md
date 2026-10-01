@@ -1326,6 +1326,83 @@ detector-parity check passed on the tagged commit.
 - **The self-contained executable is still not driven** by the GUI smoke suite; it was run
   here only for `--version`.
 
+### v3.15.1 — `56550ed97401aef47bdc1e83ca10ccfcc80a18ae`, no corpus run
+
+**No four-corpus audit was run.** This release changes neither detection nor
+`ConversionPolicy`, and `UnicodeDetector.cs` and `TextValidation.cs` have no diff since
+v3.15.0. What EC detects, converts and refuses is what v3.15.0 did; the change is to how a
+preview is reported. The v3.15.0 audit above remains the latest corpus measurement, and it
+measured v3.15.0, not this build.
+
+**The v3.12.0 gap is still open.** Nothing here re-audits it.
+
+#### The shipped build reproduces from the tagged commit, on a matching runtime
+
+```
+commit      56550ed97401aef47bdc1e83ca10ccfcc80a18ae   (annotated tag v3.15.1)
+worktree    clean checkout (fresh git clone of the tag into a scratch directory, not the primary clone)
+runner      windows-2025-vs2026, image version 20260925.250.1 - .NET SDK 10.0.401, runtime 10.0.12
+local       Windows 10.0.26200 - .NET SDK 10.0.401, runtime 10.0.12
+executable  EncodingChecker.exe (framework-dependent and self-contained, single-file)
+  framework-dependent  published and driven  dc33e9759ea80ab71d8aa5c47eed881d0d9ad73eb90fb5147cd37cf5bb945202
+                       rebuilt locally        dc33e9759ea80ab71d8aa5c47eed881d0d9ad73eb90fb5147cd37cf5bb945202
+  self-contained       published             0d5bdfa2cde63d6265d4033cb0a26188fdefd647e10186162e6260e3c075a3a4
+                       rebuilt locally        0d5bdfa2cde63d6265d4033cb0a26188fdefd647e10186162e6260e3c075a3a4
+```
+
+Both hashes match exactly, for both build flavors. The "published and driven" hash is the
+`EcSha256` recorded by the release job's own GUI smoke report (`Outcome` Passed, ten
+phases, no evidence errors, driven on Windows 10.0.26100 with runtime 10.0.12), and it
+equals the executable inside the downloaded archive. Both published executables report
+`3.15.1` from `--version`. The matching runtime is by circumstance rather than by a pin:
+both workflows still resolve `dotnet-version: "10.0.x"`.
+
+One step of gathering this evidence first read the wrong run: a script picked up a
+`gui-smoke-evidence` artifact from a run other than the release job, whose hash
+(`0efbc5f6…`) did not match. Downloading the artifact by the release run's own ID gave the
+hash above. The mismatch was in the collection, not in the release.
+
+The published archives, each downloaded and hashed rather than trusting GitHub's own
+report of them — and confirmed to equal what GitHub itself reports as each asset's digest:
+
+```
+EncodingChecker-3.15.1-framework-dependent.zip
+  e393efd323120cac1f18c36687fdf8155afcec40609a73087eba846f2d8cba7f
+EncodingChecker-3.15.1-win-x64-self-contained.zip
+  f583d717c772c563223684009acb092ec3060390f9b6cf8e2283babf9a9ad937
+```
+
+The local gates ran on the tagged commit before tagging: a Release build with no
+warnings, 987 tests passing, `Test-DefectBacklog.ps1` passing, and the ten GUI smoke
+phases passing against the local build (managed assembly `67abe4ffdb16d3e0…`). The
+`release.yml` rehearsal passed on the bump branch before merging.
+
+#### What changed in v3.15.1
+
+| | |
+|---|---|
+| `ConversionReport.cs`, `ScanEngine.cs`, `Program.CliReporting.cs` (BL-42) | A file a preview or plan only decided to convert is `WouldConvert` in the CSV `Result` column and in the `-Verbose` breakdown, instead of `Converted`. The mark is cleared at the start of every pass, and `NotAttempted` still outranks it. |
+
+#### What this release says about these records
+
+Conversion semantics stay at 8, the plan schema at 6, the journal schema at 6. The CSV
+`Result` column has a new value, `WouldConvert`, for preview and plan rows; rows from a
+real run are unchanged.
+
+#### Known limits specific to this release
+
+- **Code signing did not run, by decision.** The signing secrets are still not
+  configured, so the step was skipped and the archives above are **unsigned**. This is
+  the **twelfth** release to carry the limit — v3.11.2, v3.12.0, v3.12.1, v3.13.0,
+  v3.14.0, v3.14.1, v3.14.2, v3.14.3, v3.14.4, v3.14.5, v3.15.0, v3.15.1.
+- **No accessibility spot check is recorded.** This is the **eleventh** release without
+  one.
+- **The GUI's CSV export after a preview was not seen live.** It is covered by a test
+  that runs the window's orchestrator and the export's writer; the GUI smoke suite does
+  not read exports.
+- **The self-contained executable is still not driven** by the GUI smoke suite; it was run
+  here only for `--version`.
+
 ## Known limits
 
 - No detector can recover an author's historical legacy encoding when the same bytes admit multiple plausible readings. EC refuses automatic legacy conversion instead of guessing.
