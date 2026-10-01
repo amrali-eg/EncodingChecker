@@ -1006,7 +1006,9 @@ internal static class ScanEngine
                 return;
             }
 
-            entry.Result = ConversionRowResult.Converted; // "would be converted"
+            // Converted here means "would be converted"; the flag says so in reports.
+            entry.Result = ConversionRowResult.Converted;
+            entry.ConversionOnlyDecided = true;
             return;
         }
 

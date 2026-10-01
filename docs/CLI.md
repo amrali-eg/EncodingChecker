@@ -124,6 +124,12 @@ combined with conversion options.
 | `-Verbose` | Include error details and a result breakdown. |
 | `-MaxParallelism <N>` | Maximum simultaneous files. Default: the smaller of CPU count and 8. |
 
+In a preview (`-WhatIf`, `-Plan`, or the GUI's preview), the per-file CSV, whether
+on stdout, written with `-Report`, or exported from the GUI, calls a file that would
+be converted `WouldConvert`, and the `-Verbose` breakdown counts it the same way.
+`Converted` appears only for a file EC wrote. An `Error` row may still have been
+replaced; the journal records which.
+
 `-Quiet` and `-Verbose` cannot be combined.
 
 After cancellation, a requested journal is still saved with `Interrupted: true`

@@ -4,9 +4,9 @@ This is the current ledger for defects and review findings in EncodingChecker.
 It is organised by status, not discovery date, so the open work is visible in
 one place. Longer evidence and history follow the ledger.
 
-<!-- backlog-counts total=87 fixed=75 open=8 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
+<!-- backlog-counts total=87 fixed=76 open=7 not-reproduced=1 withdrawn=1 intentional-behavior=1 decision=1 -->
 
-**Derived count: 87 findings — 75 fixed, 8 open, 1 not reproduced, 1 withdrawn,
+**Derived count: 87 findings — 76 fixed, 7 open, 1 not reproduced, 1 withdrawn,
 1 intentional behavior, and 1 design decision.** Recompute and check these
 figures with:
 
@@ -56,7 +56,6 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | BL-19 | ASCII with many NUL bytes can be reported as UTF-16 | Open | Medium | Rare | [BL-19](#bl-19) |
 | BL-20 | Two hard-link names for one file are converted separately | Open | Low | Rare | [BL-20](#bl-20) |
 | BL-21 | Detection can accept a cut-off final character that conversion rejects | Open | Low | Rare | [BL-21](#bl-21) |
-| BL-42 | A preview's CSV report calls files Converted | Open | Low | Common | [BL-42](#bl-42) |
 | BL-43 | A file name with an unpaired UTF-16 surrogate cannot be planned or backed up | Open | Low | Rare | [BL-43](#bl-43) |
 
 ### Fixed and resolved findings
@@ -94,6 +93,7 @@ the 2026-09-08 reformat to findings that previously had only a sentence.
 | BL-39 | A source chosen in a cancelled GUI review carried into the next review | Fixed | — | — | [BL-39](#bl-39) |
 | BL-40 | The GUI's Validate status read the same when every file passed and when none was checked | Fixed | — | — | [BL-40](#bl-40) |
 | BL-41 | GUI rows kept an earlier run's icon and never showed why a file failed | Fixed | — | — | [BL-41](#bl-41) |
+| BL-42 | A preview's CSV report called files Converted | Fixed | — | — | [BL-42](#bl-42) |
 | EC-32 | A cancellation timeout could hide repeated refusals to press Cancel | Fixed | — | — | [EC-32](#ec-32) |
 | EC-15 | Plans and journals showed fixed safety flags as if they recorded checks | Fixed | — | — | [EC-15](#ec-15) |
 | BL-18 | BOM-less UTF-16 could be detected and converted as UTF-32 | Fixed | — | — | [BL-18](#bl-18) |
@@ -1462,15 +1462,29 @@ result, and the window showing a scanned row's reason; four mutations fail them.
 
 ### BL-42
 
-**A preview's CSV report calls files `Converted`.** `-WhatIf`, and the GUI's
-preview followed by a CSV export, write `Converted` for each file that a real run
-would convert, although nothing was written. Only the journal marks a preview, as
-`NotAttempted`. Found by the 2026-09-20 review with the CLI's `-WhatIf` output.
-No file is at risk: this is what the report says, not what EC does.
+**A preview's CSV report now says `WouldConvert`.** `-WhatIf`, `-Plan`, and the
+GUI's preview followed by a CSV export wrote `Converted` for each file that a real
+run would convert, although nothing was written. On the command line, only the
+journal marked a preview, as `NotAttempted`. Found by the 2026-09-20 review and reproduced on
+2026-10-01 with the v3.15.0 CLI: the file's bytes were unchanged and no backup
+existed, while the report said `Converted`. No file was at risk: this was what the
+report said, not what EC did.
 
-Left open deliberately. The CSV `Result` column is read by scripts, so renaming
-the value, or adding a column, changes a contract. It needs a decision on the
-wording before any change.
+The `Result` column is read by scripts, so the wording was decided before the
+change: a file a preview only decided to convert is `WouldConvert`, and
+`Converted` now appears only for a file EC wrote; the `-Verbose` breakdown counts
+the same way. A script that counted `Converted` rows in a preview to learn what
+would change must now match `WouldConvert`, and a script that checks for known
+`Result` values will see a new one. An unreached row still reads `NotAttempted`.
+The journal is unchanged. The reverse does not hold: an `Error` row may still have
+been replaced, which the journal records.
+
+Tests read the CSV from `-WhatIf -Report` and `-WhatIf` stdout, `-Plan` stdout, a
+real run's report, and the orchestrator's rows after a GUI-style preview followed
+by a real conversion, and by a run on which the file had become unreadable. A
+writer test checks that `NotAttempted` takes precedence, and a `-Verbose` test
+checks the breakdown. Ignoring the preview marker, not clearing it at the start of
+a pass, or letting it outrank `NotAttempted` each fails them.
 
 ### BL-43
 

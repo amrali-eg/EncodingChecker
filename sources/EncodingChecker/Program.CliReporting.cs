@@ -16,13 +16,20 @@ internal static partial class Program
                 .GroupBy(e => e.Result)
                 .ToDictionary(g => g.Key, g => g.Count());
 
+        // In a preview, Converted rows were only decided; count them as the CSV names them.
+        int wouldConvert = entries.Count(e => e is
+        {
+            Result: ConversionRowResult.Converted, ConversionOnlyDecided: true,
+        });
+
         Console.Out.WriteLine();
         Console.Out.WriteLine(
             $"Total: {entries.Count}  " +
             $"Unchanged: {byResult.GetValueOrDefault(ConversionRowResult.Unchanged)}  " +
             $"Skipped: {byResult.GetValueOrDefault(ConversionRowResult.Skipped)}  " +
             $"Refused: {byResult.GetValueOrDefault(ConversionRowResult.Refused)}  " +
-            $"Converted: {byResult.GetValueOrDefault(ConversionRowResult.Converted)}  " +
+            $"Converted: {byResult.GetValueOrDefault(ConversionRowResult.Converted) - wouldConvert}  " +
+            $"WouldConvert: {wouldConvert}  " +
             $"Invalid: {byResult.GetValueOrDefault(ConversionRowResult.Invalid)}  " +
             $"Error: {byResult.GetValueOrDefault(ConversionRowResult.Error)}");
     }
