@@ -829,6 +829,9 @@ internal static class ScanEngine
         entry.TargetHasBom = targetWriteBom;
         entry.ResolvedSourceLabel = FormatCharsetLabel(sourceCharset, sourceHasBom);
 
+        // A deciding pass marks this again below; a write pass must not inherit it.
+        entry.ConversionOnlyDecided = false;
+
         // Capture the original hash before anything can overwrite the file.
         if (entry is { CaptureSourceHash: true, JournalSourceSha256: null })
         {
@@ -1007,6 +1010,7 @@ internal static class ScanEngine
             }
 
             entry.Result = ConversionRowResult.Converted; // "would be converted"
+            entry.ConversionOnlyDecided = true;
             return;
         }
 

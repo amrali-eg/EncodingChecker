@@ -133,6 +133,8 @@ not a complete list of the folder. Earlier journals lack this interruption flag.
 
 A requested CSV report is also saved for the files reached. Its `Result` column
 uses `NotAttempted` for unprocessed GUI rows, rather than claiming conversion.
+In a preview (`-WhatIf`, `-Plan`, or the GUI's preview) a file that would be
+converted is `WouldConvert`; `Converted` means the file was written.
 `Encoding` names the source used or attempted; for refused or unprocessed rows,
 it retains the scan result. It is not proof of the original encoding.
 

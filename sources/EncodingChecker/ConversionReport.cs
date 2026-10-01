@@ -180,6 +180,13 @@ internal sealed class ConversionReportEntry
     internal bool NotAttempted { get; set; }
 
     /// <summary>
+    /// Whether <see cref="Result"/> says Converted for a conversion that was only decided,
+    /// in a preview or a plan, and not carried out. Internal state; the CSV writes it as
+    /// <c>WouldConvert</c>.
+    /// </summary>
+    internal bool ConversionOnlyDecided { get; set; }
+
+    /// <summary>
     /// Whether the converted file reached its destination, or <see langword="null"/>
     /// when the outcome is unknown or nothing was attempted.
     /// </summary>
@@ -317,7 +324,11 @@ internal static class ConversionReport
             WriteField(writer, entry.TargetHasBom ? "Yes" : "No");
             writer.Write(Delimiter);
 
-            writer.Write(entry.NotAttempted ? "NotAttempted" : entry.Result.ToString());
+            writer.Write(
+                entry.NotAttempted ? "NotAttempted"
+                : entry is { Result: ConversionRowResult.Converted, ConversionOnlyDecided: true }
+                    ? "WouldConvert"
+                    : entry.Result.ToString());
             writer.Write(Delimiter);
 
             WriteField(writer, entry.ReasonCode);
