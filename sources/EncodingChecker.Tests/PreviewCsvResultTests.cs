@@ -9,8 +9,11 @@ namespace EncodingChecker.Tests;
 /// <c>Converted</c> only for a file that was written.
 /// </summary>
 /// <remarks>
-/// A preview's CSV used to say <c>Converted</c> for files it never touched, and only the
-/// journal marked the run as a preview. Each case reads the CSV a real surface writes.
+/// A preview's CSV used to say <c>Converted</c> for files it never touched, and on the
+/// command line only the journal marked the run as a preview. The CLI cases read the CSV
+/// and summary the CLI writes. The GUI cases run the orchestrator the window uses and
+/// write its rows with the export's writer. The last case checks the writer's precedence
+/// directly.
 /// </remarks>
 public sealed class PreviewCsvResultTests : IDisposable
 {
@@ -63,7 +66,7 @@ public sealed class PreviewCsvResultTests : IDisposable
         byte[] before = File.ReadAllBytes(path);
 
         (int exit, string output, _) = RunCaptured(
-            "-BasePath", _root, "-Target", "utf-8", "-WhatIf", "-Report", Report);
+            "-BasePath", _root, "-Target", "utf-8", "-WhatIf", "-Backup", "-Report", Report);
 
         Assert.Equal(ExpectedClean, exit);
         Assert.Equal("WouldConvert", ResultFor(File.ReadAllText(Report), path));
@@ -132,7 +135,67 @@ public sealed class PreviewCsvResultTests : IDisposable
         // The real run's own deciding pass marks the row again; its write pass must clear it.
         Assert.Equal(OrchestrationOutcome.Converted, Run(preview: false).Outcome);
         Assert.Equal("Converted", ResultFor(ConversionReport.ToCsvString(rows), path));
+        Assert.Equal(
+            new UTF8Encoding(false).GetBytes("Hello 世界\r\n"), File.ReadAllBytes(path));
     }
+
+    [Fact]
+    public void APreviewedRowThatLaterFailsSaysErrorNotWouldConvert()
+    {
+        // The later pass ends before the code that decides a conversion, so only the start
+        // of the pass can clear the earlier preview's mark.
+        string path = WriteConvertible();
+        List<ConversionReportEntry> rows = ViewRows();
+
+        Assert.Equal(OrchestrationOutcome.Previewed, Preview(rows).Outcome);
+        Assert.Equal("WouldConvert", ResultFor(ConversionReport.ToCsvString(rows), path));
+
+        File.Delete(path);
+        Preview(rows);
+
+        ConversionReportEntry row = Assert.Single(rows);
+        Assert.Equal(ConversionRowResult.Error, row.Result);
+        Assert.False(row.ConversionOnlyDecided);
+        Assert.Equal("Error", ResultFor(ConversionReport.ToCsvString(rows), path));
+    }
+
+    [Fact]
+    public void TheVerboseBreakdownCountsAPreviewAsWouldConvert()
+    {
+        WriteConvertible();
+
+        (_, string preview, _) = RunCaptured(
+            "-BasePath", _root, "-Target", "utf-8", "-WhatIf", "-Verbose");
+        Assert.Contains("Converted: 0  WouldConvert: 1  ", preview);
+
+        (_, string real, _) = RunCaptured("-BasePath", _root, "-Target", "utf-8", "-Verbose");
+        Assert.Contains("Converted: 1  WouldConvert: 0  ", real);
+    }
+
+    private List<ConversionReportEntry> ViewRows()
+    {
+        var scanned = new EntrySink();
+        ScanEngine.ScanDirectory(
+            new ScanDirectoryOptions
+            {
+                BaseDirectory = _root,
+                IncludeSubdirectories = true,
+                IncludePatterns = ["*"],
+                Action = ScanAction.Detect,
+            },
+            scanned.Add,
+            CancellationToken.None);
+
+        return [.. scanned];
+    }
+
+    private OrchestrationResult Preview(List<ConversionReportEntry> rows) =>
+        new ConversionOrchestrator(_ => ConfirmationResponse.Proceed).Run(
+            rows, _root, "utf-8", targetWriteBom: false,
+            backup: false, preview: true,
+            ScanEngine.DefaultMaxParallelism,
+            _ => { },
+            CancellationToken.None);
 
     [Fact]
     public void AnUnreachedRowStillSaysNotAttempted()

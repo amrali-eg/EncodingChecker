@@ -124,6 +124,12 @@ combined with conversion options.
 | `-Verbose` | Include error details and a result breakdown. |
 | `-MaxParallelism <N>` | Maximum simultaneous files. Default: the smaller of CPU count and 8. |
 
+In a preview (`-WhatIf`, `-Plan`, or the GUI's preview), the per-file CSV, whether
+on stdout, written with `-Report`, or exported from the GUI, calls a file that would
+be converted `WouldConvert`, and the `-Verbose` breakdown counts it the same way.
+`Converted` appears only for a file EC wrote. An `Error` row may still have been
+replaced; the journal records which.
+
 `-Quiet` and `-Verbose` cannot be combined.
 
 After cancellation, a requested journal is still saved with `Interrupted: true`
@@ -133,8 +139,6 @@ not a complete list of the folder. Earlier journals lack this interruption flag.
 
 A requested CSV report is also saved for the files reached. Its `Result` column
 uses `NotAttempted` for unprocessed GUI rows, rather than claiming conversion.
-In a preview (`-WhatIf`, `-Plan`, or the GUI's preview) a file that would be
-converted is `WouldConvert`; `Converted` means the file was written.
 `Encoding` names the source used or attempted; for refused or unprocessed rows,
 it retains the scan result. It is not proof of the original encoding.
 

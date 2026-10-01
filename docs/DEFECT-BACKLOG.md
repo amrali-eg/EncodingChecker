@@ -1464,21 +1464,27 @@ result, and the window showing a scanned row's reason; four mutations fail them.
 
 **A preview's CSV report now says `WouldConvert`.** `-WhatIf`, `-Plan`, and the
 GUI's preview followed by a CSV export wrote `Converted` for each file that a real
-run would convert, although nothing was written. Only the journal marked a
-preview, as `NotAttempted`. Found by the 2026-09-20 review and reproduced on
+run would convert, although nothing was written. On the command line, only the
+journal marked a preview, as `NotAttempted`. Found by the 2026-09-20 review and reproduced on
 2026-10-01 with the v3.15.0 CLI: the file's bytes were unchanged and no backup
 existed, while the report said `Converted`. No file was at risk: this was what the
 report said, not what EC did.
 
 The `Result` column is read by scripts, so the wording was decided before the
 change: a file a preview only decided to convert is `WouldConvert`, and
-`Converted` now always means the file was written. Scripts that matched
-`Converted` stop matching preview rows, which is the point. An unreached row
-still reads `NotAttempted`. The journal is unchanged.
+`Converted` now appears only for a file EC wrote; the `-Verbose` breakdown counts
+the same way. A script that counted `Converted` rows in a preview to learn what
+would change must now match `WouldConvert`, and a script that checks for known
+`Result` values will see a new one. An unreached row still reads `NotAttempted`.
+The journal is unchanged. The reverse does not hold: an `Error` row may still have
+been replaced, which the journal records.
 
-Tests read the CSV from `-WhatIf -Report`, `-Plan`, a real run, and a GUI preview
-followed by a real conversion of the same rows. Ignoring the new flag, keeping it
-through the write pass, or letting it outrank `NotAttempted` each fails them.
+Tests read the CSV from `-WhatIf -Report` and `-WhatIf` stdout, `-Plan` stdout, a
+real run's report, and the orchestrator's rows after a GUI-style preview followed
+by a real conversion, and by a run on which the file had become unreadable. A
+writer test checks that `NotAttempted` takes precedence, and a `-Verbose` test
+checks the breakdown. Ignoring the preview marker, not clearing it at the start of
+a pass, or letting it outrank `NotAttempted` each fails them.
 
 ### BL-43
 

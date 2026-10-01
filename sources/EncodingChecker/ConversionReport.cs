@@ -174,16 +174,23 @@ internal sealed class ConversionReportEntry
     /// Whether the run ended before it reached this file. Internal state; not in CSV.
     /// </summary>
     /// <remarks>
-    /// An entry keeps the deciding pass's result until the write pass overwrites it,
-    /// so a file the run never got to still reads as Converted. This says otherwise.
+    /// An entry keeps the deciding pass's result until the write pass overwrites it, so a
+    /// file the run never reached still carries Converted. Without this the journal would
+    /// report it converted and the CSV would call it WouldConvert. This says neither
+    /// happened.
     /// </remarks>
     internal bool NotAttempted { get; set; }
 
     /// <summary>
-    /// Whether <see cref="Result"/> says Converted for a conversion that was only decided,
-    /// in a preview or a plan, and not carried out. Internal state; the CSV writes it as
-    /// <c>WouldConvert</c>.
+    /// Whether the last deciding pass chose to convert this file and no write pass has
+    /// reached it since: a preview, a plan, or a GUI review not yet carried out.
+    /// Internal state.
     /// </summary>
+    /// <remarks>
+    /// Cleared at the start of every pass. Meaningful only while <see cref="Result"/> is
+    /// Converted; the CSV then writes <c>WouldConvert</c>. <see cref="NotAttempted"/>
+    /// outranks it.
+    /// </remarks>
     internal bool ConversionOnlyDecided { get; set; }
 
     /// <summary>
@@ -221,6 +228,7 @@ internal sealed class ConversionReportEntry
         ResolvedSourceLabel = null;
         JournalSourceSha256 = null;
         NotAttempted = false;
+        ConversionOnlyDecided = false;
         ReplacementCommitted = null;
         OutputSha256 = null;
         BackupPath = null;

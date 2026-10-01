@@ -96,6 +96,13 @@ public sealed class ConversionOrchestrationTests : IDisposable
     private static ConfirmationResponse Proceed(ConversionPlan _) =>
         ConfirmationResponse.Proceed;
 
+    // A run that wrote nothing exports every row as NotAttempted: not Converted, and not
+    // WouldConvert either, because the run meant to write.
+    private static void AssertEveryCsvRowNotAttempted(string csv) =>
+        Assert.All(
+            csv.Split(Environment.NewLine).Skip(1).Where(line => line.Length > 0),
+            row => Assert.Equal("NotAttempted", row.Split(',')[5]));
+
     [Fact]
     public void ACompletedRunEmitsExactlyOneTerminalResultPerSelectedFile()
     {
@@ -550,7 +557,7 @@ public sealed class ConversionOrchestrationTests : IDisposable
 
         using var csv = new StringWriter();
         ConversionReport.WriteCsv(entries, csv);
-        Assert.DoesNotContain("Converted", csv.ToString());
+        AssertEveryCsvRowNotAttempted(csv.ToString());
     }
 
     // ------------------------------------------------------- nothing gets modified
@@ -581,7 +588,7 @@ public sealed class ConversionOrchestrationTests : IDisposable
 
         using var csv = new StringWriter();
         ConversionReport.WriteCsv(entries, csv);
-        Assert.DoesNotContain("Converted", csv.ToString());
+        AssertEveryCsvRowNotAttempted(csv.ToString());
     }
 
     [Fact]
@@ -608,7 +615,7 @@ public sealed class ConversionOrchestrationTests : IDisposable
 
         using var csv = new StringWriter();
         ConversionReport.WriteCsv(entries, csv);
-        Assert.DoesNotContain("Converted", csv.ToString());
+        AssertEveryCsvRowNotAttempted(csv.ToString());
     }
 
     [Fact]
@@ -648,7 +655,7 @@ public sealed class ConversionOrchestrationTests : IDisposable
 
         using var csv = new StringWriter();
         ConversionReport.WriteCsv(entries, csv);
-        Assert.DoesNotContain("Converted", csv.ToString());
+        AssertEveryCsvRowNotAttempted(csv.ToString());
     }
 
     [Fact]
